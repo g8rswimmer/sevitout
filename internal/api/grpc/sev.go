@@ -1,0 +1,371 @@
+package grpc
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/sev"
+	"github.com/g8rswimmer/sevitout/internal/store"
+)
+
+type SEVServer struct {
+	pb.UnimplementedSEVServiceServer
+	sevs    store.SEVStore
+	audit   store.AuditStore
+	history store.StatusHistoryStore
+}
+
+func NewSEVServer(sevs store.SEVStore, audit store.AuditStore, history store.StatusHistoryStore) *SEVServer {
+	return &SEVServer{
+		sevs:    sevs,
+		audit:   audit,
+		history: history,
+	}
+}
+
+func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*pb.SEVResponse, error) {
+	if req.GetTitle() == "" {
+		return nil, status.Error(codes.InvalidArgument, "title is required")
+	}
+	if req.GetSeverityLevel() < 1 || req.GetSeverityLevel() > 4 {
+		return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
+	}
+	if req.GetCreatedBy() == "" {
+		return nil, status.Error(codes.InvalidArgument, "created_by is required")
+	}
+
+	now := time.Now()
+	record := &store.SEV{
+		Title:            req.GetTitle(),
+		Description:      req.GetDescription(),
+		SeverityLevel:    int16(req.GetSeverityLevel()),
+		Status:           store.SEVStatusOpen,
+		AffectedServices: req.GetAffectedServices(),
+		Tags:             req.GetTags(),
+		Sensitive:        req.GetSensitive(),
+		CreatedBy:        req.GetCreatedBy(),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	if v := req.GetDetectionMethod(); v != "" {
+		record.DetectionMethod = &v
+	}
+	if v := req.GetAlertName(); v != "" {
+		record.AlertName = &v
+	}
+	if v := req.GetMonitoringTool(); v != "" {
+		record.MonitoringTool = &v
+	}
+	if req.GetStartedAt() != nil {
+		t := req.GetStartedAt().AsTime()
+		record.StartedAt = &t
+	} else {
+		// Default to creation time when the caller doesn't provide started_at;
+		// the requirements say this timestamp "may be estimated".
+		record.StartedAt = &now
+	}
+	if req.GetDetectedAt() != nil {
+		t := req.GetDetectedAt().AsTime()
+		record.DetectedAt = &t
+	}
+
+	if err := s.sevs.Create(ctx, record); err != nil {
+		return nil, status.Error(codes.Internal, "failed to create SEV")
+	}
+
+	_ = s.audit.Append(ctx, &store.AuditEntry{
+		SEVID:     record.ID,
+		UserID:    req.GetCreatedBy(),
+		Action:    "sev.created",
+		CreatedAt: now,
+	})
+
+	return sevToProto(record), nil
+}
+
+func (s *SEVServer) GetSEV(ctx context.Context, req *pb.GetSEVRequest) (*pb.SEVResponse, error) {
+	record, err := s.sevs.Get(ctx, req.GetId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+	return sevToProto(record), nil
+}
+
+func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*pb.SEVResponse, error) {
+	if req.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
+
+	record, err := s.sevs.Get(ctx, req.GetId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+
+	if v := req.GetTitle(); v != "" {
+		record.Title = v
+	}
+	if v := req.GetDescription(); v != "" {
+		record.Description = v
+	}
+	if v := req.GetSeverityLevel(); v != 0 {
+		record.SeverityLevel = int16(v)
+	}
+	if v := req.GetRootCauseCategory(); v != "" {
+		record.RootCauseCategory = &v
+	}
+	if v := req.GetRootCauseDescription(); v != "" {
+		record.RootCauseDescription = &v
+	}
+	if v := req.GetMitigation(); v != "" {
+		record.Mitigation = &v
+	}
+	if v := req.GetPrevention(); v != "" {
+		record.Prevention = &v
+	}
+	if v := req.GetBusinessImpact(); v != "" {
+		record.BusinessImpact = &v
+	}
+	if v := req.GetAffectedServices(); len(v) > 0 {
+		record.AffectedServices = v
+	}
+	if v := req.GetDetectionMethod(); v != "" {
+		record.DetectionMethod = &v
+	}
+	if v := req.GetAlertName(); v != "" {
+		record.AlertName = &v
+	}
+	if v := req.GetMonitoringTool(); v != "" {
+		record.MonitoringTool = &v
+	}
+	if req.GetRightPeoplePresent() {
+		v := true
+		record.RightPeoplePresent = &v
+	}
+	if v := req.GetRightPeopleNotes(); v != "" {
+		record.RightPeopleNotes = &v
+	}
+	if v := req.GetTags(); len(v) > 0 {
+		record.Tags = v
+	}
+	if req.GetStartedAt() != nil {
+		t := req.GetStartedAt().AsTime()
+		record.StartedAt = &t
+	}
+	if req.GetDetectedAt() != nil {
+		t := req.GetDetectedAt().AsTime()
+		record.DetectedAt = &t
+	}
+	if req.GetSensitive() {
+		record.Sensitive = true
+	}
+
+	record.UpdatedAt = time.Now()
+	sev.ComputeMetrics(record)
+
+	if err := s.sevs.Update(ctx, record); err != nil {
+		return nil, status.Error(codes.Internal, "failed to update SEV")
+	}
+
+	_ = s.audit.Append(ctx, &store.AuditEntry{
+		SEVID:     record.ID,
+		UserID:    "",
+		Action:    "sev.updated",
+		CreatedAt: record.UpdatedAt,
+	})
+
+	return sevToProto(record), nil
+}
+
+func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.ListSEVsResponse, error) {
+	filter := store.SEVFilter{
+		OnCallUser: req.GetOnCallUser(),
+		Search:     req.GetSearch(),
+		Limit:      int(req.GetLimit()),
+		Offset:     int(req.GetOffset()),
+	}
+	for _, l := range req.GetSeverityLevels() {
+		filter.SeverityLevels = append(filter.SeverityLevels, int16(l))
+	}
+	for _, st := range req.GetStatuses() {
+		filter.Statuses = append(filter.Statuses, store.SEVStatus(st))
+	}
+
+	records, err := s.sevs.List(ctx, filter)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to list SEVs")
+	}
+
+	resp := &pb.ListSEVsResponse{
+		Total: int32(len(records)),
+	}
+	for _, r := range records {
+		resp.Sevs = append(resp.Sevs, sevToProto(r))
+	}
+	return resp, nil
+}
+
+func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStatusRequest) (*pb.SEVResponse, error) {
+	if req.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
+	if req.GetToStatus() == "" {
+		return nil, status.Error(codes.InvalidArgument, "to_status is required")
+	}
+
+	toStatus := store.SEVStatus(req.GetToStatus())
+	switch toStatus {
+	case store.SEVStatusOpen,
+		store.SEVStatusInvestigating,
+		store.SEVStatusMitigated,
+		store.SEVStatusResolved,
+		store.SEVStatusPostmortemInProgress,
+		store.SEVStatusPostmortemComplete:
+	default:
+		return nil, status.Error(codes.InvalidArgument, "unknown to_status value")
+	}
+
+	record, err := s.sevs.Get(ctx, req.GetId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+
+	if err := sev.ValidateTransition(record.Status, toStatus); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	fromStatus := record.Status
+	record.Status = toStatus
+
+	if req.GetMitigatedAt() != nil {
+		t := req.GetMitigatedAt().AsTime()
+		record.MitigatedAt = &t
+	}
+	if req.GetResolvedAt() != nil {
+		t := req.GetResolvedAt().AsTime()
+		record.ResolvedAt = &t
+	}
+	if req.GetPostmortemCompletedAt() != nil {
+		t := req.GetPostmortemCompletedAt().AsTime()
+		record.PostmortemCompletedAt = &t
+	}
+
+	sev.ComputeMetrics(record)
+	now := time.Now()
+	record.UpdatedAt = now
+
+	if err := s.sevs.Update(ctx, record); err != nil {
+		return nil, status.Error(codes.Internal, "failed to update SEV")
+	}
+
+	if err := s.history.Create(ctx, &store.SEVStatusHistory{
+		SEVID:          record.ID,
+		FromStatus:     &fromStatus,
+		ToStatus:       toStatus,
+		UserID:         req.GetUserId(),
+		TransitionedAt: now,
+	}); err != nil {
+		return nil, status.Error(codes.Internal, "failed to record status history")
+	}
+
+	_ = s.audit.Append(ctx, &store.AuditEntry{
+		SEVID:     record.ID,
+		UserID:    req.GetUserId(),
+		Action:    "sev.status_transitioned",
+		CreatedAt: now,
+	})
+
+	return sevToProto(record), nil
+}
+
+func sevToProto(s *store.SEV) *pb.SEVResponse {
+	resp := &pb.SEVResponse{
+		Id:               s.ID,
+		Title:            s.Title,
+		Description:      s.Description,
+		SeverityLevel:    int32(s.SeverityLevel),
+		Status:           string(s.Status),
+		AffectedServices: s.AffectedServices,
+		Tags:             s.Tags,
+		Locked:           s.Locked,
+		Sensitive:        s.Sensitive,
+		CreatedBy:        s.CreatedBy,
+		CreatedAt:        timestamppb.New(s.CreatedAt),
+		UpdatedAt:        timestamppb.New(s.UpdatedAt),
+	}
+
+	if s.RootCauseCategory != nil {
+		resp.RootCauseCategory = *s.RootCauseCategory
+	}
+	if s.RootCauseDescription != nil {
+		resp.RootCauseDescription = *s.RootCauseDescription
+	}
+	if s.Mitigation != nil {
+		resp.Mitigation = *s.Mitigation
+	}
+	if s.Prevention != nil {
+		resp.Prevention = *s.Prevention
+	}
+	if s.BusinessImpact != nil {
+		resp.BusinessImpact = *s.BusinessImpact
+	}
+	if s.DetectionMethod != nil {
+		resp.DetectionMethod = *s.DetectionMethod
+	}
+	if s.AlertName != nil {
+		resp.AlertName = *s.AlertName
+	}
+	if s.MonitoringTool != nil {
+		resp.MonitoringTool = *s.MonitoringTool
+	}
+	if s.RightPeoplePresent != nil {
+		resp.RightPeoplePresent = *s.RightPeoplePresent
+	}
+	if s.RightPeopleNotes != nil {
+		resp.RightPeopleNotes = *s.RightPeopleNotes
+	}
+	if s.StartedAt != nil {
+		resp.StartedAt = timestamppb.New(*s.StartedAt)
+	}
+	if s.DetectedAt != nil {
+		resp.DetectedAt = timestamppb.New(*s.DetectedAt)
+	}
+	if s.MitigatedAt != nil {
+		resp.MitigatedAt = timestamppb.New(*s.MitigatedAt)
+	}
+	if s.ResolvedAt != nil {
+		resp.ResolvedAt = timestamppb.New(*s.ResolvedAt)
+	}
+	if s.PostmortemCompletedAt != nil {
+		resp.PostmortemCompletedAt = timestamppb.New(*s.PostmortemCompletedAt)
+	}
+	if s.MTTDSeconds != nil {
+		resp.MttdSeconds = *s.MTTDSeconds
+	}
+	if s.MTTMSeconds != nil {
+		resp.MttmSeconds = *s.MTTMSeconds
+	}
+	if s.MTTRSeconds != nil {
+		resp.MttrSeconds = *s.MTTRSeconds
+	}
+	if s.DTTMSeconds != nil {
+		resp.DttmSeconds = *s.DTTMSeconds
+	}
+
+	return resp
+}

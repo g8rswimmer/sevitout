@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// AuditService provides read access to the immutable audit log.
+service AuditService {
+  rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/audit"
+    };
+  }
+}
+
+message AuditEntryResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  string user_id = 3;
+  string action = 4;
+  string field_name = 5;
+  string old_value = 6;
+  string new_value = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message ListAuditEntriesRequest {
+  string sev_id = 1;
+}
+
+message ListAuditEntriesResponse {
+  repeated AuditEntryResponse entries = 1;
+}
