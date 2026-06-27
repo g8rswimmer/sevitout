@@ -363,7 +363,7 @@ All secrets are passed via environment variables (or a `.env` file for local dev
 
 ---
 
-## 12. Open Architectural Questions
+## 12. Resolved Architectural Decisions
 
 1. ~~**Rich text storage**: Should postmortem documents be stored as ProseMirror JSON (TipTap native), Markdown, or HTML in PostgreSQL? ProseMirror JSON preserves structure best but is editor-specific.~~
    - **Answered**: Postmortem documents are stored as Markdown in PostgreSQL. The TipTap editor will use a Markdown extension for serialization/deserialization. Markdown is portable, human-readable outside the UI, and easy to export.
