@@ -1,6 +1,6 @@
 COMPOSE = docker compose --project-directory . -f deploy/docker-compose.yml --env-file .env
 
-.PHONY: build test lint up down migrate psql
+.PHONY: build test lint up down migrate psql check-env
 
 build:
 	go build ./...
@@ -11,14 +11,17 @@ test:
 lint:
 	golangci-lint run
 
-up:
+check-env:
+	@test -f .env || (echo "ERROR: .env not found — run: cp .env.example .env" && exit 1)
+
+up: check-env
 	$(COMPOSE) up
 
-down:
+down: check-env
 	$(COMPOSE) down
 
-migrate:
+migrate: check-env
 	$(COMPOSE) run --rm migrate
 
-psql:
+psql: check-env
 	$(COMPOSE) exec postgres bash -c 'psql -U $$POSTGRES_USER -d $$POSTGRES_DB'

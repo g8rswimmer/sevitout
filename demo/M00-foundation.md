@@ -118,3 +118,9 @@ docker compose -f deploy/docker-compose.yml down -v
   `build: .` for the migrate service.
 - `web/` contains only placeholder `.gitkeep` files; the React frontend is
   implemented in M14.
+- `API_GRPC_ADDR=api:8080` in `.env.example` is a forward reference — the
+  `api` Docker service is defined in a later milestone. Update this value
+  when the service is added to `deploy/docker-compose.yml`.
+- `DATABASE_URL` in `.env.example` uses `localhost` for host-machine tool
+  connections (psql, migrations via CLI). The `migrate` Docker service uses
+  the `postgres` service name directly in its command to avoid this mismatch.
