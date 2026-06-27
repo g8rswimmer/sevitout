@@ -1,6 +1,9 @@
 COMPOSE = docker compose --project-directory . -f deploy/docker-compose.yml --env-file .env
 
-.PHONY: build test lint up down migrate psql check-env
+.PHONY: build test lint generate up down migrate psql check-env
+
+generate:
+	sqlc generate
 
 build:
 	go build ./...
@@ -22,6 +25,12 @@ down: check-env
 
 migrate: check-env
 	$(COMPOSE) run --rm migrate
+
+migrate-down: check-env
+	$(COMPOSE) run --rm migrate -path=/migrations -database "postgres://$${POSTGRES_USER}:$${POSTGRES_PASSWORD}@postgres:5432/$${POSTGRES_DB}?sslmode=disable" down 1
+
+test-integration: check-env
+	go test -tags integration -v ./internal/store/...
 
 psql: check-env
 	$(COMPOSE) exec postgres bash -c 'psql -U $$POSTGRES_USER -d $$POSTGRES_DB'

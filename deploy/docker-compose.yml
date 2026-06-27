@@ -19,7 +19,7 @@ services:
   migrate:
     image: migrate/migrate:v4.17.0
     volumes:
-      - ../migrations:/migrations
+      - ./migrations:/migrations
     command: ["-path=/migrations", "-database=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable", "up"]
     depends_on:
       postgres:
