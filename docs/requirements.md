@@ -300,6 +300,7 @@ SEVs must be searchable and filterable across all records:
 - Each entry: timestamp, user, action (field changed, value before/after)
 - Accessible to Admins and the IC for a given SEV
 - Critical for postmortem accuracy, compliance, and dispute resolution
+- Immutability enforced at both the database level (INSERT-only DB role) and the application level (append-only store interface — no update or delete path exists)
 
 ---
 
@@ -397,7 +398,7 @@ Sevitout maintains its own lightweight service registry:
 | **Latency** | Sub-200ms read latency for open SEV views |
 | **Single organization** | Single-tenant data model (multi-tenancy is out of scope for v1) |
 | **Auditability** | All mutations logged with user and timestamp |
-| **Security** | OAuth tokens and AI API keys encrypted at rest |
+| **Security** | OAuth tokens, AI API keys, and integration credentials encrypted at rest using AES-256-GCM at the application layer; database never holds plaintext |
 | **Extensibility** | Plugin architecture for AI agents and future integrations |
 
 ---
