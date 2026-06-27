@@ -1,0 +1,925 @@
+package memory_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/g8rswimmer/sevitout/internal/store"
+	"github.com/g8rswimmer/sevitout/internal/store/memory"
+)
+
+// Compile-time interface compliance checks.
+var (
+	_ store.SEVStore               = (*memory.SEVStore)(nil)
+	_ store.StatusHistoryStore     = (*memory.StatusHistoryStore)(nil)
+	_ store.PostmortemStore        = (*memory.PostmortemStore)(nil)
+	_ store.AuditStore             = (*memory.AuditStore)(nil)
+	_ store.AnnouncementStore      = (*memory.AnnouncementStore)(nil)
+	_ store.ChatStore              = (*memory.ChatStore)(nil)
+	_ store.TaskStore              = (*memory.TaskStore)(nil)
+	_ store.SEVLinkStore           = (*memory.SEVLinkStore)(nil)
+	_ store.SLIStore               = (*memory.SLIStore)(nil)
+	_ store.UserStore              = (*memory.UserStore)(nil)
+	_ store.ServiceStore           = (*memory.ServiceStore)(nil)
+	_ store.OnCallStore            = (*memory.OnCallStore)(nil)
+	_ store.AIPluginStore          = (*memory.AIPluginStore)(nil)
+	_ store.IntegrationConfigStore = (*memory.IntegrationConfigStore)(nil)
+	_ store.ShareStore             = (*memory.ShareStore)(nil)
+)
+
+var ctx = context.Background()
+
+// ── SEVStore ──────────────────────────────────────────────────────────────────
+
+func TestSEVStore(t *testing.T) {
+	s := memory.NewSEVStore()
+
+	sev := &store.SEV{
+		ID:            "SEV-2026-0001",
+		Title:         "API latency spike",
+		Description:   "P99 latency exceeded 5 s",
+		SeverityLevel: 2,
+		Status:        store.SEVStatusOpen,
+		CreatedBy:     "user-1",
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, sev); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+
+	t.Run("CreateDuplicate", func(t *testing.T) {
+		if err := s.Create(ctx, sev); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, sev.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Title != sev.Title {
+			t.Fatalf("title mismatch: want %q got %q", sev.Title, got.Title)
+		}
+	})
+
+	t.Run("GetNotFound", func(t *testing.T) {
+		if _, err := s.Get(ctx, "missing"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		sev.Status = store.SEVStatusInvestigating
+		if err := s.Update(ctx, sev); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		got, _ := s.Get(ctx, sev.ID)
+		if got.Status != store.SEVStatusInvestigating {
+			t.Fatalf("status not updated")
+		}
+	})
+
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		ghost := &store.SEV{ID: "missing"}
+		if err := s.Update(ctx, ghost); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("List", func(t *testing.T) {
+		items, err := s.List(ctx, store.SEVFilter{})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("ListFilterBySeverity", func(t *testing.T) {
+		items, _ := s.List(ctx, store.SEVFilter{SeverityLevels: []int16{1}})
+		if len(items) != 0 {
+			t.Fatal("expected empty result for severity 1")
+		}
+	})
+
+	t.Run("ListFilterByStatus", func(t *testing.T) {
+		items, _ := s.List(ctx, store.SEVFilter{Statuses: []store.SEVStatus{store.SEVStatusOpen}})
+		if len(items) != 0 {
+			t.Fatal("expected empty: status was changed to investigating")
+		}
+	})
+
+	t.Run("ListSearch", func(t *testing.T) {
+		items, _ := s.List(ctx, store.SEVFilter{Search: "latency"})
+		if len(items) != 1 {
+			t.Fatalf("search: want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("UpdateLocked", func(t *testing.T) {
+		if err := s.UpdateLocked(ctx, sev.ID, true); err != nil {
+			t.Fatalf("UpdateLocked: %v", err)
+		}
+		got, _ := s.Get(ctx, sev.ID)
+		if !got.Locked {
+			t.Fatal("expected locked=true")
+		}
+	})
+
+	t.Run("UpdateLockedNotFound", func(t *testing.T) {
+		if err := s.UpdateLocked(ctx, "missing", true); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+}
+
+// ── PostmortemStore ───────────────────────────────────────────────────────────
+
+func TestPostmortemStore(t *testing.T) {
+	s := memory.NewPostmortemStore()
+
+	pm := &store.Postmortem{
+		SEVID:     "SEV-2026-0001",
+		Status:    store.PostmortemStatusDraft,
+		Content:   "## Summary\n",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, pm); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if pm.ID == 0 {
+			t.Fatal("ID should be set after Create")
+		}
+	})
+
+	t.Run("CreateDuplicate", func(t *testing.T) {
+		if err := s.Create(ctx, pm); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("GetBySEVID", func(t *testing.T) {
+		got, err := s.GetBySEVID(ctx, pm.SEVID)
+		if err != nil {
+			t.Fatalf("GetBySEVID: %v", err)
+		}
+		if got.Status != store.PostmortemStatusDraft {
+			t.Fatal("status mismatch")
+		}
+	})
+
+	t.Run("GetBySEVIDNotFound", func(t *testing.T) {
+		if _, err := s.GetBySEVID(ctx, "missing"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		pm.Status = store.PostmortemStatusInReview
+		if err := s.Update(ctx, pm); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		got, _ := s.GetBySEVID(ctx, pm.SEVID)
+		if got.Status != store.PostmortemStatusInReview {
+			t.Fatal("status not updated")
+		}
+	})
+}
+
+// ── AuditStore ────────────────────────────────────────────────────────────────
+
+func TestAuditStore(t *testing.T) {
+	s := memory.NewAuditStore()
+
+	entry := &store.AuditEntry{
+		SEVID:     "SEV-2026-0001",
+		UserID:    "user-1",
+		Action:    "create",
+		CreatedAt: time.Now(),
+	}
+
+	t.Run("Append", func(t *testing.T) {
+		if err := s.Append(ctx, entry); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		if entry.ID == 0 {
+			t.Fatal("ID should be set after Append")
+		}
+	})
+
+	t.Run("AppendSecond", func(t *testing.T) {
+		e2 := &store.AuditEntry{SEVID: "SEV-2026-0001", UserID: "user-1", Action: "update"}
+		if err := s.Append(ctx, e2); err != nil {
+			t.Fatalf("second Append: %v", err)
+		}
+		if e2.ID <= entry.ID {
+			t.Fatal("second ID should be greater than first")
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		entries, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(entries) != 2 {
+			t.Fatalf("want 2 entries, got %d", len(entries))
+		}
+	})
+
+	t.Run("ListBySEVIDOtherSEV", func(t *testing.T) {
+		entries, _ := s.ListBySEVID(ctx, "SEV-2026-9999")
+		if len(entries) != 0 {
+			t.Fatal("expected empty for unknown SEV")
+		}
+	})
+}
+
+// ── AnnouncementStore ─────────────────────────────────────────────────────────
+
+func TestAnnouncementStore(t *testing.T) {
+	s := memory.NewAnnouncementStore()
+
+	a := &store.Announcement{
+		SEVID:    "SEV-2026-0001",
+		AuthorID: "user-1",
+		Message:  "SEV opened",
+		Audience: store.AudienceInternal,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, a); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if a.ID == 0 {
+			t.Fatal("ID not set")
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+}
+
+// ── ChatStore ─────────────────────────────────────────────────────────────────
+
+func TestChatStore(t *testing.T) {
+	s := memory.NewChatStore()
+
+	entry := &store.ChatEntry{
+		SEVID:      "SEV-2026-0001",
+		OccurredAt: time.Now(),
+		Source:     "slack",
+		Author:     "alice",
+		Content:    "working on it",
+		AddedBy:    "user-1",
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, entry); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+}
+
+// ── TaskStore ─────────────────────────────────────────────────────────────────
+
+func TestTaskStore(t *testing.T) {
+	s := memory.NewTaskStore()
+
+	task := &store.LinkedTask{
+		SEVID:            "SEV-2026-0001",
+		ExternalSystem:   "github",
+		TaskID:           "42",
+		URL:              "https://github.com/org/repo/issues/42",
+		Title:            "Fix the thing",
+		RelationshipType: store.TaskRelationshipActionItem,
+		Priority:         store.TaskPriorityCritical,
+		CreatedBy:        "user-1",
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, task); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if task.ID == 0 {
+			t.Fatal("ID not set")
+		}
+	})
+
+	taskID := task.ID
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, taskID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Title != task.Title {
+			t.Fatal("title mismatch")
+		}
+	})
+
+	t.Run("GetNotFound", func(t *testing.T) {
+		if _, err := s.Get(ctx, 9999); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		task.Overdue = true
+		if err := s.Update(ctx, task); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		got, _ := s.Get(ctx, taskID)
+		if !got.Overdue {
+			t.Fatal("overdue not updated")
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, taskID); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := s.Get(ctx, taskID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound after delete, got %v", err)
+		}
+	})
+}
+
+// ── SEVLinkStore ──────────────────────────────────────────────────────────────
+
+func TestSEVLinkStore(t *testing.T) {
+	s := memory.NewSEVLinkStore()
+
+	link := &store.SEVLink{
+		SourceSEVID:      "SEV-2026-0001",
+		TargetSEVID:      "SEV-2026-0002",
+		RelationshipType: store.SEVRelationshipRelated,
+		CreatedBy:        "user-1",
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, link); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+
+	t.Run("CreateDuplicate", func(t *testing.T) {
+		if err := s.Create(ctx, link); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("ListBySEVIDTarget", func(t *testing.T) {
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-0002")
+		if len(items) != 1 {
+			t.Fatal("link should appear on both sides")
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, "SEV-2026-0001", "SEV-2026-0002", store.SEVRelationshipRelated); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if len(items) != 0 {
+			t.Fatal("expected empty after delete")
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		if err := s.Delete(ctx, "a", "b", store.SEVRelationshipRelated); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+}
+
+// ── SLIStore ──────────────────────────────────────────────────────────────────
+
+func TestSLIStore(t *testing.T) {
+	s := memory.NewSLIStore()
+
+	sli := &store.SLI{
+		SEVID:         "SEV-2026-0001",
+		SLIName:       "availability",
+		SLOThreshold:  "99.9%",
+		MeasuredValue: "98.1%",
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, sli); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if sli.ID == 0 {
+			t.Fatal("ID not set")
+		}
+	})
+
+	sliID := sli.ID
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, sliID); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if len(items) != 0 {
+			t.Fatal("expected empty after delete")
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		if err := s.Delete(ctx, 9999); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+}
+
+// ── UserStore ─────────────────────────────────────────────────────────────────
+
+func TestUserStore(t *testing.T) {
+	s := memory.NewUserStore()
+
+	user := &store.User{
+		ID:            "usr-abc",
+		Email:         "alice@example.com",
+		Name:          "Alice",
+		OrgRole:       store.OrgRoleResponder,
+		Active:        true,
+		OAuthProvider: "google",
+		OAuthSubject:  "123",
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, user); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+
+	t.Run("CreateDuplicate", func(t *testing.T) {
+		if err := s.Create(ctx, user); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("CreateEmailConflict", func(t *testing.T) {
+		dup := &store.User{ID: "usr-xyz", Email: "alice@example.com", OAuthProvider: "github", OAuthSubject: "456"}
+		if err := s.Create(ctx, dup); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict on email dup, got %v", err)
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Email != user.Email {
+			t.Fatal("email mismatch")
+		}
+	})
+
+	t.Run("GetNotFound", func(t *testing.T) {
+		if _, err := s.Get(ctx, "missing"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("GetByEmail", func(t *testing.T) {
+		got, err := s.GetByEmail(ctx, user.Email)
+		if err != nil {
+			t.Fatalf("GetByEmail: %v", err)
+		}
+		if got.ID != user.ID {
+			t.Fatal("id mismatch")
+		}
+	})
+
+	t.Run("GetByEmailNotFound", func(t *testing.T) {
+		if _, err := s.GetByEmail(ctx, "nobody@example.com"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		user.OrgRole = store.OrgRoleAdmin
+		if err := s.Update(ctx, user); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		got, _ := s.Get(ctx, user.ID)
+		if got.OrgRole != store.OrgRoleAdmin {
+			t.Fatal("role not updated")
+		}
+	})
+
+	t.Run("List", func(t *testing.T) {
+		users, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(users) != 1 {
+			t.Fatalf("want 1, got %d", len(users))
+		}
+	})
+}
+
+// ── ServiceStore ──────────────────────────────────────────────────────────────
+
+func TestServiceStore(t *testing.T) {
+	s := memory.NewServiceStore()
+
+	svc := &store.Service{
+		ID:     "svc-api",
+		Name:   "API Service",
+		Active: true,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, svc); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+
+	t.Run("CreateDuplicate", func(t *testing.T) {
+		if err := s.Create(ctx, svc); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, svc.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != svc.Name {
+			t.Fatal("name mismatch")
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		svc.Active = false
+		if err := s.Update(ctx, svc); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		got, _ := s.Get(ctx, svc.ID)
+		if got.Active {
+			t.Fatal("active should be false")
+		}
+	})
+
+	t.Run("ListActiveOnly", func(t *testing.T) {
+		items, _ := s.List(ctx, true)
+		if len(items) != 0 {
+			t.Fatal("inactive service should be excluded")
+		}
+	})
+
+	t.Run("ListAll", func(t *testing.T) {
+		items, _ := s.List(ctx, false)
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, svc.ID); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := s.Get(ctx, svc.ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound after delete, got %v", err)
+		}
+	})
+}
+
+// ── OnCallStore ───────────────────────────────────────────────────────────────
+
+func TestOnCallStore(t *testing.T) {
+	s := memory.NewOnCallStore()
+
+	svcID := "svc-api"
+	r := &store.OnCallRotation{
+		Name:      "API on-call",
+		ServiceID: &svcID,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if r.ID == 0 {
+			t.Fatal("ID not set")
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, r.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != r.Name {
+			t.Fatal("name mismatch")
+		}
+	})
+
+	t.Run("GetCurrentOnCall", func(t *testing.T) {
+		got, err := s.GetCurrentOnCall(ctx, svcID)
+		if err != nil {
+			t.Fatalf("GetCurrentOnCall: %v", err)
+		}
+		if got.Name != r.Name {
+			t.Fatal("name mismatch")
+		}
+	})
+
+	t.Run("GetCurrentOnCallNotFound", func(t *testing.T) {
+		if _, err := s.GetCurrentOnCall(ctx, "svc-missing"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("List", func(t *testing.T) {
+		items, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		r.Name = "API on-call (updated)"
+		if err := s.Update(ctx, r); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		got, _ := s.Get(ctx, r.ID)
+		if got.Name != "API on-call (updated)" {
+			t.Fatal("name not updated")
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, r.ID); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := s.Get(ctx, r.ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound after delete, got %v", err)
+		}
+	})
+}
+
+// ── AIPluginStore ─────────────────────────────────────────────────────────────
+
+func TestAIPluginStore(t *testing.T) {
+	s := memory.NewAIPluginStore()
+
+	plugin := &store.AIPlugin{
+		Name:        "anthropic",
+		Version:     "1.0.0",
+		HandlerType: store.AIHandlerBuiltin,
+		Enabled:     false,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, plugin); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	})
+
+	t.Run("CreateDuplicateName", func(t *testing.T) {
+		dup := &store.AIPlugin{Name: "anthropic", Version: "2.0.0", HandlerType: store.AIHandlerBuiltin}
+		if err := s.Create(ctx, dup); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, plugin.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != plugin.Name {
+			t.Fatal("name mismatch")
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		plugin.Enabled = true
+		if err := s.Update(ctx, plugin); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		got, _ := s.Get(ctx, plugin.ID)
+		if !got.Enabled {
+			t.Fatal("enabled not updated")
+		}
+	})
+
+	t.Run("List", func(t *testing.T) {
+		items, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, plugin.ID); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		items, _ := s.List(ctx)
+		if len(items) != 0 {
+			t.Fatal("expected empty after delete")
+		}
+	})
+}
+
+// ── IntegrationConfigStore ────────────────────────────────────────────────────
+
+func TestIntegrationConfigStore(t *testing.T) {
+	s := memory.NewIntegrationConfigStore()
+
+	cfg := &store.IntegrationConfig{
+		IntegrationType: "slack",
+		Settings:        map[string]any{"default_channel": "#incidents"},
+	}
+
+	t.Run("Upsert (insert)", func(t *testing.T) {
+		if err := s.Upsert(ctx, cfg); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if cfg.ID == 0 {
+			t.Fatal("ID not set on insert")
+		}
+	})
+
+	firstID := cfg.ID
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, "slack")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.ID != firstID {
+			t.Fatal("id mismatch")
+		}
+	})
+
+	t.Run("Upsert (update)", func(t *testing.T) {
+		cfg.Settings = map[string]any{"default_channel": "#sev-events"}
+		if err := s.Upsert(ctx, cfg); err != nil {
+			t.Fatalf("Upsert update: %v", err)
+		}
+		if cfg.ID != firstID {
+			t.Fatal("ID should not change on update")
+		}
+		got, _ := s.Get(ctx, "slack")
+		if got.Settings["default_channel"] != "#sev-events" {
+			t.Fatal("settings not updated")
+		}
+	})
+
+	t.Run("GetNotFound", func(t *testing.T) {
+		if _, err := s.Get(ctx, "pagerduty"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("List", func(t *testing.T) {
+		items, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+}
+
+// ── ShareStore ────────────────────────────────────────────────────────────────
+
+func TestShareStore(t *testing.T) {
+	s := memory.NewShareStore()
+
+	link := &store.ShareableLink{
+		SEVID:     "SEV-2026-0001",
+		Token:     "tok-abc123",
+		CreatedBy: "user-1",
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, link); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if link.ID == 0 {
+			t.Fatal("ID not set")
+		}
+	})
+
+	t.Run("CreateDuplicate", func(t *testing.T) {
+		if err := s.Create(ctx, link); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("GetByToken", func(t *testing.T) {
+		got, err := s.GetByToken(ctx, "tok-abc123")
+		if err != nil {
+			t.Fatalf("GetByToken: %v", err)
+		}
+		if got.SEVID != link.SEVID {
+			t.Fatal("sev_id mismatch")
+		}
+	})
+
+	t.Run("GetByTokenNotFound", func(t *testing.T) {
+		if _, err := s.GetByToken(ctx, "missing"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("Revoke", func(t *testing.T) {
+		if err := s.Revoke(ctx, "tok-abc123", "user-1"); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		got, _ := s.GetByToken(ctx, "tok-abc123")
+		if !got.Revoked {
+			t.Fatal("expected revoked=true")
+		}
+		if got.RevokedBy == nil || *got.RevokedBy != "user-1" {
+			t.Fatal("revoked_by not set")
+		}
+	})
+
+	t.Run("RevokeNotFound", func(t *testing.T) {
+		if err := s.Revoke(ctx, "missing", "user-1"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+}

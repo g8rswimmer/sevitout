@@ -1,0 +1,331 @@
+package store
+
+import "time"
+
+// SEVStatus represents the lifecycle state of a SEV.
+type SEVStatus string
+
+const (
+	SEVStatusOpen                 SEVStatus = "open"
+	SEVStatusInvestigating        SEVStatus = "investigating"
+	SEVStatusMitigated            SEVStatus = "mitigated"
+	SEVStatusResolved             SEVStatus = "resolved"
+	SEVStatusPostmortemInProgress SEVStatus = "postmortem_in_progress"
+	SEVStatusPostmortemComplete   SEVStatus = "postmortem_complete"
+)
+
+// SEVRoleType identifies the role a person holds on a SEV.
+type SEVRoleType string
+
+const (
+	SEVRoleOnCall            SEVRoleType = "on-call"
+	SEVRoleDetectedBy        SEVRoleType = "detected-by"
+	SEVRoleIncidentCommander SEVRoleType = "incident-commander"
+	SEVRoleCommsLead         SEVRoleType = "comms-lead"
+	SEVRoleRecorder          SEVRoleType = "recorder"
+	SEVRoleResponder         SEVRoleType = "responder"
+)
+
+// AudienceType controls who can see an announcement.
+type AudienceType string
+
+const (
+	AudienceInternal   AudienceType = "internal"
+	AudienceExternal   AudienceType = "external"
+	AudienceStatusPage AudienceType = "status-page"
+)
+
+// TaskRelationshipType describes how a linked task relates to a SEV.
+type TaskRelationshipType string
+
+const (
+	TaskRelationshipActionItem         TaskRelationshipType = "action-item"
+	TaskRelationshipContributingFactor TaskRelationshipType = "contributing-factor"
+	TaskRelationshipFollowUp           TaskRelationshipType = "follow-up"
+	TaskRelationshipDependency         TaskRelationshipType = "dependency"
+)
+
+// TaskPriority controls the default SLA due-date applied at link time.
+type TaskPriority string
+
+const (
+	TaskPriorityCritical    TaskPriority = "critical"
+	TaskPriorityNonCritical TaskPriority = "non-critical"
+)
+
+// SEVRelationshipType describes how two SEVs relate to each other.
+type SEVRelationshipType string
+
+const (
+	SEVRelationshipRelated      SEVRelationshipType = "related"
+	SEVRelationshipCausedBy     SEVRelationshipType = "caused-by"
+	SEVRelationshipDuplicate    SEVRelationshipType = "duplicate"
+	SEVRelationshipRecurrenceOf SEVRelationshipType = "recurrence-of"
+)
+
+// PostmortemStatus is the lifecycle state of a postmortem document.
+type PostmortemStatus string
+
+const (
+	PostmortemStatusDraft    PostmortemStatus = "draft"
+	PostmortemStatusInReview PostmortemStatus = "in-review"
+	PostmortemStatusApproved PostmortemStatus = "approved"
+)
+
+// OrgRole is the organisation-wide role assigned to a user.
+type OrgRole string
+
+const (
+	OrgRoleViewer            OrgRole = "viewer"
+	OrgRoleResponder         OrgRole = "responder"
+	OrgRoleIncidentCommander OrgRole = "incident-commander"
+	OrgRoleAdmin             OrgRole = "admin"
+)
+
+// AIHandlerType indicates whether a plugin is built-in or calls an HTTP endpoint.
+type AIHandlerType string
+
+const (
+	AIHandlerBuiltin AIHandlerType = "builtin"
+	AIHandlerHTTP    AIHandlerType = "http"
+)
+
+// SEV is the central incident record.
+type SEV struct {
+	ID                    string
+	Title                 string
+	Description           string
+	SeverityLevel         int16
+	Status                SEVStatus
+	RootCauseCategory     *string
+	RootCauseDescription  *string
+	Mitigation            *string
+	Prevention            *string
+	BusinessImpact        *string
+	AffectedServices      []string
+	DetectionMethod       *string
+	AlertName             *string
+	MonitoringTool        *string
+	RightPeoplePresent    *bool
+	RightPeopleNotes      *string
+	Tags                  map[string]string
+	StartedAt             *time.Time
+	DetectedAt            *time.Time
+	MitigatedAt           *time.Time
+	ResolvedAt            *time.Time
+	PostmortemCompletedAt *time.Time
+	MTTDSeconds           *int64
+	MTTMSeconds           *int64
+	MTTRSeconds           *int64
+	DTTMSeconds           *int64
+	Locked                bool
+	Sensitive             bool
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	CreatedBy             string
+}
+
+// SEVFilter narrows the result set returned by SEVStore.List.
+type SEVFilter struct {
+	SeverityLevels []int16
+	Statuses       []SEVStatus
+	OnCallUser     string
+	Search         string
+	Limit          int
+	Offset         int
+}
+
+// SEVStatusHistory is one entry in the immutable status-transition log.
+type SEVStatusHistory struct {
+	ID             int64
+	SEVID          string
+	FromStatus     *SEVStatus
+	ToStatus       SEVStatus
+	UserID         string
+	TransitionedAt time.Time
+}
+
+// SEVRole is a person assigned to a named role on a SEV.
+type SEVRole struct {
+	ID          int64
+	SEVID       string
+	RoleType    SEVRoleType
+	UserID      *string
+	DisplayName string
+	CreatedAt   time.Time
+	CreatedBy   string
+}
+
+// Announcement is a time-ordered status update on a SEV.
+type Announcement struct {
+	ID          int64
+	SEVID       string
+	AuthorID    string
+	Message     string
+	Audience    AudienceType
+	IsMilestone bool
+	CreatedAt   time.Time
+}
+
+// ChatEntry is one captured message from an incident communication channel.
+type ChatEntry struct {
+	ID         int64
+	SEVID      string
+	OccurredAt time.Time
+	Source     string
+	Author     string
+	Content    string
+	AddedAt    time.Time
+	AddedBy    string
+}
+
+// LinkedTask is an external task (e.g., GitHub Issue) linked to a SEV.
+type LinkedTask struct {
+	ID               int64
+	SEVID            string
+	ExternalSystem   string
+	TaskID           string
+	URL              string
+	Title            string
+	Description      *string
+	RelationshipType TaskRelationshipType
+	Priority         TaskPriority
+	DueDate          *time.Time
+	Overdue          bool
+	CreatedAt        time.Time
+	CreatedBy        string
+}
+
+// SEVLink is a typed directional relationship between two SEVs.
+// Bidirectionality is maintained by the application: linking A→B also inserts B→A.
+type SEVLink struct {
+	ID               int64
+	SourceSEVID      string
+	TargetSEVID      string
+	RelationshipType SEVRelationshipType
+	CreatedAt        time.Time
+	CreatedBy        string
+}
+
+// SLI is one SLI violation record on a SEV.
+type SLI struct {
+	ID             int64
+	SEVID          string
+	ServiceID      *string
+	SLIName        string
+	SLOThreshold   string
+	MeasuredValue  string
+	ViolationStart *time.Time
+	ViolationEnd   *time.Time
+	DashboardURL   *string
+	CreatedAt      time.Time
+}
+
+// Postmortem is the required postmortem document attached to every SEV.
+type Postmortem struct {
+	ID        int64
+	SEVID     string
+	Status    PostmortemStatus
+	Content   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UpdatedBy *string
+}
+
+// AuditEntry is one immutable entry in the append-only audit log.
+type AuditEntry struct {
+	ID        int64
+	SEVID     string
+	UserID    string
+	Action    string
+	FieldName *string
+	OldValue  *string
+	NewValue  *string
+	CreatedAt time.Time
+}
+
+// AIPlugin is a registered AI provider plugin configuration.
+type AIPlugin struct {
+	ID                        int64
+	Name                      string
+	Version                   string
+	Description               *string
+	HandlerType               AIHandlerType
+	HTTPEndpoint              *string
+	Provider                  *string
+	Model                     *string
+	EncryptedAPIKey           []byte
+	Enabled                   bool
+	TriggerOnOpen             bool
+	TriggerOnMitigated        bool
+	TriggerOnResolved         bool
+	TriggerOnPostmortemReview bool
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+}
+
+// Service is an entry in the lightweight internal service registry.
+type Service struct {
+	ID                 string
+	Name               string
+	Description        *string
+	OwningTeam         *string
+	PagerDutyServiceID *string
+	Tags               map[string]string
+	Active             bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// User is a person who has authenticated via OAuth.
+type User struct {
+	ID            string
+	Email         string
+	Name          string
+	AvatarURL     *string
+	OrgRole       OrgRole
+	Active        bool
+	OAuthProvider string
+	OAuthSubject  string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// OnCallRotation defines a named on-call entry, with optional PagerDuty backing and manual overrides.
+type OnCallRotation struct {
+	ID                  int64
+	Name                string
+	ServiceID           *string
+	PagerDutyScheduleID *string
+	ManualUserID        *string
+	ManualDisplayName   *string
+	OverrideStart       *time.Time
+	OverrideEnd         *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// IntegrationConfig holds credentials and settings for one third-party integration.
+// Credentials are stored encrypted at the application layer; this struct holds the
+// encrypted bytes as returned by the store.
+type IntegrationConfig struct {
+	ID                   int64
+	IntegrationType      string
+	EncryptedCredentials []byte
+	Settings             map[string]any
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+// ShareableLink is a public, revocable read-only token for a SEV.
+type ShareableLink struct {
+	ID        int64
+	SEVID     string
+	Token     string
+	CreatedBy string
+	ExpiresAt *time.Time
+	Revoked   bool
+	RevokedBy *string
+	RevokedAt *time.Time
+	CreatedAt time.Time
+}
