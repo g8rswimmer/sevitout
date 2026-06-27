@@ -1,0 +1,1 @@
+-- Baseline migration. golang-migrate manages the schema_migrations tracking table.

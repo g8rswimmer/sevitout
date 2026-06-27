@@ -1,0 +1,11 @@
+.env
+
+# Go build artifacts
+*.test
+coverage.out
+/cmd/server/server
+/cmd/slackbot/slackbot
+
+# Frontend
+web/dist/
+web/node_modules/
