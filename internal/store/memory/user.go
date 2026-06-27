@@ -64,6 +64,11 @@ func (s *UserStore) Update(_ context.Context, user *store.User) error {
 	if _, ok := s.data[user.ID]; !ok {
 		return store.ErrNotFound
 	}
+	for _, u := range s.data {
+		if u.ID != user.ID && u.Email == user.Email {
+			return store.ErrConflict
+		}
+	}
 	cp := *user
 	s.data[user.ID] = &cp
 	return nil

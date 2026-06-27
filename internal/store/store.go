@@ -117,6 +117,12 @@ type IntegrationConfigStore interface {
 	List(ctx context.Context) ([]*IntegrationConfig, error)
 }
 
+// StatusHistoryStore is an immutable log of SEV status transitions.
+type StatusHistoryStore interface {
+	Create(ctx context.Context, h *SEVStatusHistory) error
+	ListBySEVID(ctx context.Context, sevID string) ([]*SEVStatusHistory, error)
+}
+
 // ShareStore manages public shareable link tokens for SEVs.
 type ShareStore interface {
 	Create(ctx context.Context, link *ShareableLink) error

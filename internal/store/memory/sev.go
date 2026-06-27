@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,13 @@ func (s *SEVStore) List(_ context.Context, filter store.SEVFilter) ([]*store.SEV
 		out = append(out, &cp)
 	}
 
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+
 	if filter.Offset >= len(out) {
 		return []*store.SEV{}, nil
 	}
@@ -130,6 +138,8 @@ type StatusHistoryStore struct {
 	data []*store.SEVStatusHistory
 	seq  atomic.Int64
 }
+
+var _ store.StatusHistoryStore = (*StatusHistoryStore)(nil)
 
 func NewStatusHistoryStore() *StatusHistoryStore { return &StatusHistoryStore{} }
 

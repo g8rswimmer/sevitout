@@ -76,23 +76,27 @@ func (s *OnCallStore) List(_ context.Context) ([]*store.OnCallRotation, error) {
 
 // GetCurrentOnCall returns the active rotation for the given service.
 // It prefers manual overrides whose time window contains now, then falls back to
-// the first rotation linked to the service.
+// the first normal rotation (no full override set) linked to the service.
+// Expired overrides are excluded entirely, matching the Postgres SQL behaviour.
 func (s *OnCallStore) GetCurrentOnCall(_ context.Context, serviceID string) (*store.OnCallRotation, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	now := time.Now()
 	var fallback *store.OnCallRotation
 	for _, r := range s.data {
-		svcMatch := r.ServiceID != nil && *r.ServiceID == serviceID
-		if !svcMatch {
+		if r.ServiceID == nil || *r.ServiceID != serviceID {
 			continue
 		}
 		if r.ManualUserID != nil && r.OverrideStart != nil && r.OverrideEnd != nil {
+			// Full override: return it only when the time window is active.
 			if now.After(*r.OverrideStart) && now.Before(*r.OverrideEnd) {
 				cp := *r
 				return &cp, nil
 			}
+			// Expired full override — skip; do not use as fallback.
+			continue
 		}
+		// Normal rotation (at least one override field is nil): candidate fallback.
 		if fallback == nil {
 			cp := *r
 			fallback = &cp

@@ -52,6 +52,9 @@ func (s *ShareStore) Revoke(_ context.Context, token string, revokedBy string) e
 	if !ok {
 		return store.ErrNotFound
 	}
+	if link.Revoked {
+		return nil
+	}
 	now := time.Now()
 	link.Revoked = true
 	link.RevokedBy = &revokedBy

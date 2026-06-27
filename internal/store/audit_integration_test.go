@@ -31,7 +31,9 @@ func TestAuditWriterRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect superuser: %v", err)
 	}
-	defer superConn.Close(ctx)
+	// Register the connection close first so it runs last (t.Cleanup is LIFO),
+	// keeping superConn alive for all other cleanup callbacks below.
+	t.Cleanup(func() { superConn.Close(context.Background()) })
 
 	// Grant LOGIN to audit_writer so we can connect as it.
 	// We set a temporary password and revoke LOGIN afterward in cleanup.
@@ -43,7 +45,9 @@ func TestAuditWriterRole(t *testing.T) {
 		t.Fatalf("alter role audit_writer login: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = superConn.Exec(context.Background(), "ALTER ROLE audit_writer NOLOGIN")
+		if _, err := superConn.Exec(context.Background(), "ALTER ROLE audit_writer NOLOGIN"); err != nil {
+			t.Logf("cleanup: alter role audit_writer nologin: %v", err)
+		}
 	})
 
 	// Insert a test SEV so we have a valid sev_id for audit_log FK.
@@ -58,8 +62,12 @@ func TestAuditWriterRole(t *testing.T) {
 		t.Fatalf("insert test sev: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = superConn.Exec(context.Background(), "DELETE FROM audit_log WHERE user_id = 'audit_writer_test'")
-		_, _ = superConn.Exec(context.Background(), "DELETE FROM sevs WHERE id = $1", sevID)
+		if _, err := superConn.Exec(context.Background(), "DELETE FROM audit_log WHERE user_id = 'audit_writer_test'"); err != nil {
+			t.Logf("cleanup: delete audit_log rows: %v", err)
+		}
+		if _, err := superConn.Exec(context.Background(), "DELETE FROM sevs WHERE id = $1", sevID); err != nil {
+			t.Logf("cleanup: delete test sev: %v", err)
+		}
 	})
 
 	// Build an audit_writer connection URL from the superuser URL.

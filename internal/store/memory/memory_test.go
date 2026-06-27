@@ -12,6 +12,7 @@ import (
 // Compile-time interface compliance checks.
 var (
 	_ store.SEVStore               = (*memory.SEVStore)(nil)
+	_ store.StatusHistoryStore     = (*memory.StatusHistoryStore)(nil)
 	_ store.PostmortemStore        = (*memory.PostmortemStore)(nil)
 	_ store.AuditStore             = (*memory.AuditStore)(nil)
 	_ store.AnnouncementStore      = (*memory.AnnouncementStore)(nil)
