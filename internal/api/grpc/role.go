@@ -15,12 +15,6 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
-// OnCaller retrieves the current on-call person for a PagerDuty service.
-// Implementations must return ("", nil) when no one is on-call.
-type OnCaller interface {
-	OnCallLookup(ctx context.Context, pagerdutyServiceID string) (string, error)
-}
-
 // RoleServer implements pb.RoleServiceServer.
 type RoleServer struct {
 	pb.UnimplementedRoleServiceServer
@@ -29,7 +23,7 @@ type RoleServer struct {
 	audit store.AuditStore
 }
 
-// NewRoleServer constructs a RoleServer.
+// NewRoleServer returns a RoleServer backed by the given stores.
 func NewRoleServer(roles store.RoleStore, sevs store.SEVStore, audit store.AuditStore) *RoleServer {
 	return &RoleServer{roles: roles, sevs: sevs, audit: audit}
 }
@@ -98,12 +92,19 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
 
+	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+
 	callerID := ""
 	if uc, ok := auth.UserFromContext(ctx); ok {
 		callerID = uc.UserID
 	}
 
-	if err := s.roles.Remove(ctx, req.GetId()); err != nil {
+	if err := s.roles.Remove(ctx, req.GetSevId(), req.GetId()); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "role assignment not found")
 		}
@@ -123,6 +124,13 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 func (s *RoleServer) ListRoles(ctx context.Context, req *pb.ListRolesRequest) (*pb.ListRolesResponse, error) {
 	if req.GetSevId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
+	}
+
+	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to get SEV")
 	}
 
 	roles, err := s.roles.ListBySEVID(ctx, req.GetSevId())

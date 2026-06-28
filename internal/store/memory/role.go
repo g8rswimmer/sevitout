@@ -29,12 +29,15 @@ func (s *RoleStore) Assign(_ context.Context, role *store.SEVRole) error {
 	return nil
 }
 
-func (s *RoleStore) Remove(_ context.Context, id int64) error {
+func (s *RoleStore) Remove(_ context.Context, sevID string, id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, r := range s.data {
-		if r.ID == id {
-			s.data = append(s.data[:i], s.data[i+1:]...)
+		if r.ID == id && r.SEVID == sevID {
+			last := len(s.data) - 1
+			s.data[i] = s.data[last]
+			s.data[last] = nil
+			s.data = s.data[:last]
 			return nil
 		}
 	}

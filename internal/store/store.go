@@ -136,6 +136,8 @@ type ShareStore interface {
 // RoleStore manages people and role assignments on SEVs.
 type RoleStore interface {
 	Assign(ctx context.Context, role *SEVRole) error
-	Remove(ctx context.Context, id int64) error
+	// Remove deletes the role assignment with the given id from the given SEV.
+	// Returns ErrNotFound when no matching assignment exists.
+	Remove(ctx context.Context, sevID string, id int64) error
 	ListBySEVID(ctx context.Context, sevID string) ([]*SEVRole, error)
 }

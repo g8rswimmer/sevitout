@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
+
+const onCallLookupTimeout = 10 * time.Second
 
 const defaultBaseURL = "https://api.pagerduty.com"
 
@@ -23,7 +26,7 @@ func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
-		http:    &http.Client{},
+		http:    &http.Client{Timeout: onCallLookupTimeout},
 	}
 }
 
@@ -33,7 +36,7 @@ func NewClientWithBaseURL(apiKey, baseURL string) *Client {
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		http:    &http.Client{},
+		http:    &http.Client{Timeout: onCallLookupTimeout},
 	}
 }
 
@@ -80,7 +83,14 @@ func (c *Client) OnCallLookup(ctx context.Context, serviceID string) (string, er
 	if len(body.OnCalls) == 0 {
 		return "", nil
 	}
-	u2 := body.OnCalls[0].User
+	// Find primary on-call by lowest escalation level; response order is not guaranteed.
+	primary := body.OnCalls[0]
+	for _, oc := range body.OnCalls[1:] {
+		if oc.EscalationLevel < primary.EscalationLevel {
+			primary = oc
+		}
+	}
+	u2 := primary.User
 	if u2.Name == "" {
 		return "", nil
 	}

@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
+	"github.com/g8rswimmer/sevitout/internal/integrations/oncall"
 	"github.com/g8rswimmer/sevitout/internal/sev"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
@@ -23,7 +25,7 @@ type SEVServer struct {
 	history  store.StatusHistoryStore
 	roles    store.RoleStore
 	services store.ServiceStore
-	onCaller OnCaller // nil when PagerDuty is not configured
+	onCaller oncall.OnCaller // nil when PagerDuty is not configured
 }
 
 func NewSEVServer(
@@ -32,7 +34,7 @@ func NewSEVServer(
 	history store.StatusHistoryStore,
 	roles store.RoleStore,
 	services store.ServiceStore,
-	onCaller OnCaller,
+	onCaller oncall.OnCaller,
 ) *SEVServer {
 	return &SEVServer{
 		sevs:     sevs,
@@ -99,28 +101,29 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		return nil, status.Error(codes.Internal, "failed to create SEV")
 	}
 
-	// Auto-populate on-call role from PagerDuty when the primary affected service
-	// has a PagerDuty service ID and the integration is configured.
-	if s.onCaller != nil && len(req.GetAffectedServices()) > 0 {
-		if svc, err := s.services.Get(ctx, req.GetAffectedServices()[0]); err == nil && svc.PagerDutyServiceID != nil {
-			if displayName, err := s.onCaller.OnCallLookup(ctx, *svc.PagerDutyServiceID); err == nil && displayName != "" {
-				_ = s.roles.Assign(ctx, &store.SEVRole{
-					SEVID:       record.ID,
-					RoleType:    store.SEVRoleOnCall,
-					DisplayName: displayName,
-					CreatedAt:   now,
-					CreatedBy:   callerID,
-				})
-			}
-		}
-	}
-
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     record.ID,
 		UserID:    callerID,
 		Action:    "sev.created",
 		CreatedAt: now,
 	})
+
+	// Best-effort on-call auto-population. Never blocks or fails the response.
+	if s.onCaller != nil && len(req.GetAffectedServices()) > 0 {
+		if svc, err := s.services.Get(ctx, req.GetAffectedServices()[0]); err == nil && svc.PagerDutyServiceID != nil {
+			if displayName, err := s.onCaller.OnCallLookup(ctx, *svc.PagerDutyServiceID); err == nil && displayName != "" {
+				if err := s.roles.Assign(ctx, &store.SEVRole{
+					SEVID:       record.ID,
+					RoleType:    store.SEVRoleOnCall,
+					DisplayName: displayName,
+					CreatedAt:   now,
+					CreatedBy:   callerID,
+				}); err != nil {
+					slog.ErrorContext(ctx, "on-call role auto-assign failed", "sev_id", record.ID, "err", err)
+				}
+			}
+		}
+	}
 
 	return sevToProto(record), nil
 }
@@ -159,6 +162,9 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		record.Description = v
 	}
 	if v := req.GetSeverityLevel(); v != 0 {
+		if v < 1 || v > 4 {
+			return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
+		}
 		record.SeverityLevel = int16(v)
 	}
 	if v := req.GetRootCauseCategory(); v != "" {

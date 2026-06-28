@@ -40,10 +40,14 @@ func (r *RoleStore) Assign(ctx context.Context, role *store.SEVRole) error {
 	return nil
 }
 
-func (r *RoleStore) Remove(ctx context.Context, id int64) error {
+func (r *RoleStore) Remove(ctx context.Context, sevID string, id int64) error {
 	q := queries.New(r.pool)
-	if err := q.DeleteSEVRole(ctx, id); err != nil {
+	tag, err := q.DeleteSEVRole(ctx, queries.DeleteSEVRoleParams{ID: id, SevID: sevID})
+	if err != nil {
 		return fmt.Errorf("postgres role: remove: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
 	}
 	return nil
 }

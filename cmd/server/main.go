@@ -20,6 +20,7 @@ import (
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
+	"github.com/g8rswimmer/sevitout/internal/integrations/oncall"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
@@ -36,7 +37,7 @@ func main() {
 	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore := buildStores(ctx, log)
 
 	// --- PagerDuty client (optional) ---
-	var onCaller grpchandler.OnCaller
+	var onCaller oncall.OnCaller
 	if apiKey := os.Getenv("PAGERDUTY_API_KEY"); apiKey != "" {
 		onCaller = pagerduty.NewClient(apiKey)
 		log.Info("PagerDuty on-call integration enabled")

@@ -909,7 +909,7 @@ func TestRoleStore(t *testing.T) {
 	})
 
 	t.Run("Remove", func(t *testing.T) {
-		if err := s.Remove(ctx, roleID); err != nil {
+		if err := s.Remove(ctx, "SEV-2026-0001", roleID); err != nil {
 			t.Fatalf("Remove: %v", err)
 		}
 		items, _ := s.ListBySEVID(ctx, "SEV-2026-0001")
@@ -919,8 +919,18 @@ func TestRoleStore(t *testing.T) {
 	})
 
 	t.Run("RemoveNotFound", func(t *testing.T) {
-		if err := s.Remove(ctx, 9999); err != store.ErrNotFound {
+		if err := s.Remove(ctx, "SEV-2026-0001", 9999); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("RemoveWrongSEV", func(t *testing.T) {
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if len(items) == 0 {
+			t.Skip("no roles to test with")
+		}
+		if err := s.Remove(ctx, "SEV-WRONG", items[0].ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound when sev_id doesn't match, got %v", err)
 		}
 	})
 }

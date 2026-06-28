@@ -273,6 +273,45 @@ func TestListRoles_MissingSEVID(t *testing.T) {
 	}
 }
 
+func TestListRoles_SEVNotFound(t *testing.T) {
+	ts := newTestRoleServer()
+	_, err := ts.server.ListRoles(context.Background(), &pb.ListRolesRequest{SevId: "SEV-9999-0001"})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound for unknown SEV, got %v", grpcCode(err))
+	}
+}
+
+func TestRemoveRole_WrongSEV(t *testing.T) {
+	ts := newTestRoleServer()
+	ctx := context.Background()
+	sevID := seedSEVForRole(t, ts)
+
+	assigned, err := ts.server.AssignRole(ctx, &pb.AssignRoleRequest{
+		SevId:       sevID,
+		RoleType:    string(store.SEVRoleResponder),
+		DisplayName: "Eve",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	// Seed a second SEV and try to delete the first SEV's role using the second SEV's ID.
+	sevID2 := seedSEVForRole(t, ts)
+	_, err = ts.server.RemoveRole(ctx, &pb.RemoveRoleRequest{
+		SevId: sevID2,
+		Id:    assigned.GetId(),
+	})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound when role id belongs to different SEV, got %v", grpcCode(err))
+	}
+
+	// Confirm the original role is untouched.
+	listResp, _ := ts.server.ListRoles(ctx, &pb.ListRolesRequest{SevId: sevID})
+	if len(listResp.GetRoles()) != 1 {
+		t.Errorf("original role should still exist, got %d roles", len(listResp.GetRoles()))
+	}
+}
+
 // ── On-call auto-population via SEVServer ─────────────────────────────────────
 
 // staticOnCaller is a test double that always returns a fixed display name.
