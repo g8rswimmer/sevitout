@@ -134,3 +134,12 @@ func (s *UserStore) List(ctx context.Context) ([]*store.User, error) {
 	}
 	return users, nil
 }
+
+func (s *UserStore) Count(ctx context.Context) (int64, error) {
+	q := queries.New(s.pool)
+	n, err := q.CountUsers(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("postgres user: count: %w", err)
+	}
+	return n, nil
+}

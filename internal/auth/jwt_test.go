@@ -94,28 +94,3 @@ func TestJWTSigner_Validate_WrongSecret(t *testing.T) {
 	}
 }
 
-func TestJWTSigner_SignState_ValidateState(t *testing.T) {
-	signer := auth.NewJWTSigner("test-secret-32-chars-long-enough", 24)
-
-	state, err := signer.SignState("google", "random-nonce-123")
-	if err != nil {
-		t.Fatalf("SignState: %v", err)
-	}
-
-	provider, err := signer.ValidateState(state)
-	if err != nil {
-		t.Fatalf("ValidateState: %v", err)
-	}
-	if provider != "google" {
-		t.Errorf("provider = %q, want %q", provider, "google")
-	}
-}
-
-func TestJWTSigner_ValidateState_Invalid(t *testing.T) {
-	signer := auth.NewJWTSigner("test-secret-32-chars-long-enough", 24)
-
-	_, err := signer.ValidateState("not-a-jwt")
-	if err != auth.ErrTokenInvalid {
-		t.Errorf("ValidateState bad token = %v, want ErrTokenInvalid", err)
-	}
-}

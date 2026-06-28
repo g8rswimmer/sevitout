@@ -54,8 +54,8 @@ func main() {
 	authServer := grpchandler.NewAuthServer(userStore)
 
 	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner)),
-		grpc.StreamInterceptor(auth.StreamInterceptor(jwtSigner)),
+		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
+		grpc.StreamInterceptor(auth.StreamInterceptor(jwtSigner, userStore)),
 	)
 	pb.RegisterSEVServiceServer(grpcSrv, sevServer)
 	pb.RegisterAuditServiceServer(grpcSrv, auditServer)
@@ -80,21 +80,24 @@ func main() {
 			return nil
 		}),
 	)
-	// RegisterXxxHandlerFromEndpoint dials the gRPC server over loopback so that
-	// REST requests routed through the gateway still run through the gRPC
-	// interceptors (JWT validation, RBAC). HandlerServer bypasses interceptors
-	// and must not be used here.
+	// Dial a single loopback connection shared across all gateway services.
+	// RegisterXxxHandlerClient does not spawn cleanup goroutines, so the
+	// context lifetime does not affect connection cleanup.
 	const addr = ":8080"
-	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	if err := pb.RegisterSEVServiceHandlerFromEndpoint(ctx, gwMux, addr, dialOpts); err != nil {
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Error("dial loopback gRPC", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterSEVServiceHandlerClient(ctx, gwMux, pb.NewSEVServiceClient(conn)); err != nil {
 		log.Error("register sev gateway", "err", err)
 		os.Exit(1)
 	}
-	if err := pb.RegisterAuditServiceHandlerFromEndpoint(ctx, gwMux, addr, dialOpts); err != nil {
+	if err := pb.RegisterAuditServiceHandlerClient(ctx, gwMux, pb.NewAuditServiceClient(conn)); err != nil {
 		log.Error("register audit gateway", "err", err)
 		os.Exit(1)
 	}
-	if err := pb.RegisterAuthServiceHandlerFromEndpoint(ctx, gwMux, addr, dialOpts); err != nil {
+	if err := pb.RegisterAuthServiceHandlerClient(ctx, gwMux, pb.NewAuthServiceClient(conn)); err != nil {
 		log.Error("register auth gateway", "err", err)
 		os.Exit(1)
 	}

@@ -79,16 +79,6 @@ func (h *PasswordHandler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := h.users.GetByEmail(r.Context(), req.Email)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if existing != nil {
-		http.Error(w, "email already registered", http.StatusConflict)
-		return
-	}
-
 	role, err := h.bootstrapRole(r.Context())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -152,13 +142,13 @@ func (h *PasswordHandler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+	if !user.Active {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
-	if !user.Active {
-		http.Error(w, "account disabled", http.StatusForbidden)
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
@@ -172,17 +162,7 @@ func (h *PasswordHandler) respondWithToken(w http.ResponseWriter, user *store.Us
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "token",
-		Value:    token,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteLaxMode,
-	})
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(authResponse{
+	body, err := json.Marshal(authResponse{
 		Token: token,
 		User: publicUser{
 			ID:      user.ID,
@@ -191,15 +171,30 @@ func (h *PasswordHandler) respondWithToken(w http.ResponseWriter, user *store.Us
 			OrgRole: string(user.OrgRole),
 		},
 	})
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "token",
+		Value:    token,
+		HttpOnly: true,
+		Secure:   true,
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 // bootstrapRole returns Admin for the first registered user, Viewer for all others.
 func (h *PasswordHandler) bootstrapRole(ctx context.Context) (store.OrgRole, error) {
-	users, err := h.users.List(ctx)
+	n, err := h.users.Count(ctx)
 	if err != nil {
 		return "", err
 	}
-	if len(users) == 0 {
+	if n == 0 {
 		return store.OrgRoleAdmin, nil
 	}
 	return store.OrgRoleViewer, nil

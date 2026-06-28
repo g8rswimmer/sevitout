@@ -12,11 +12,11 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
-// UnaryInterceptor returns a gRPC unary interceptor that validates JWT tokens
-// and enforces RBAC before invoking the handler.
-func UnaryInterceptor(signer *JWTSigner) grpc.UnaryServerInterceptor {
+// UnaryInterceptor returns a gRPC unary interceptor that validates JWT tokens,
+// checks the caller's active status in the store, and enforces RBAC.
+func UnaryInterceptor(signer *JWTSigner, users store.UserStore) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		ctx, err := authenticate(ctx, signer, info.FullMethod)
+		ctx, err := authenticate(ctx, signer, users, info.FullMethod)
 		if err != nil {
 			return nil, err
 		}
@@ -24,11 +24,11 @@ func UnaryInterceptor(signer *JWTSigner) grpc.UnaryServerInterceptor {
 	}
 }
 
-// StreamInterceptor returns a gRPC stream interceptor that validates JWT tokens
-// and enforces RBAC before invoking the handler.
-func StreamInterceptor(signer *JWTSigner) grpc.StreamServerInterceptor {
+// StreamInterceptor returns a gRPC stream interceptor that validates JWT tokens,
+// checks the caller's active status in the store, and enforces RBAC.
+func StreamInterceptor(signer *JWTSigner, users store.UserStore) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		ctx, err := authenticate(ss.Context(), signer, info.FullMethod)
+		ctx, err := authenticate(ss.Context(), signer, users, info.FullMethod)
 		if err != nil {
 			return err
 		}
@@ -36,7 +36,7 @@ func StreamInterceptor(signer *JWTSigner) grpc.StreamServerInterceptor {
 	}
 }
 
-func authenticate(ctx context.Context, signer *JWTSigner, method string) (context.Context, error) {
+func authenticate(ctx context.Context, signer *JWTSigner, users store.UserStore, method string) (context.Context, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing metadata")
@@ -53,6 +53,11 @@ func authenticate(ctx context.Context, signer *JWTSigner, method string) (contex
 
 	claims, err := signer.Validate(tokenStr)
 	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
+	}
+
+	user, err := users.Get(ctx, claims.Subject)
+	if err != nil || !user.Active {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
 	}
 

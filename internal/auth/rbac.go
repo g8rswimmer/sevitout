@@ -24,6 +24,9 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.AuditService/ListAuditEntries": store.OrgRoleViewer,
 	// Auth service
 	"/sevitout.v1.AuthService/WhoAmI": store.OrgRoleViewer,
+	// gRPC reflection (both v1alpha and v1 registered by grpc-go)
+	"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": store.OrgRoleViewer,
+	"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      store.OrgRoleViewer,
 }
 
 // HasPermission reports whether role meets the minimum required for method.

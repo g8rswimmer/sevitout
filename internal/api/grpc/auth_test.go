@@ -32,8 +32,8 @@ func startAuthTestServer(t *testing.T, signer *auth.JWTSigner, users store.UserS
 	authSrv := grpchandler.NewAuthServer(users)
 
 	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(auth.UnaryInterceptor(signer)),
-		grpc.StreamInterceptor(auth.StreamInterceptor(signer)),
+		grpc.UnaryInterceptor(auth.UnaryInterceptor(signer, users)),
+		grpc.StreamInterceptor(auth.StreamInterceptor(signer, users)),
 	)
 	pb.RegisterSEVServiceServer(srv, sevSrv)
 	pb.RegisterAuthServiceServer(srv, authSrv)
@@ -121,6 +121,20 @@ func TestAuthInterceptor_Authenticated(t *testing.T) {
 func TestAuthInterceptor_InsufficientPermissions(t *testing.T) {
 	signer := auth.NewJWTSigner("test-secret-key-32-chars-long!!", 24)
 	users := memory.NewUserStore()
+
+	now := time.Now()
+	viewerUser := &store.User{
+		ID:        "viewer-1",
+		Email:     "viewer@example.com",
+		Name:      "Viewer",
+		OrgRole:   store.OrgRoleViewer,
+		Active:    true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := users.Create(context.Background(), viewerUser); err != nil {
+		t.Fatalf("seed viewer user: %v", err)
+	}
 
 	_, sevClient, teardown := startAuthTestServer(t, signer, users)
 	defer teardown()

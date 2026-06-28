@@ -53,36 +53,6 @@ func (s *JWTSigner) Sign(userID, email, orgRole string) (string, error) {
 	return t.SignedString(s.secret)
 }
 
-// SignState creates a short-lived (10 min) state token used for OAuth CSRF protection.
-func (s *JWTSigner) SignState(provider, nonce string) (string, error) {
-	claims := jwt.MapClaims{
-		"provider": provider,
-		"nonce":    nonce,
-		"exp":      time.Now().Add(10 * time.Minute).Unix(),
-	}
-	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return t.SignedString(s.secret)
-}
-
-// ValidateState validates an OAuth state token and returns the embedded provider name.
-func (s *JWTSigner) ValidateState(state string) (provider string, err error) {
-	t, parseErr := jwt.Parse(state, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
-		return s.secret, nil
-	})
-	if parseErr != nil {
-		return "", ErrTokenInvalid
-	}
-	claims, ok := t.Claims.(jwt.MapClaims)
-	if !ok || !t.Valid {
-		return "", ErrTokenInvalid
-	}
-	p, _ := claims["provider"].(string)
-	return p, nil
-}
-
 // Validate parses and validates a JWT, returning its claims on success.
 func (s *JWTSigner) Validate(tokenStr string) (*Claims, error) {
 	t, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {

@@ -77,6 +77,7 @@ type UserStore interface {
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	Update(ctx context.Context, user *User) error
 	List(ctx context.Context) ([]*User, error)
+	Count(ctx context.Context) (int64, error)
 }
 
 // ServiceStore manages the lightweight internal service registry.
