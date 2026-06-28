@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+
+// AuthService manages authentication and user identity.
+service AuthService {
+  // WhoAmI returns the identity of the currently authenticated caller.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse) {
+    option (google.api.http) = {
+      get: "/v1/auth/me"
+    };
+  }
+}
+
+message WhoAmIRequest {}
+
+message WhoAmIResponse {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string avatar_url = 4;
+  string org_role = 5;
+  string oauth_provider = 6;
+}

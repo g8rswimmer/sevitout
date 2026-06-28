@@ -492,13 +492,11 @@ func TestUserStore(t *testing.T) {
 	s := memory.NewUserStore()
 
 	user := &store.User{
-		ID:            "usr-abc",
-		Email:         "alice@example.com",
-		Name:          "Alice",
-		OrgRole:       store.OrgRoleResponder,
-		Active:        true,
-		OAuthProvider: "google",
-		OAuthSubject:  "123",
+		ID:      "usr-abc",
+		Email:   "alice@example.com",
+		Name:    "Alice",
+		OrgRole: store.OrgRoleResponder,
+		Active:  true,
 	}
 
 	t.Run("Create", func(t *testing.T) {
@@ -514,7 +512,7 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("CreateEmailConflict", func(t *testing.T) {
-		dup := &store.User{ID: "usr-xyz", Email: "alice@example.com", OAuthProvider: "github", OAuthSubject: "456"}
+		dup := &store.User{ID: "usr-xyz", Email: "alice@example.com"}
 		if err := s.Create(ctx, dup); err != store.ErrConflict {
 			t.Fatalf("want ErrConflict on email dup, got %v", err)
 		}

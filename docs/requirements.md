@@ -271,7 +271,8 @@ SEVs must be searchable and filterable across all records:
 
 ## 14. Authentication & Authorization
 
-- **Authentication**: OAuth 2.0 via Google or GitHub (no local username/password)
+- **Authentication**: Email and password. Passwords are stored as bcrypt hashes — no external OAuth provider required.
+- **Registration**: Open self-registration. The first user to register is automatically granted the Admin role for bootstrapping; all subsequent users receive the Viewer role by default and must be promoted by an Admin.
 - **Authorization roles**:
 
 | Role | Capabilities |
@@ -306,7 +307,7 @@ SEVs must be searchable and filterable across all records:
 
 ## 16. Notifications & Alerting
 
-- Configurable notification channels: Slack, email (via OAuth-connected address)
+- Configurable notification channels: Slack, email
 - Notification triggers: SEV opened, status change, new announcement, postmortem due, postmortem approved
 - Role-based routing: IC notified of all changes; management notified of SEV-1/SEV-2 opens only
 - Escalation: alert if a SEV-1 has been open for > N minutes without an IC assigned (configurable threshold)
@@ -337,7 +338,7 @@ Sevitout maintains its own lightweight service registry:
 
 ### 18.2 User Management
 
-- View all users who have authenticated via OAuth
+- View all registered users
 - Assign and revoke organization roles (Viewer, Responder, Incident Commander, Admin)
 - Deactivate a user (revokes access without deleting historical attribution)
 - User directory is searchable by name and email

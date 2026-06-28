@@ -1,14 +1,14 @@
 -- name: InsertUser :exec
-INSERT INTO users (id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+INSERT INTO users (id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: GetUser :one
-SELECT id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
 FROM users
 WHERE id = $1;
 
 -- name: GetUserByEmail :one
-SELECT id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
 FROM users
 WHERE email = $1;
 
@@ -21,7 +21,16 @@ UPDATE users SET
     updated_at = $6
 WHERE id = $1;
 
+-- name: UpdateUserPassword :exec
+UPDATE users SET
+    password_hash = $2,
+    updated_at    = $3
+WHERE id = $1;
+
+-- name: CountUsers :one
+SELECT COUNT(*) FROM users;
+
 -- name: ListUsers :many
-SELECT id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
 FROM users
 ORDER BY email;

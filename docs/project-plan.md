@@ -119,15 +119,14 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 
 ### M03 — Authentication & Authorization
 
-**Goal**: OAuth 2.0 login via Google and GitHub. JWT issuance. RBAC enforced on all gRPC endpoints. Users created on first login.
+**Goal**: Email + password login. JWT issuance. RBAC enforced on all gRPC endpoints. No external OAuth provider required.
 
 **Deliverables**:
-- `proto/sevitout/v1/auth.proto`: `AuthService` with `InitiateOAuth`, `OAuthCallback`, `WhoAmI`
-- `internal/auth/` package: OAuth 2.0 flow (Google + GitHub), JWT sign/validate (`golang-jwt/jwt/v5`), RBAC role definitions and permission map
+- `proto/sevitout/v1/auth.proto`: `AuthService` with `WhoAmI`
+- `internal/auth/` package: email+password handler (`POST /auth/register`, `POST /auth/login`), JWT sign/validate (`golang-jwt/jwt/v5`), RBAC role definitions and permission map
 - gRPC unary + stream interceptors: JWT validation → user context attachment → RBAC enforcement
-- `users` table populated on first OAuth callback
-- HTTP endpoints for OAuth redirect and callback (served via gateway, not gRPC)
-- `JWT_SECRET`, `JWT_TTL_HOURS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` env vars wired
+- `users` table: email, bcrypt `password_hash`; first registered user receives Admin role
+- `JWT_SECRET`, `JWT_TTL_HOURS` env vars wired
 - `demo/M03-auth.md`
 
 **Dependencies**: M02
@@ -135,8 +134,8 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 **Tests**:
 - JWT sign and validate unit tests (valid, expired, tampered)
 - RBAC unit tests: each role × each RPC → allow/deny table
-- OAuth callback handler unit test with mocked provider
-- Integration test: unauthenticated call → 401; authenticated call → 200
+- Register + login handler unit tests (success, duplicate email, wrong password)
+- Integration test: unauthenticated call → 401; authenticated call → 200; Viewer creating SEV → 403
 
 ---
 
@@ -447,10 +446,6 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 | `JWT_SECRET` | api | JWT signing key (min 32 chars) |
 | `JWT_TTL_HOURS` | api | Token lifetime (default: 24) |
 | `ENCRYPTION_KEY` | api | AES-256 key, base64-encoded 32 bytes |
-| `GOOGLE_CLIENT_ID` | api | OAuth Google client ID |
-| `GOOGLE_CLIENT_SECRET` | api | OAuth Google client secret |
-| `GITHUB_CLIENT_ID` | api | OAuth GitHub client ID |
-| `GITHUB_CLIENT_SECRET` | api | OAuth GitHub client secret |
 | `PAGERDUTY_API_KEY` | api | PagerDuty REST API key (optional) |
 | `GITHUB_TOKEN` | api | GitHub PAT for Issues API (optional) |
 | `SLACK_APP_TOKEN` | slackbot | Slack Socket Mode app token |
