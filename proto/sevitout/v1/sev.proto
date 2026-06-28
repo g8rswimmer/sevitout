@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// SEVService manages SEV lifecycle records.
+service SEVService {
+  rpc CreateSEV(CreateSEVRequest) returns (SEVResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs"
+      body: "*"
+    };
+  }
+  rpc GetSEV(GetSEVRequest) returns (SEVResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{id}"
+    };
+  }
+  rpc UpdateSEV(UpdateSEVRequest) returns (SEVResponse) {
+    option (google.api.http) = {
+      patch: "/v1/sevs/{id}"
+      body: "*"
+    };
+  }
+  rpc ListSEVs(ListSEVsRequest) returns (ListSEVsResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs"
+    };
+  }
+  rpc TransitionStatus(TransitionStatusRequest) returns (SEVResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{id}/transition"
+      body: "*"
+    };
+  }
+}
+
+message SEVResponse {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  int32 severity_level = 4;
+  string status = 5;
+  string root_cause_category = 6;
+  string root_cause_description = 7;
+  string mitigation = 8;
+  string prevention = 9;
+  string business_impact = 10;
+  repeated string affected_services = 11;
+  string detection_method = 12;
+  string alert_name = 13;
+  string monitoring_tool = 14;
+  google.protobuf.BoolValue right_people_present = 15;
+  string right_people_notes = 16;
+  map<string, string> tags = 17;
+  google.protobuf.Timestamp started_at = 18;
+  google.protobuf.Timestamp detected_at = 19;
+  google.protobuf.Timestamp mitigated_at = 20;
+  google.protobuf.Timestamp resolved_at = 21;
+  google.protobuf.Timestamp postmortem_completed_at = 22;
+  int64 mttd_seconds = 23;
+  int64 mttm_seconds = 24;
+  int64 mttr_seconds = 25;
+  int64 dttm_seconds = 26;
+  bool locked = 27;
+  bool sensitive = 28;
+  google.protobuf.Timestamp created_at = 29;
+  google.protobuf.Timestamp updated_at = 30;
+  string created_by = 31;
+}
+
+message CreateSEVRequest {
+  string title = 1;
+  string description = 2;
+  int32 severity_level = 3;
+  string created_by = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp detected_at = 6;
+  repeated string affected_services = 7;
+  string detection_method = 8;
+  string alert_name = 9;
+  string monitoring_tool = 10;
+  map<string, string> tags = 11;
+  bool sensitive = 12;
+}
+
+message GetSEVRequest {
+  string id = 1;
+}
+
+message UpdateSEVRequest {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  int32 severity_level = 4;
+  string root_cause_category = 5;
+  string root_cause_description = 6;
+  string mitigation = 7;
+  string prevention = 8;
+  string business_impact = 9;
+  repeated string affected_services = 10;
+  string detection_method = 11;
+  string alert_name = 12;
+  string monitoring_tool = 13;
+  google.protobuf.BoolValue right_people_present = 14;
+  string right_people_notes = 15;
+  map<string, string> tags = 16;
+  google.protobuf.Timestamp started_at = 17;
+  google.protobuf.Timestamp detected_at = 18;
+  google.protobuf.BoolValue sensitive = 19;
+  string user_id = 20;
+}
+
+message ListSEVsRequest {
+  repeated int32 severity_levels = 1;
+  repeated string statuses = 2;
+  string on_call_user = 3;
+  string search = 4;
+  int32 limit = 5;
+  int32 offset = 6;
+}
+
+message ListSEVsResponse {
+  repeated SEVResponse sevs = 1;
+  int32 total = 2;
+}
+
+message TransitionStatusRequest {
+  string id = 1;
+  string to_status = 2;
+  string user_id = 3;
+  google.protobuf.Timestamp mitigated_at = 4;
+  google.protobuf.Timestamp resolved_at = 5;
+  google.protobuf.Timestamp postmortem_completed_at = 6;
+}

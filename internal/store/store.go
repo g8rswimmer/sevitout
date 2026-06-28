@@ -17,6 +17,7 @@ type SEVStore interface {
 	Get(ctx context.Context, id string) (*SEV, error)
 	Update(ctx context.Context, sev *SEV) error
 	List(ctx context.Context, filter SEVFilter) ([]*SEV, error)
+	Count(ctx context.Context, filter SEVFilter) (int, error)
 	UpdateLocked(ctx context.Context, id string, locked bool) error
 }
 

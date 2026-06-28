@@ -1,0 +1,531 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "sevitout/v1/sev.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "SEVService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/sevs": {
+      "get": {
+        "operationId": "SEVService_ListSEVs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListSEVsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "severityLevels",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "onCallUser",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "SEVService"
+        ]
+      },
+      "post": {
+        "operationId": "SEVService_CreateSEV",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateSEVRequest"
+            }
+          }
+        ],
+        "tags": [
+          "SEVService"
+        ]
+      }
+    },
+    "/v1/sevs/{id}": {
+      "get": {
+        "operationId": "SEVService_GetSEV",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "SEVService"
+        ]
+      },
+      "patch": {
+        "operationId": "SEVService_UpdateSEV",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SEVServiceUpdateSEVBody"
+            }
+          }
+        ],
+        "tags": [
+          "SEVService"
+        ]
+      }
+    },
+    "/v1/sevs/{id}/transition": {
+      "post": {
+        "operationId": "SEVService_TransitionStatus",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SEVServiceTransitionStatusBody"
+            }
+          }
+        ],
+        "tags": [
+          "SEVService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "SEVServiceTransitionStatusBody": {
+      "type": "object",
+      "properties": {
+        "toStatus": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "mitigatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resolvedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "postmortemCompletedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "SEVServiceUpdateSEVBody": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "rootCauseCategory": {
+          "type": "string"
+        },
+        "rootCauseDescription": {
+          "type": "string"
+        },
+        "mitigation": {
+          "type": "string"
+        },
+        "prevention": {
+          "type": "string"
+        },
+        "businessImpact": {
+          "type": "string"
+        },
+        "affectedServices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "detectionMethod": {
+          "type": "string"
+        },
+        "alertName": {
+          "type": "string"
+        },
+        "monitoringTool": {
+          "type": "string"
+        },
+        "rightPeoplePresent": {
+          "type": "boolean"
+        },
+        "rightPeopleNotes": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1CreateSEVRequest": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "createdBy": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "affectedServices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "detectionMethod": {
+          "type": "string"
+        },
+        "alertName": {
+          "type": "string"
+        },
+        "monitoringTool": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "sensitive": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1ListSEVsResponse": {
+      "type": "object",
+      "properties": {
+        "sevs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SEVResponse"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1SEVResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "status": {
+          "type": "string"
+        },
+        "rootCauseCategory": {
+          "type": "string"
+        },
+        "rootCauseDescription": {
+          "type": "string"
+        },
+        "mitigation": {
+          "type": "string"
+        },
+        "prevention": {
+          "type": "string"
+        },
+        "businessImpact": {
+          "type": "string"
+        },
+        "affectedServices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "detectionMethod": {
+          "type": "string"
+        },
+        "alertName": {
+          "type": "string"
+        },
+        "monitoringTool": {
+          "type": "string"
+        },
+        "rightPeoplePresent": {
+          "type": "boolean"
+        },
+        "rightPeopleNotes": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mitigatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resolvedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "postmortemCompletedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mttdSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttmSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttrSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "dttmSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -36,7 +36,6 @@ func TestSEVStore(t *testing.T) {
 	s := memory.NewSEVStore()
 
 	sev := &store.SEV{
-		ID:            "SEV-2026-0001",
 		Title:         "API latency spike",
 		Description:   "P99 latency exceeded 5 s",
 		SeverityLevel: 2,
@@ -50,11 +49,8 @@ func TestSEVStore(t *testing.T) {
 		if err := s.Create(ctx, sev); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-	})
-
-	t.Run("CreateDuplicate", func(t *testing.T) {
-		if err := s.Create(ctx, sev); err != store.ErrConflict {
-			t.Fatalf("want ErrConflict, got %v", err)
+		if sev.ID == "" {
+			t.Fatal("Create must assign a non-empty ID")
 		}
 	})
 

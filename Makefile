@@ -1,6 +1,21 @@
 COMPOSE = docker compose --project-directory . -f deploy/docker-compose.yml --env-file .env
 
-.PHONY: build test lint generate up down migrate psql check-env
+PROTO_DIR     = proto
+PB_OUT        = .
+PROTO_FILES   = $(shell find $(PROTO_DIR)/sevitout -name '*.proto')
+GATEWAY_PROTO = $(shell go env GOPATH)/pkg/mod/github.com/grpc-ecosystem/grpc-gateway/v2@v2.19.1
+
+.PHONY: build test lint generate proto up down migrate psql check-env
+
+proto:
+	protoc \
+	  -I $(PROTO_DIR) \
+	  -I $(GATEWAY_PROTO) \
+	  --go_out=$(PB_OUT) --go_opt=module=github.com/g8rswimmer/sevitout \
+	  --go-grpc_out=$(PB_OUT) --go-grpc_opt=module=github.com/g8rswimmer/sevitout \
+	  --grpc-gateway_out=$(PB_OUT) --grpc-gateway_opt=module=github.com/g8rswimmer/sevitout \
+	  --openapiv2_out=internal/api/pb \
+	  $(PROTO_FILES)
 
 generate:
 	sqlc generate
@@ -18,7 +33,7 @@ check-env:
 	@test -f .env || (echo "ERROR: .env not found — run: cp .env.example .env" && exit 1)
 
 up: check-env
-	$(COMPOSE) up
+	$(COMPOSE) up --build
 
 down: check-env
 	$(COMPOSE) down
