@@ -238,14 +238,13 @@ type ShareableLink struct {
 }
 
 type User struct {
-	ID            string             `json:"id"`
-	Email         string             `json:"email"`
-	Name          string             `json:"name"`
-	AvatarUrl     *string            `json:"avatar_url"`
-	OrgRole       string             `json:"org_role"`
-	Active        bool               `json:"active"`
-	OauthProvider string             `json:"oauth_provider"`
-	OauthSubject  string             `json:"oauth_subject"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID           string             `json:"id"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	AvatarUrl    *string            `json:"avatar_url"`
+	OrgRole      string             `json:"org_role"`
+	Active       bool               `json:"active"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	PasswordHash string             `json:"password_hash"`
 }

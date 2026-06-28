@@ -193,7 +193,7 @@ Full-text search uses PostgreSQL's native `tsvector`/`tsquery` with GIN indexes 
 | Table | Purpose |
 |---|---|
 | `services` | Service registry |
-| `users` | Users (created on first OAuth login) |
+| `users` | Registered users (email + bcrypt password hash) |
 | `oncall_rotations` | On-call rotation definitions and overrides |
 | `ai_plugins` | Registered AI plugin configurations |
 | `integration_config` | Per-integration credentials and settings |
@@ -218,7 +218,7 @@ The `sevs` table carries a `search_vector tsvector` column populated by a trigge
 | `github.com/sqlc-dev/sqlc` | Generate type-safe Go from SQL queries |
 | `github.com/golang-migrate/migrate/v4` | Database migrations |
 | `github.com/gorilla/websocket` | WebSocket server |
-| `golang.org/x/oauth2` | OAuth 2.0 (Google + GitHub) |
+| `golang.org/x/crypto` | bcrypt password hashing |
 | `github.com/golang-jwt/jwt/v5` | JWT session tokens |
 | `github.com/slack-go/slack` | Slack API client (bot + events) |
 | `log/slog` (stdlib) | Structured logging |
@@ -300,11 +300,11 @@ TanStack Query manages all server state. REST API calls are made to the gRPC-Gat
 
 ### Auth flow
 
-1. User clicks "Sign in with Google/GitHub"
-2. Frontend redirects to backend OAuth initiation endpoint
-3. Backend completes OAuth, issues a JWT, redirects back with token
-4. Token stored in `httpOnly` cookie; sent automatically on all API requests
-5. On 401, React Router redirects to login
+1. User submits email + password to `POST /auth/login` (or `POST /auth/register` for first-time setup)
+2. Backend verifies bcrypt hash (or hashes and stores on register), issues a JWT
+3. Token returned in JSON response body and set as an `httpOnly` cookie
+4. Cookie sent automatically on all subsequent API requests
+5. On 401, React Router redirects to login page
 
 ---
 
@@ -327,7 +327,7 @@ services:
     command: /app/server
     ports: ["8080:8080"]   # gRPC + REST gateway + WebSocket
     depends_on: [migrate]
-    environment: [DATABASE_URL, JWT_SECRET, JWT_TTL_HOURS, ENCRYPTION_KEY, GOOGLE_CLIENT_ID, ...]
+    environment: [DATABASE_URL, JWT_SECRET, JWT_TTL_HOURS, ENCRYPTION_KEY]
 
   slackbot:
     build: .
@@ -373,3 +373,5 @@ All secrets are passed via environment variables (or a `.env` file for local dev
    - **Answered**: Enforced at both levels. At the DB level: a dedicated `audit_writer` PostgreSQL role has INSERT-only privileges on `audit_log` — no UPDATE or DELETE granted. At the application level: the store layer exposes only an `Append` method; no update or delete operations exist in code. Defense-in-depth ensures immutability even if application logic is bypassed.
 4. ~~**Session management**: JWT-only (stateless) or store sessions in PostgreSQL to support instant revocation on user deactivation?~~
    - **Answered**: JWT-only (stateless). Tokens are short-lived (configurable, default 24h) to limit the window after user deactivation. No session table required.
+5. ~~**Authentication provider**: OAuth 2.0 via Google/GitHub, or internal email+password?~~
+   - **Answered**: Internal email+password with bcrypt hashing (`golang.org/x/crypto/bcrypt`, cost 12). OAuth was removed because requiring external provider credentials creates friction for local development and self-hosted deployments. The first registered user receives the Admin role automatically for bootstrapping.

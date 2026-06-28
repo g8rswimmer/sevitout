@@ -70,13 +70,14 @@ type SLIStore interface {
 	ListBySEVID(ctx context.Context, sevID string) ([]*SLI, error)
 }
 
-// UserStore manages users who have authenticated via OAuth.
+// UserStore manages registered users.
 type UserStore interface {
 	Create(ctx context.Context, user *User) error
 	Get(ctx context.Context, id string) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	Update(ctx context.Context, user *User) error
 	List(ctx context.Context) ([]*User, error)
+	Count(ctx context.Context) (int64, error)
 }
 
 // ServiceStore manages the lightweight internal service registry.

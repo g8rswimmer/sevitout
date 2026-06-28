@@ -11,15 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUsers = `-- name: CountUsers :one
+SELECT COUNT(*) FROM users
+`
+
+func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getUser = `-- name: GetUser :one
-SELECT id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
 FROM users
 WHERE id = $1
 `
 
-func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
+type GetUserRow struct {
+	ID           string             `json:"id"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	AvatarUrl    *string            `json:"avatar_url"`
+	OrgRole      string             `json:"org_role"`
+	Active       bool               `json:"active"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetUser(ctx context.Context, id string) (GetUserRow, error) {
 	row := q.db.QueryRow(ctx, getUser, id)
-	var i User
+	var i GetUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -27,8 +50,7 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 		&i.AvatarUrl,
 		&i.OrgRole,
 		&i.Active,
-		&i.OauthProvider,
-		&i.OauthSubject,
+		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -36,14 +58,26 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
 FROM users
 WHERE email = $1
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+type GetUserByEmailRow struct {
+	ID           string             `json:"id"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	AvatarUrl    *string            `json:"avatar_url"`
+	OrgRole      string             `json:"org_role"`
+	Active       bool               `json:"active"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
-	var i User
+	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -51,8 +85,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.AvatarUrl,
 		&i.OrgRole,
 		&i.Active,
-		&i.OauthProvider,
-		&i.OauthSubject,
+		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -60,21 +93,20 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const insertUser = `-- name: InsertUser :exec
-INSERT INTO users (id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO users (id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertUserParams struct {
-	ID            string             `json:"id"`
-	Email         string             `json:"email"`
-	Name          string             `json:"name"`
-	AvatarUrl     *string            `json:"avatar_url"`
-	OrgRole       string             `json:"org_role"`
-	Active        bool               `json:"active"`
-	OauthProvider string             `json:"oauth_provider"`
-	OauthSubject  string             `json:"oauth_subject"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID           string             `json:"id"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	AvatarUrl    *string            `json:"avatar_url"`
+	OrgRole      string             `json:"org_role"`
+	Active       bool               `json:"active"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
@@ -85,8 +117,7 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 		arg.AvatarUrl,
 		arg.OrgRole,
 		arg.Active,
-		arg.OauthProvider,
-		arg.OauthSubject,
+		arg.PasswordHash,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -94,20 +125,32 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, name, avatar_url, org_role, active, oauth_provider, oauth_subject, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
 FROM users
 ORDER BY email
 `
 
-func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
+type ListUsersRow struct {
+	ID           string             `json:"id"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	AvatarUrl    *string            `json:"avatar_url"`
+	OrgRole      string             `json:"org_role"`
+	Active       bool               `json:"active"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	rows, err := q.db.Query(ctx, listUsers)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []User
+	var items []ListUsersRow
 	for rows.Next() {
-		var i User
+		var i ListUsersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Email,
@@ -115,8 +158,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.AvatarUrl,
 			&i.OrgRole,
 			&i.Active,
-			&i.OauthProvider,
-			&i.OauthSubject,
+			&i.PasswordHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -158,5 +200,23 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.Active,
 		arg.UpdatedAt,
 	)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users SET
+    password_hash = $2,
+    updated_at    = $3
+WHERE id = $1
+`
+
+type UpdateUserPasswordParams struct {
+	ID           string             `json:"id"`
+	PasswordHash string             `json:"password_hash"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash, arg.UpdatedAt)
 	return err
 }

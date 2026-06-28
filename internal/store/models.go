@@ -277,18 +277,17 @@ type Service struct {
 	UpdatedAt          time.Time
 }
 
-// User is a person who has authenticated via OAuth.
+// User is a registered user who authenticates with email and password.
 type User struct {
-	ID            string
-	Email         string
-	Name          string
-	AvatarURL     *string
-	OrgRole       OrgRole
-	Active        bool
-	OAuthProvider string
-	OAuthSubject  string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID           string
+	Email        string
+	Name         string
+	AvatarURL    *string
+	OrgRole      OrgRole
+	Active       bool
+	PasswordHash string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // OnCallRotation defines a named on-call entry, with optional PagerDuty backing and manual overrides.

@@ -84,3 +84,9 @@ func (s *UserStore) List(_ context.Context) ([]*store.User, error) {
 	}
 	return out, nil
 }
+
+func (s *UserStore) Count(_ context.Context) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return int64(len(s.data)), nil
+}
