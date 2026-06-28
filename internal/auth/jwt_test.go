@@ -93,4 +93,3 @@ func TestJWTSigner_Validate_WrongSecret(t *testing.T) {
 		t.Errorf("Validate wrong-secret token = %v, want ErrTokenInvalid", err)
 	}
 }
-

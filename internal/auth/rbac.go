@@ -24,6 +24,10 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.AuditService/ListAuditEntries": store.OrgRoleViewer,
 	// Auth service
 	"/sevitout.v1.AuthService/WhoAmI": store.OrgRoleViewer,
+	// Role service
+	"/sevitout.v1.RoleService/AssignRole": store.OrgRoleIncidentCommander,
+	"/sevitout.v1.RoleService/RemoveRole": store.OrgRoleIncidentCommander,
+	"/sevitout.v1.RoleService/ListRoles":  store.OrgRoleViewer,
 	// gRPC reflection (both v1alpha and v1 registered by grpc-go)
 	"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": store.OrgRoleViewer,
 	"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      store.OrgRoleViewer,

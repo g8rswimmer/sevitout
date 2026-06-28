@@ -132,3 +132,10 @@ type ShareStore interface {
 	Revoke(ctx context.Context, token string, revokedBy string) error
 	ListBySEVID(ctx context.Context, sevID string) ([]*ShareableLink, error)
 }
+
+// RoleStore manages people and role assignments on SEVs.
+type RoleStore interface {
+	Assign(ctx context.Context, role *SEVRole) error
+	Remove(ctx context.Context, id int64) error
+	ListBySEVID(ctx context.Context, sevID string) ([]*SEVRole, error)
+}

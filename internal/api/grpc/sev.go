@@ -11,22 +11,36 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/sev"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
 type SEVServer struct {
 	pb.UnimplementedSEVServiceServer
-	sevs    store.SEVStore
-	audit   store.AuditStore
-	history store.StatusHistoryStore
+	sevs     store.SEVStore
+	audit    store.AuditStore
+	history  store.StatusHistoryStore
+	roles    store.RoleStore
+	services store.ServiceStore
+	onCaller OnCaller // nil when PagerDuty is not configured
 }
 
-func NewSEVServer(sevs store.SEVStore, audit store.AuditStore, history store.StatusHistoryStore) *SEVServer {
+func NewSEVServer(
+	sevs store.SEVStore,
+	audit store.AuditStore,
+	history store.StatusHistoryStore,
+	roles store.RoleStore,
+	services store.ServiceStore,
+	onCaller OnCaller,
+) *SEVServer {
 	return &SEVServer{
-		sevs:    sevs,
-		audit:   audit,
-		history: history,
+		sevs:     sevs,
+		audit:    audit,
+		history:  history,
+		roles:    roles,
+		services: services,
+		onCaller: onCaller,
 	}
 }
 
@@ -37,8 +51,10 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 	if req.GetSeverityLevel() < 1 || req.GetSeverityLevel() > 4 {
 		return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
 	}
-	if req.GetCreatedBy() == "" {
-		return nil, status.Error(codes.InvalidArgument, "created_by is required")
+
+	callerID := req.GetCreatedBy()
+	if uc, ok := auth.UserFromContext(ctx); ok {
+		callerID = uc.UserID
 	}
 
 	now := time.Now()
@@ -50,7 +66,7 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		AffectedServices: req.GetAffectedServices(),
 		Tags:             req.GetTags(),
 		Sensitive:        req.GetSensitive(),
-		CreatedBy:        req.GetCreatedBy(),
+		CreatedBy:        callerID,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -83,9 +99,25 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		return nil, status.Error(codes.Internal, "failed to create SEV")
 	}
 
+	// Auto-populate on-call role from PagerDuty when the primary affected service
+	// has a PagerDuty service ID and the integration is configured.
+	if s.onCaller != nil && len(req.GetAffectedServices()) > 0 {
+		if svc, err := s.services.Get(ctx, req.GetAffectedServices()[0]); err == nil && svc.PagerDutyServiceID != nil {
+			if displayName, err := s.onCaller.OnCallLookup(ctx, *svc.PagerDutyServiceID); err == nil && displayName != "" {
+				_ = s.roles.Assign(ctx, &store.SEVRole{
+					SEVID:       record.ID,
+					RoleType:    store.SEVRoleOnCall,
+					DisplayName: displayName,
+					CreatedAt:   now,
+					CreatedBy:   callerID,
+				})
+			}
+		}
+	}
+
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     record.ID,
-		UserID:    req.GetCreatedBy(),
+		UserID:    callerID,
 		Action:    "sev.created",
 		CreatedAt: now,
 	})
@@ -185,9 +217,14 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		return nil, status.Error(codes.Internal, "failed to update SEV")
 	}
 
+	updaterID := req.GetUserId()
+	if uc, ok := auth.UserFromContext(ctx); ok {
+		updaterID = uc.UserID
+	}
+
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     record.ID,
-		UserID:    req.GetUserId(),
+		UserID:    updaterID,
 		Action:    "sev.updated",
 		CreatedAt: record.UpdatedAt,
 	})
@@ -280,13 +317,18 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	now := time.Now()
 	record.UpdatedAt = now
 
+	transitionerID := req.GetUserId()
+	if uc, ok := auth.UserFromContext(ctx); ok {
+		transitionerID = uc.UserID
+	}
+
 	// Write history before updating the SEV so that a history failure leaves
 	// the SEV in its previous state and the caller can safely retry.
 	if err := s.history.Create(ctx, &store.SEVStatusHistory{
 		SEVID:          record.ID,
 		FromStatus:     &fromStatus,
 		ToStatus:       toStatus,
-		UserID:         req.GetUserId(),
+		UserID:         transitionerID,
 		TransitionedAt: now,
 	}); err != nil {
 		return nil, status.Error(codes.Internal, "failed to record status history")
@@ -298,7 +340,7 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     record.ID,
-		UserID:    req.GetUserId(),
+		UserID:    transitionerID,
 		Action:    "sev.status_transitioned",
 		CreatedAt: now,
 	})
