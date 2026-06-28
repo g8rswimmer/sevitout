@@ -3,8 +3,8 @@ INSERT INTO sev_roles (sev_id, role_type, user_id, display_name, created_at, cre
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id;
 
--- name: DeleteSEVRole :exec
-DELETE FROM sev_roles WHERE id = $1;
+-- name: DeleteSEVRole :execresult
+DELETE FROM sev_roles WHERE id = $1 AND sev_id = $2;
 
 -- name: ListRolesBySEVID :many
 SELECT id, sev_id, role_type, user_id, display_name, created_at, created_by

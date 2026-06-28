@@ -26,6 +26,7 @@ var (
 	_ store.AIPluginStore          = (*memory.AIPluginStore)(nil)
 	_ store.IntegrationConfigStore = (*memory.IntegrationConfigStore)(nil)
 	_ store.ShareStore             = (*memory.ShareStore)(nil)
+	_ store.RoleStore              = (*memory.RoleStore)(nil)
 )
 
 var ctx = context.Background()
@@ -842,6 +843,94 @@ func TestIntegrationConfigStore(t *testing.T) {
 		}
 		if len(items) != 1 {
 			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+}
+
+// ── RoleStore ─────────────────────────────────────────────────────────────────
+
+func TestRoleStore(t *testing.T) {
+	s := memory.NewRoleStore()
+
+	role := &store.SEVRole{
+		SEVID:       "SEV-2026-0001",
+		RoleType:    store.SEVRoleIncidentCommander,
+		DisplayName: "Alice",
+		CreatedBy:   "user-1",
+		CreatedAt:   time.Now(),
+	}
+
+	t.Run("Assign", func(t *testing.T) {
+		if err := s.Assign(ctx, role); err != nil {
+			t.Fatalf("Assign: %v", err)
+		}
+		if role.ID == 0 {
+			t.Fatal("ID should be set after Assign")
+		}
+	})
+
+	roleID := role.ID
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+		if items[0].RoleType != store.SEVRoleIncidentCommander {
+			t.Errorf("role_type = %q, want incident-commander", items[0].RoleType)
+		}
+	})
+
+	t.Run("ListBySEVID_OtherSEV", func(t *testing.T) {
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-9999")
+		if len(items) != 0 {
+			t.Fatal("expected empty for unknown SEV")
+		}
+	})
+
+	t.Run("AssignMultipleRoles", func(t *testing.T) {
+		r2 := &store.SEVRole{
+			SEVID:       "SEV-2026-0001",
+			RoleType:    store.SEVRoleResponder,
+			DisplayName: "Bob",
+			CreatedBy:   "user-1",
+			CreatedAt:   time.Now(),
+		}
+		if err := s.Assign(ctx, r2); err != nil {
+			t.Fatalf("Assign second: %v", err)
+		}
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if len(items) != 2 {
+			t.Fatalf("want 2, got %d", len(items))
+		}
+	})
+
+	t.Run("Remove", func(t *testing.T) {
+		if err := s.Remove(ctx, "SEV-2026-0001", roleID); err != nil {
+			t.Fatalf("Remove: %v", err)
+		}
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if len(items) != 1 {
+			t.Fatalf("want 1 remaining, got %d", len(items))
+		}
+	})
+
+	t.Run("RemoveNotFound", func(t *testing.T) {
+		if err := s.Remove(ctx, "SEV-2026-0001", 9999); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("RemoveWrongSEV", func(t *testing.T) {
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if len(items) == 0 {
+			t.Skip("no roles to test with")
+		}
+		if err := s.Remove(ctx, "SEV-WRONG", items[0].ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound when sev_id doesn't match, got %v", err)
 		}
 	})
 }

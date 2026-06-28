@@ -8,16 +8,21 @@ package queries
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteSEVRole = `-- name: DeleteSEVRole :exec
-DELETE FROM sev_roles WHERE id = $1
+const deleteSEVRole = `-- name: DeleteSEVRole :execresult
+DELETE FROM sev_roles WHERE id = $1 AND sev_id = $2
 `
 
-func (q *Queries) DeleteSEVRole(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, deleteSEVRole, id)
-	return err
+type DeleteSEVRoleParams struct {
+	ID    int64  `json:"id"`
+	SevID string `json:"sev_id"`
+}
+
+func (q *Queries) DeleteSEVRole(ctx context.Context, arg DeleteSEVRoleParams) (pgconn.CommandTag, error) {
+	return q.db.Exec(ctx, deleteSEVRole, arg.ID, arg.SevID)
 }
 
 const insertSEVRole = `-- name: InsertSEVRole :one

@@ -20,6 +20,7 @@ import (
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
+	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 	"github.com/g8rswimmer/sevitout/internal/store/postgres"
@@ -32,7 +33,14 @@ func main() {
 	ctx := context.Background()
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	sevStore, auditStore, historyStore, userStore := buildStores(ctx, log)
+	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore := buildStores(ctx, log)
+
+	// --- PagerDuty client (optional) ---
+	var onCaller grpchandler.OnCaller
+	if apiKey := os.Getenv("PAGERDUTY_API_KEY"); apiKey != "" {
+		onCaller = pagerduty.NewClient(apiKey)
+		log.Info("PagerDuty on-call integration enabled")
+	}
 
 	// --- JWT signer ---
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -49,9 +57,10 @@ func main() {
 	jwtSigner := auth.NewJWTSigner(jwtSecret, jwtTTLHours)
 
 	// --- gRPC server with auth interceptors ---
-	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore)
+	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, onCaller)
 	auditServer := grpchandler.NewAuditServer(auditStore)
 	authServer := grpchandler.NewAuthServer(userStore)
+	roleServer := grpchandler.NewRoleServer(roleStore, sevStore, auditStore)
 
 	grpcSrv := grpc.NewServer(
 		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
@@ -60,6 +69,7 @@ func main() {
 	pb.RegisterSEVServiceServer(grpcSrv, sevServer)
 	pb.RegisterAuditServiceServer(grpcSrv, auditServer)
 	pb.RegisterAuthServiceServer(grpcSrv, authServer)
+	pb.RegisterRoleServiceServer(grpcSrv, roleServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -99,6 +109,10 @@ func main() {
 	}
 	if err := pb.RegisterAuthServiceHandlerClient(ctx, gwMux, pb.NewAuthServiceClient(conn)); err != nil {
 		log.Error("register auth gateway", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterRoleServiceHandlerClient(ctx, gwMux, pb.NewRoleServiceClient(conn)); err != nil {
+		log.Error("register role gateway", "err", err)
 		os.Exit(1)
 	}
 
@@ -142,11 +156,23 @@ func main() {
 	}
 }
 
-func buildStores(ctx context.Context, log *slog.Logger) (store.SEVStore, store.AuditStore, store.StatusHistoryStore, store.UserStore) {
+func buildStores(ctx context.Context, log *slog.Logger) (
+	store.SEVStore,
+	store.AuditStore,
+	store.StatusHistoryStore,
+	store.UserStore,
+	store.RoleStore,
+	store.ServiceStore,
+) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		log.Warn("DATABASE_URL not set — using in-memory store (data will not persist)")
-		return memory.NewSEVStore(), memory.NewAuditStore(), memory.NewStatusHistoryStore(), memory.NewUserStore()
+		return memory.NewSEVStore(),
+			memory.NewAuditStore(),
+			memory.NewStatusHistoryStore(),
+			memory.NewUserStore(),
+			memory.NewRoleStore(),
+			memory.NewServiceStore()
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
@@ -154,5 +180,10 @@ func buildStores(ctx context.Context, log *slog.Logger) (store.SEVStore, store.A
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
-	return postgres.NewSEVStore(pool), postgres.NewAuditStore(pool), postgres.NewStatusHistoryStore(pool), postgres.NewUserStore(pool)
+	return postgres.NewSEVStore(pool),
+		postgres.NewAuditStore(pool),
+		postgres.NewStatusHistoryStore(pool),
+		postgres.NewUserStore(pool),
+		postgres.NewRoleStore(pool),
+		memory.NewServiceStore() // postgres ServiceStore is part of M10 Config API
 }

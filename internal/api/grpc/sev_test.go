@@ -28,7 +28,7 @@ func newTestSEVServer() *testSEVServer {
 	audit := memory.NewAuditStore()
 	history := memory.NewStatusHistoryStore()
 	return &testSEVServer{
-		server:  grpchandler.NewSEVServer(sevs, audit, history),
+		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), nil),
 		sevs:    sevs,
 		audit:   audit,
 		history: history,
@@ -72,7 +72,6 @@ func TestCreateSEV_ValidRequest(t *testing.T) {
 	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
 		Title:         "Database failure",
 		SeverityLevel: 2,
-		CreatedBy:     "user-1",
 		Description:   "Primary DB is unresponsive",
 	})
 	if err != nil {
@@ -86,9 +85,6 @@ func TestCreateSEV_ValidRequest(t *testing.T) {
 	}
 	if resp.GetSeverityLevel() != 2 {
 		t.Errorf("SeverityLevel = %d, want 2", resp.GetSeverityLevel())
-	}
-	if resp.GetCreatedBy() != "user-1" {
-		t.Errorf("CreatedBy = %q, want %q", resp.GetCreatedBy(), "user-1")
 	}
 	if resp.GetDescription() != "Primary DB is unresponsive" {
 		t.Errorf("Description = %q, want %q", resp.GetDescription(), "Primary DB is unresponsive")
