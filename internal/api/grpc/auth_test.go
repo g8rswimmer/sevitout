@@ -28,7 +28,7 @@ func startAuthTestServer(t *testing.T, signer *auth.JWTSigner, users store.UserS
 	auditStore := memory.NewAuditStore()
 	historyStore := memory.NewStatusHistoryStore()
 
-	sevSrv := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, memory.NewRoleStore(), memory.NewServiceStore(), nil)
+	sevSrv := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), nil, nil)
 	authSrv := grpchandler.NewAuthServer(users)
 
 	srv := grpc.NewServer(

@@ -1,0 +1,269 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "sevitout/v1/postmortem.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "PostmortemService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/sevs/{sevId}/postmortem": {
+      "get": {
+        "operationId": "PostmortemService_GetPostmortem",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PostmortemResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      },
+      "patch": {
+        "operationId": "PostmortemService_UpdatePostmortem",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PostmortemResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PostmortemServiceUpdatePostmortemBody"
+            }
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/postmortem/transition": {
+      "post": {
+        "operationId": "PostmortemService_TransitionPostmortemStatus",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PostmortemResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PostmortemServiceTransitionPostmortemStatusBody"
+            }
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/unlock": {
+      "post": {
+        "operationId": "PostmortemService_UnlockSEV",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UnlockSEVResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PostmortemServiceUnlockSEVBody"
+            }
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "PostmortemServiceTransitionPostmortemStatusBody": {
+      "type": "object",
+      "properties": {
+        "toStatus": {
+          "type": "string",
+          "title": "to_status must be one of: draft, in-review, approved"
+        },
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "PostmortemServiceUnlockSEVBody": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "reason is required and is written to the audit log."
+        },
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "PostmortemServiceUpdatePostmortemBody": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is required when the SEV is locked (PostmortemComplete status)."
+        },
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1PostmortemResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "v1UnlockSEVResponse": {
+      "type": "object",
+      "properties": {
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is a short-lived JWT scoped to sev_id.\nPass it as unlock_token in subsequent mutation requests."
+        }
+      }
+    }
+  }
+}

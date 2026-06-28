@@ -13,6 +13,7 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
+	"github.com/g8rswimmer/sevitout/internal/postmortem"
 	"github.com/g8rswimmer/sevitout/internal/sev"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
@@ -25,12 +26,14 @@ type OnCaller interface {
 
 type SEVServer struct {
 	pb.UnimplementedSEVServiceServer
-	sevs     store.SEVStore
-	audit    store.AuditStore
-	history  store.StatusHistoryStore
-	roles    store.RoleStore
-	services store.ServiceStore
-	onCaller OnCaller // nil when PagerDuty is not configured
+	sevs        store.SEVStore
+	audit       store.AuditStore
+	history     store.StatusHistoryStore
+	roles       store.RoleStore
+	services    store.ServiceStore
+	postmortems store.PostmortemStore
+	onCaller    OnCaller // nil when PagerDuty is not configured
+	unlock      Unlocker // nil when lock enforcement is not needed (tests)
 }
 
 func NewSEVServer(
@@ -39,15 +42,19 @@ func NewSEVServer(
 	history store.StatusHistoryStore,
 	roles store.RoleStore,
 	services store.ServiceStore,
+	postmortems store.PostmortemStore,
 	onCaller OnCaller,
+	unlock Unlocker,
 ) *SEVServer {
 	return &SEVServer{
-		sevs:     sevs,
-		audit:    audit,
-		history:  history,
-		roles:    roles,
-		services: services,
-		onCaller: onCaller,
+		sevs:        sevs,
+		audit:       audit,
+		history:     history,
+		roles:       roles,
+		services:    services,
+		postmortems: postmortems,
+		onCaller:    onCaller,
+		unlock:      unlock,
 	}
 }
 
@@ -113,6 +120,17 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		CreatedAt: now,
 	})
 
+	// Auto-create an empty Draft postmortem for every new SEV.
+	if s.postmortems != nil {
+		_ = s.postmortems.Create(ctx, &store.Postmortem{
+			SEVID:     record.ID,
+			Status:    store.PostmortemStatusDraft,
+			Content:   "",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+
 	// Best-effort on-call auto-population. Never blocks or fails the response.
 	if s.onCaller != nil && len(req.GetAffectedServices()) > 0 {
 		if svc, err := s.services.Get(ctx, req.GetAffectedServices()[0]); err == nil && svc.PagerDutyServiceID != nil {
@@ -158,6 +176,12 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
 		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+
+	if record.Locked && s.unlock != nil {
+		if err := validateUnlock(s.unlock, req.GetUnlockToken(), req.GetId()); err != nil {
+			return nil, err
+		}
 	}
 
 	if v := req.GetTitle(); v != "" {
@@ -304,6 +328,13 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		return nil, status.Error(codes.Internal, "failed to get SEV")
 	}
 
+	// A locked SEV can only be re-opened with a valid unlock token.
+	if record.Locked && s.unlock != nil {
+		if err := validateUnlock(s.unlock, req.GetUnlockToken(), req.GetId()); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := sev.ValidateTransition(record.Status, toStatus); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -322,6 +353,15 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	if req.GetPostmortemCompletedAt() != nil {
 		t := req.GetPostmortemCompletedAt().AsTime()
 		record.PostmortemCompletedAt = &t
+	}
+
+	// Auto-set PostmortemCompletedAt and lock the SEV when reaching terminal status.
+	if toStatus == store.SEVStatusPostmortemComplete {
+		now2 := time.Now()
+		if record.PostmortemCompletedAt == nil {
+			record.PostmortemCompletedAt = &now2
+		}
+		record.Locked = true
 	}
 
 	sev.ComputeMetrics(record)
@@ -357,6 +397,23 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	})
 
 	return sevToProto(record), nil
+}
+
+// validateUnlock returns a gRPC status error when the token is missing or invalid for sevID.
+func validateUnlock(u Unlocker, token, sevID string) error {
+	if token == "" {
+		return status.Error(codes.PermissionDenied, "SEV is locked; provide an unlock_token")
+	}
+	if err := u.Validate(token, sevID); err != nil {
+		if errors.Is(err, postmortem.ErrUnlockTokenExpired) {
+			return status.Error(codes.PermissionDenied, "unlock token has expired")
+		}
+		if errors.Is(err, postmortem.ErrUnlockTokenSEVMismatch) {
+			return status.Error(codes.PermissionDenied, "unlock token is not valid for this SEV")
+		}
+		return status.Error(codes.PermissionDenied, "invalid unlock token")
+	}
+	return nil
 }
 
 func sevToProto(s *store.SEV) *pb.SEVResponse {

@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// PostmortemService manages the postmortem document attached to every SEV.
+service PostmortemService {
+  rpc GetPostmortem(GetPostmortemRequest) returns (PostmortemResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/postmortem"
+    };
+  }
+  rpc UpdatePostmortem(UpdatePostmortemRequest) returns (PostmortemResponse) {
+    option (google.api.http) = {
+      patch: "/v1/sevs/{sev_id}/postmortem"
+      body: "*"
+    };
+  }
+  rpc TransitionPostmortemStatus(TransitionPostmortemStatusRequest) returns (PostmortemResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/postmortem/transition"
+      body: "*"
+    };
+  }
+  rpc UnlockSEV(UnlockSEVRequest) returns (UnlockSEVResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/unlock"
+      body: "*"
+    };
+  }
+}
+
+message PostmortemResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  string status = 3;
+  string content = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  string updated_by = 7;
+}
+
+message GetPostmortemRequest {
+  string sev_id = 1;
+}
+
+message UpdatePostmortemRequest {
+  string sev_id = 1;
+  string content = 2;
+  // unlock_token is required when the SEV is locked (PostmortemComplete status).
+  string unlock_token = 3;
+  string user_id = 4;
+}
+
+message TransitionPostmortemStatusRequest {
+  string sev_id = 1;
+  // to_status must be one of: draft, in-review, approved
+  string to_status = 2;
+  string user_id = 3;
+}
+
+message UnlockSEVRequest {
+  string sev_id = 1;
+  // reason is required and is written to the audit log.
+  string reason = 2;
+  string user_id = 3;
+}
+
+message UnlockSEVResponse {
+  // unlock_token is a short-lived JWT scoped to sev_id.
+  // Pass it as unlock_token in subsequent mutation requests.
+  string unlock_token = 1;
+}
