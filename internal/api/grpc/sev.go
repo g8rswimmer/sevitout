@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/sev"
@@ -76,6 +77,8 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		record.DetectedAt = &t
 	}
 
+	sev.ComputeMetrics(record)
+
 	if err := s.sevs.Create(ctx, record); err != nil {
 		return nil, status.Error(codes.Internal, "failed to create SEV")
 	}
@@ -91,6 +94,9 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 }
 
 func (s *SEVServer) GetSEV(ctx context.Context, req *pb.GetSEVRequest) (*pb.SEVResponse, error) {
+	if req.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
 	record, err := s.sevs.Get(ctx, req.GetId())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -150,9 +156,9 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	if v := req.GetMonitoringTool(); v != "" {
 		record.MonitoringTool = &v
 	}
-	if req.GetRightPeoplePresent() {
-		v := true
-		record.RightPeoplePresent = &v
+	if req.GetRightPeoplePresent() != nil {
+		b := req.GetRightPeoplePresent().GetValue()
+		record.RightPeoplePresent = &b
 	}
 	if v := req.GetRightPeopleNotes(); v != "" {
 		record.RightPeopleNotes = &v
@@ -168,8 +174,8 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		t := req.GetDetectedAt().AsTime()
 		record.DetectedAt = &t
 	}
-	if req.GetSensitive() {
-		record.Sensitive = true
+	if req.GetSensitive() != nil {
+		record.Sensitive = req.GetSensitive().GetValue()
 	}
 
 	record.UpdatedAt = time.Now()
@@ -181,7 +187,7 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     record.ID,
-		UserID:    "",
+		UserID:    req.GetUserId(),
 		Action:    "sev.updated",
 		CreatedAt: record.UpdatedAt,
 	})
@@ -203,13 +209,18 @@ func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.
 		filter.Statuses = append(filter.Statuses, store.SEVStatus(st))
 	}
 
+	total, err := s.sevs.Count(ctx, filter)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to count SEVs")
+	}
+
 	records, err := s.sevs.List(ctx, filter)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to list SEVs")
 	}
 
 	resp := &pb.ListSEVsResponse{
-		Total: int32(len(records)),
+		Total: int32(total),
 	}
 	for _, r := range records {
 		resp.Sevs = append(resp.Sevs, sevToProto(r))
@@ -269,10 +280,8 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	now := time.Now()
 	record.UpdatedAt = now
 
-	if err := s.sevs.Update(ctx, record); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update SEV")
-	}
-
+	// Write history before updating the SEV so that a history failure leaves
+	// the SEV in its previous state and the caller can safely retry.
 	if err := s.history.Create(ctx, &store.SEVStatusHistory{
 		SEVID:          record.ID,
 		FromStatus:     &fromStatus,
@@ -281,6 +290,10 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		TransitionedAt: now,
 	}); err != nil {
 		return nil, status.Error(codes.Internal, "failed to record status history")
+	}
+
+	if err := s.sevs.Update(ctx, record); err != nil {
+		return nil, status.Error(codes.Internal, "failed to update SEV")
 	}
 
 	_ = s.audit.Append(ctx, &store.AuditEntry{
@@ -334,7 +347,7 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 		resp.MonitoringTool = *s.MonitoringTool
 	}
 	if s.RightPeoplePresent != nil {
-		resp.RightPeoplePresent = *s.RightPeoplePresent
+		resp.RightPeoplePresent = wrapperspb.Bool(*s.RightPeoplePresent)
 	}
 	if s.RightPeopleNotes != nil {
 		resp.RightPeopleNotes = *s.RightPeopleNotes

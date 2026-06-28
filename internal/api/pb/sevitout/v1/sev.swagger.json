@@ -311,6 +311,9 @@
         },
         "sensitive": {
           "type": "boolean"
+        },
+        "userId": {
+          "type": "string"
         }
       }
     },

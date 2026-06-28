@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -155,38 +156,46 @@ func (s *SEVStore) Update(ctx context.Context, sv *store.SEV) error {
 	return nil
 }
 
-// List returns SEVs ordered by created_at DESC using the provided pagination.
-// The current sqlc query does not support filtering by severity, status, or
-// search text; those filter fields are ignored until a filtered query is added.
 func (s *SEVStore) List(ctx context.Context, filter store.SEVFilter) ([]*store.SEV, error) {
-	q := queries.New(s.pool)
-
-	limit := int32(filter.Limit)
+	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
 	}
-	offset := int32(filter.Offset)
+	offset := filter.Offset
 	if offset < 0 {
 		offset = 0
 	}
 
-	rows, err := q.ListSEVs(ctx, queries.ListSEVsParams{
-		Limit:  limit,
-		Offset: offset,
-	})
+	where, args := buildSEVFilterWhere(filter)
+	n := len(args) + 1
+	q := fmt.Sprintf("%s %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", sevSelectCols, where, n, n+1)
+	args = append(args, limit, offset)
+
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres sev: list: %w", err)
 	}
+	defer rows.Close()
 
-	result := make([]*store.SEV, 0, len(rows))
-	for _, r := range rows {
-		sv, err := mapListSEVRow(r)
+	var result []*store.SEV
+	for rows.Next() {
+		sv, err := scanSEVRow(rows)
 		if err != nil {
-			return nil, fmt.Errorf("postgres sev: map row %s: %w", r.ID, err)
+			return nil, fmt.Errorf("postgres sev: scan row: %w", err)
 		}
 		result = append(result, sv)
 	}
-	return result, nil
+	return result, rows.Err()
+}
+
+func (s *SEVStore) Count(ctx context.Context, filter store.SEVFilter) (int, error) {
+	where, args := buildSEVFilterWhere(filter)
+	q := fmt.Sprintf("SELECT COUNT(*) FROM sevs %s", where)
+	var n int
+	if err := s.pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("postgres sev: count: %w", err)
+	}
+	return n, nil
 }
 
 func (s *SEVStore) UpdateLocked(ctx context.Context, id string, locked bool) error {
@@ -309,47 +318,120 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func mapGetSEVRow(r queries.GetSEVRow) (*store.SEV, error) {
-	tags, err := tagsFromDB(r.Tags)
+const sevSelectCols = `SELECT id, title, description, severity_level, status,
+       root_cause_category, root_cause_description, mitigation, prevention,
+       business_impact, affected_services, detection_method, alert_name,
+       monitoring_tool, right_people_present, right_people_notes, tags,
+       started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
+       mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
+       locked, sensitive, created_at, updated_at, created_by
+FROM sevs`
+
+// buildSEVFilterWhere builds a parameterized WHERE clause from the filter,
+// returning the clause string (empty if no conditions) and the bound args.
+// Limit, Offset, and OnCallUser are handled by the caller.
+func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
+	var conds []string
+	var args []any
+	n := 1
+
+	if len(filter.SeverityLevels) > 0 {
+		conds = append(conds, fmt.Sprintf("severity_level = ANY($%d::smallint[])", n))
+		args = append(args, filter.SeverityLevels)
+		n++
+	}
+	if len(filter.Statuses) > 0 {
+		strs := make([]string, len(filter.Statuses))
+		for i, s := range filter.Statuses {
+			strs[i] = string(s)
+		}
+		conds = append(conds, fmt.Sprintf("status = ANY($%d)", n))
+		args = append(args, strs)
+		n++
+	}
+	if filter.Search != "" {
+		conds = append(conds, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", n, n))
+		args = append(args, "%"+filter.Search+"%")
+		n++ //nolint:ineffassign
+	}
+
+	if len(conds) == 0 {
+		return "", args
+	}
+	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+// scanSEVRow scans a single SEV from an open pgx.Rows cursor.
+func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
+	var (
+		id, title, desc, status, createdBy    string
+		rootCateg, rootDesc, mitigation       *string
+		prevention, bizImpact                 *string
+		detMethod, alertName, monTool         *string
+		rightPeopleNotes                      *string
+		rightPeoplePresent                    *bool
+		severityLevel                         int16
+		locked, sensitive                     bool
+		affectedServices                      []string
+		tags                                  []byte
+		startedAt, detectedAt                 pgtype.Timestamptz
+		mitigatedAt, resolvedAt               pgtype.Timestamptz
+		postmortemCompletedAt                 pgtype.Timestamptz
+		mttdSeconds, mttmSeconds, mttrSeconds *int64
+		dttmSeconds                           *int64
+		createdAt, updatedAt                  pgtype.Timestamptz
+	)
+	if err := rows.Scan(
+		&id, &title, &desc, &severityLevel, &status,
+		&rootCateg, &rootDesc, &mitigation, &prevention,
+		&bizImpact, &affectedServices, &detMethod, &alertName,
+		&monTool, &rightPeoplePresent, &rightPeopleNotes, &tags,
+		&startedAt, &detectedAt, &mitigatedAt, &resolvedAt, &postmortemCompletedAt,
+		&mttdSeconds, &mttmSeconds, &mttrSeconds, &dttmSeconds,
+		&locked, &sensitive, &createdAt, &updatedAt, &createdBy,
+	); err != nil {
+		return nil, err
+	}
+	tagMap, err := tagsFromDB(tags)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal tags: %w", err)
 	}
 	return &store.SEV{
-		ID:                    r.ID,
-		Title:                 r.Title,
-		Description:           r.Description,
-		SeverityLevel:         r.SeverityLevel,
-		Status:                store.SEVStatus(r.Status),
-		RootCauseCategory:     r.RootCauseCategory,
-		RootCauseDescription:  r.RootCauseDescription,
-		Mitigation:            r.Mitigation,
-		Prevention:            r.Prevention,
-		BusinessImpact:        r.BusinessImpact,
-		AffectedServices:      r.AffectedServices,
-		DetectionMethod:       r.DetectionMethod,
-		AlertName:             r.AlertName,
-		MonitoringTool:        r.MonitoringTool,
-		RightPeoplePresent:    r.RightPeoplePresent,
-		RightPeopleNotes:      r.RightPeopleNotes,
-		Tags:                  tags,
-		StartedAt:             timeFromDB(r.StartedAt),
-		DetectedAt:            timeFromDB(r.DetectedAt),
-		MitigatedAt:           timeFromDB(r.MitigatedAt),
-		ResolvedAt:            timeFromDB(r.ResolvedAt),
-		PostmortemCompletedAt: timeFromDB(r.PostmortemCompletedAt),
-		MTTDSeconds:           r.MttdSeconds,
-		MTTMSeconds:           r.MttmSeconds,
-		MTTRSeconds:           r.MttrSeconds,
-		DTTMSeconds:           r.DttmSeconds,
-		Locked:                r.Locked,
-		Sensitive:             r.Sensitive,
-		CreatedAt:             r.CreatedAt.Time,
-		UpdatedAt:             r.UpdatedAt.Time,
-		CreatedBy:             r.CreatedBy,
+		ID:                    id,
+		Title:                 title,
+		Description:           desc,
+		SeverityLevel:         severityLevel,
+		Status:                store.SEVStatus(status),
+		RootCauseCategory:     rootCateg,
+		RootCauseDescription:  rootDesc,
+		Mitigation:            mitigation,
+		Prevention:            prevention,
+		BusinessImpact:        bizImpact,
+		AffectedServices:      affectedServices,
+		DetectionMethod:       detMethod,
+		AlertName:             alertName,
+		MonitoringTool:        monTool,
+		RightPeoplePresent:    rightPeoplePresent,
+		RightPeopleNotes:      rightPeopleNotes,
+		Tags:                  tagMap,
+		StartedAt:             timeFromDB(startedAt),
+		DetectedAt:            timeFromDB(detectedAt),
+		MitigatedAt:           timeFromDB(mitigatedAt),
+		ResolvedAt:            timeFromDB(resolvedAt),
+		PostmortemCompletedAt: timeFromDB(postmortemCompletedAt),
+		MTTDSeconds:           mttdSeconds,
+		MTTMSeconds:           mttmSeconds,
+		MTTRSeconds:           mttrSeconds,
+		DTTMSeconds:           dttmSeconds,
+		Locked:                locked,
+		Sensitive:             sensitive,
+		CreatedAt:             createdAt.Time,
+		UpdatedAt:             updatedAt.Time,
+		CreatedBy:             createdBy,
 	}, nil
 }
 
-func mapListSEVRow(r queries.ListSEVsRow) (*store.SEV, error) {
+func mapGetSEVRow(r queries.GetSEVRow) (*store.SEV, error) {
 	tags, err := tagsFromDB(r.Tags)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal tags: %w", err)

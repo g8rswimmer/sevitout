@@ -35,24 +35,24 @@ func newTestSEVServer() *testSEVServer {
 	}
 }
 
-// seedSEV inserts a SEV directly into the backing store with a known, non-empty
-// ID.  Use this for tests that need to call handlers (e.g. TransitionStatus)
-// that validate the ID field; the CreateSEV handler does not assign IDs, so
-// the in-memory store uses whatever ID is already on the record.
-func seedSEV(t *testing.T, ts *testSEVServer, id string) {
+// seedSEV inserts a SEV directly into the backing store and returns the
+// auto-assigned ID. Use this for tests that need a pre-existing SEV to call
+// handlers such as TransitionStatus or UpdateSEV.
+func seedSEV(t *testing.T, ts *testSEVServer) string {
 	t.Helper()
 	now := time.Now()
-	if err := ts.sevs.Create(context.Background(), &store.SEV{
-		ID:            id,
+	sv := &store.SEV{
 		Title:         "Seeded SEV",
 		SeverityLevel: 1,
 		Status:        store.SEVStatusOpen,
 		CreatedBy:     "user-seed",
 		CreatedAt:     now,
 		UpdatedAt:     now,
-	}); err != nil {
-		t.Fatalf("seedSEV(%q): %v", id, err)
 	}
+	if err := ts.sevs.Create(context.Background(), sv); err != nil {
+		t.Fatalf("seedSEV: %v", err)
+	}
+	return sv.ID
 }
 
 // grpcCode extracts the gRPC status code from an error returned by a handler.
@@ -177,8 +177,7 @@ func TestUpdateSEV_Title(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
-	const sevID = "SEV-2026-0001"
-	seedSEV(t, ts, sevID)
+	sevID := seedSEV(t, ts)
 
 	resp, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
 		Id:    sevID,
@@ -250,8 +249,7 @@ func TestTransitionStatus_OpenToInvestigating(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
-	const sevID = "SEV-2026-0001"
-	seedSEV(t, ts, sevID)
+	sevID := seedSEV(t, ts)
 
 	resp, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
 		Id:       sevID,
@@ -270,8 +268,7 @@ func TestTransitionStatus_InvalidTransition(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
-	const sevID = "SEV-2026-0002"
-	seedSEV(t, ts, sevID) // starts at Open
+	sevID := seedSEV(t, ts) // starts at Open
 
 	// Open → Resolved is not an allowed transition.
 	_, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
@@ -292,7 +289,7 @@ func TestTransitionStatus_UnknownSEV(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
-		Id:       "no-such-sev",
+		Id:       "SEV-9999-0001", // does not exist
 		ToStatus: string(store.SEVStatusInvestigating),
 		UserId:   "user-1",
 	})
@@ -308,8 +305,7 @@ func TestTransitionStatus_AuditEntryCreated(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
-	const sevID = "SEV-2026-0003"
-	seedSEV(t, ts, sevID)
+	sevID := seedSEV(t, ts)
 
 	_, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
 		Id:       sevID,

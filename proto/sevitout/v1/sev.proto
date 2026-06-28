@@ -6,6 +6,7 @@ option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
 
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 // SEVService manages SEV lifecycle records.
 service SEVService {
@@ -54,7 +55,7 @@ message SEVResponse {
   string detection_method = 12;
   string alert_name = 13;
   string monitoring_tool = 14;
-  bool right_people_present = 15;
+  google.protobuf.BoolValue right_people_present = 15;
   string right_people_notes = 16;
   map<string, string> tags = 17;
   google.protobuf.Timestamp started_at = 18;
@@ -106,12 +107,13 @@ message UpdateSEVRequest {
   string detection_method = 11;
   string alert_name = 12;
   string monitoring_tool = 13;
-  bool right_people_present = 14;
+  google.protobuf.BoolValue right_people_present = 14;
   string right_people_notes = 15;
   map<string, string> tags = 16;
   google.protobuf.Timestamp started_at = 17;
   google.protobuf.Timestamp detected_at = 18;
-  bool sensitive = 19;
+  google.protobuf.BoolValue sensitive = 19;
+  string user_id = 20;
 }
 
 message ListSEVsRequest {

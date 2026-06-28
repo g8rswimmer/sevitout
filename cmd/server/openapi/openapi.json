@@ -220,36 +220,6 @@
           "SEVService"
         ]
       }
-    },
-    "/v1/sevs/{sevId}/audit": {
-      "get": {
-        "operationId": "AuditService_ListAuditEntries",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/v1ListAuditEntriesResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/rpcStatus"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "sevId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "AuditService"
-        ]
-      }
     }
   },
   "definitions": {
@@ -341,6 +311,9 @@
         },
         "sensitive": {
           "type": "boolean"
+        },
+        "userId": {
+          "type": "string"
         }
       }
     },
@@ -551,49 +524,6 @@
         },
         "createdBy": {
           "type": "string"
-        }
-      }
-    },
-    "v1AuditEntryResponse": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "int64"
-        },
-        "sevId": {
-          "type": "string"
-        },
-        "userId": {
-          "type": "string"
-        },
-        "action": {
-          "type": "string"
-        },
-        "fieldName": {
-          "type": "string"
-        },
-        "oldValue": {
-          "type": "string"
-        },
-        "newValue": {
-          "type": "string"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      }
-    },
-    "v1ListAuditEntriesResponse": {
-      "type": "object",
-      "properties": {
-        "entries": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1AuditEntryResponse"
-          }
         }
       }
     }

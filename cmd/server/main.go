@@ -11,7 +11,6 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -32,25 +31,27 @@ func main() {
 	sevStore, auditStore, historyStore := buildStores(ctx, log)
 
 	// --- gRPC server ---
+	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore)
+	auditServer := grpchandler.NewAuditServer(auditStore)
+
 	grpcSrv := grpc.NewServer()
-	pb.RegisterSEVServiceServer(grpcSrv, grpchandler.NewSEVServer(sevStore, auditStore, historyStore))
-	pb.RegisterAuditServiceServer(grpcSrv, grpchandler.NewAuditServer(auditStore))
+	pb.RegisterSEVServiceServer(grpcSrv, sevServer)
+	pb.RegisterAuditServiceServer(grpcSrv, auditServer)
 	reflection.Register(grpcSrv)
 
-	// --- REST gateway (dials back to the gRPC server on the same port) ---
+	// --- REST gateway (in-process, no loopback dial) ---
 	// UseProtoNames emits snake_case field names matching the proto definitions.
 	gwMux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{
 			MarshalOptions: protojson.MarshalOptions{UseProtoNames: true},
 		}),
 	)
-	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	const addr = ":8080"
-	if err := pb.RegisterSEVServiceHandlerFromEndpoint(ctx, gwMux, "localhost"+addr, dialOpts); err != nil {
+	if err := pb.RegisterSEVServiceHandlerServer(ctx, gwMux, sevServer); err != nil {
 		log.Error("register sev gateway", "err", err)
 		os.Exit(1)
 	}
-	if err := pb.RegisterAuditServiceHandlerFromEndpoint(ctx, gwMux, "localhost"+addr, dialOpts); err != nil {
+	if err := pb.RegisterAuditServiceHandlerServer(ctx, gwMux, auditServer); err != nil {
 		log.Error("register audit gateway", "err", err)
 		os.Exit(1)
 	}

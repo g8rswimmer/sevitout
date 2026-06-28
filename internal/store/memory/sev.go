@@ -2,10 +2,12 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
@@ -13,6 +15,7 @@ import (
 // SEVStore is an in-memory implementation of store.SEVStore, used in unit tests.
 type SEVStore struct {
 	mu   sync.RWMutex
+	seq  atomic.Int64
 	data map[string]*store.SEV
 }
 
@@ -26,9 +29,7 @@ var _ store.SEVStore = (*SEVStore)(nil)
 func (s *SEVStore) Create(_ context.Context, sev *store.SEV) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.data[sev.ID]; exists {
-		return store.ErrConflict
-	}
+	sev.ID = fmt.Sprintf("SEV-%d-%04d", time.Now().UTC().Year(), s.seq.Add(1))
 	cp := *sev
 	s.data[sev.ID] = &cp
 	return nil
@@ -95,6 +96,18 @@ func (s *SEVStore) UpdateLocked(_ context.Context, id string, locked bool) error
 	}
 	sev.Locked = locked
 	return nil
+}
+
+func (s *SEVStore) Count(_ context.Context, filter store.SEVFilter) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, sev := range s.data {
+		if matchesSEVFilter(sev, filter) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func matchesSEVFilter(sev *store.SEV, f store.SEVFilter) bool {
