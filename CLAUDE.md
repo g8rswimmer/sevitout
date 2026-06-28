@@ -63,3 +63,4 @@ docs/
 - All integrations (Slack, PagerDuty, etc.) are behind interfaces in `internal/integrations/`; the core domain does not import them directly.
 - The AI plugin system is configuration-driven: plugins register a name, version, and handler (HTTP endpoint or built-in). Sensitive config (API keys) is encrypted at rest.
 - SEVs flagged as sensitive (e.g., security incidents) enforce field-level visibility restrictions beyond normal RBAC.
+- **Interfaces belong to the consumer, not the producer.** Declare an interface in the package that depends on the behavior, not the package that implements it. The implementation satisfies the interface implicitly — it never imports the interface definition. A single concrete type can then satisfy multiple independent interfaces without coordination. The `internal/store/` package is the deliberate exception: it acts as a shared contract layer imported by both handlers and store implementations.

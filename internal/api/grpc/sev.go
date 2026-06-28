@@ -13,10 +13,15 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
-	"github.com/g8rswimmer/sevitout/internal/integrations/oncall"
 	"github.com/g8rswimmer/sevitout/internal/sev"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
+
+// OnCaller retrieves the current on-call person for a service.
+// Implementations must return ("", nil) when no one is on-call.
+type OnCaller interface {
+	OnCallLookup(ctx context.Context, serviceID string) (string, error)
+}
 
 type SEVServer struct {
 	pb.UnimplementedSEVServiceServer
@@ -25,7 +30,7 @@ type SEVServer struct {
 	history  store.StatusHistoryStore
 	roles    store.RoleStore
 	services store.ServiceStore
-	onCaller oncall.OnCaller // nil when PagerDuty is not configured
+	onCaller OnCaller // nil when PagerDuty is not configured
 }
 
 func NewSEVServer(
@@ -34,7 +39,7 @@ func NewSEVServer(
 	history store.StatusHistoryStore,
 	roles store.RoleStore,
 	services store.ServiceStore,
-	onCaller oncall.OnCaller,
+	onCaller OnCaller,
 ) *SEVServer {
 	return &SEVServer{
 		sevs:     sevs,
