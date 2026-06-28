@@ -12,6 +12,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -79,16 +80,21 @@ func main() {
 			return nil
 		}),
 	)
+	// RegisterXxxHandlerFromEndpoint dials the gRPC server over loopback so that
+	// REST requests routed through the gateway still run through the gRPC
+	// interceptors (JWT validation, RBAC). HandlerServer bypasses interceptors
+	// and must not be used here.
 	const addr = ":8080"
-	if err := pb.RegisterSEVServiceHandlerServer(ctx, gwMux, sevServer); err != nil {
+	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if err := pb.RegisterSEVServiceHandlerFromEndpoint(ctx, gwMux, addr, dialOpts); err != nil {
 		log.Error("register sev gateway", "err", err)
 		os.Exit(1)
 	}
-	if err := pb.RegisterAuditServiceHandlerServer(ctx, gwMux, auditServer); err != nil {
+	if err := pb.RegisterAuditServiceHandlerFromEndpoint(ctx, gwMux, addr, dialOpts); err != nil {
 		log.Error("register audit gateway", "err", err)
 		os.Exit(1)
 	}
-	if err := pb.RegisterAuthServiceHandlerServer(ctx, gwMux, authServer); err != nil {
+	if err := pb.RegisterAuthServiceHandlerFromEndpoint(ctx, gwMux, addr, dialOpts); err != nil {
 		log.Error("register auth gateway", "err", err)
 		os.Exit(1)
 	}
