@@ -114,6 +114,8 @@ message UpdateSEVRequest {
   google.protobuf.Timestamp detected_at = 18;
   google.protobuf.BoolValue sensitive = 19;
   string user_id = 20;
+  // unlock_token is required when the SEV is locked (PostmortemComplete status).
+  string unlock_token = 21;
 }
 
 message ListSEVsRequest {
@@ -137,4 +139,6 @@ message TransitionStatusRequest {
   google.protobuf.Timestamp mitigated_at = 4;
   google.protobuf.Timestamp resolved_at = 5;
   google.protobuf.Timestamp postmortem_completed_at = 6;
+  // unlock_token is required when the SEV is locked (PostmortemComplete status).
+  string unlock_token = 7;
 }

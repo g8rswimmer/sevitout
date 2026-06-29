@@ -28,7 +28,7 @@ func newTestSEVServer() *testSEVServer {
 	audit := memory.NewAuditStore()
 	history := memory.NewStatusHistoryStore()
 	return &testSEVServer{
-		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), nil),
+		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), nil, nil),
 		sevs:    sevs,
 		audit:   audit,
 		history: history,

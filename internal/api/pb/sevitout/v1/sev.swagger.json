@@ -243,6 +243,10 @@
         "postmortemCompletedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is required when the SEV is locked (PostmortemComplete status)."
         }
       }
     },
@@ -314,6 +318,10 @@
         },
         "userId": {
           "type": "string"
+        },
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is required when the SEV is locked (PostmortemComplete status)."
         }
       }
     },

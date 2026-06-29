@@ -21,6 +21,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
+	"github.com/g8rswimmer/sevitout/internal/postmortem"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 	"github.com/g8rswimmer/sevitout/internal/store/postgres"
@@ -33,7 +34,7 @@ func main() {
 	ctx := context.Background()
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore := buildStores(ctx, log)
+	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore := buildStores(ctx, log)
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
@@ -56,11 +57,15 @@ func main() {
 	}
 	jwtSigner := auth.NewJWTSigner(jwtSecret, jwtTTLHours)
 
+	// --- Unlock token signer (reuses JWT_SECRET; 15-min TTL) ---
+	unlockSigner := postmortem.NewUnlockSigner(jwtSecret)
+
 	// --- gRPC server with auth interceptors ---
-	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, onCaller)
+	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, postmortemStore, onCaller, unlockSigner)
 	auditServer := grpchandler.NewAuditServer(auditStore)
 	authServer := grpchandler.NewAuthServer(userStore)
 	roleServer := grpchandler.NewRoleServer(roleStore, sevStore, auditStore)
+	postmortemServer := grpchandler.NewPostmortemServer(postmortemStore, sevStore, auditStore, unlockSigner)
 
 	grpcSrv := grpc.NewServer(
 		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
@@ -70,6 +75,7 @@ func main() {
 	pb.RegisterAuditServiceServer(grpcSrv, auditServer)
 	pb.RegisterAuthServiceServer(grpcSrv, authServer)
 	pb.RegisterRoleServiceServer(grpcSrv, roleServer)
+	pb.RegisterPostmortemServiceServer(grpcSrv, postmortemServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -113,6 +119,10 @@ func main() {
 	}
 	if err := pb.RegisterRoleServiceHandlerClient(ctx, gwMux, pb.NewRoleServiceClient(conn)); err != nil {
 		log.Error("register role gateway", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterPostmortemServiceHandlerClient(ctx, gwMux, pb.NewPostmortemServiceClient(conn)); err != nil {
+		log.Error("register postmortem gateway", "err", err)
 		os.Exit(1)
 	}
 
@@ -163,6 +173,7 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 	store.UserStore,
 	store.RoleStore,
 	store.ServiceStore,
+	store.PostmortemStore,
 ) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -172,7 +183,8 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 			memory.NewStatusHistoryStore(),
 			memory.NewUserStore(),
 			memory.NewRoleStore(),
-			memory.NewServiceStore()
+			memory.NewServiceStore(),
+			memory.NewPostmortemStore()
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
@@ -185,5 +197,6 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		postgres.NewStatusHistoryStore(pool),
 		postgres.NewUserStore(pool),
 		postgres.NewRoleStore(pool),
-		memory.NewServiceStore() // postgres ServiceStore is part of M10 Config API
+		memory.NewServiceStore(), // postgres ServiceStore is part of M10 Config API
+		memory.NewPostmortemStore() // postgres PostmortemStore is part of a future milestone
 }
