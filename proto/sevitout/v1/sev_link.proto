@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// SEVLinkService manages typed bidirectional relationships between SEVs.
+service SEVLinkService {
+  rpc LinkSEVs(LinkSEVsRequest) returns (SEVLinkResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{source_sev_id}/links"
+      body: "*"
+    };
+  }
+  rpc UnlinkSEVs(UnlinkSEVsRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/sevs/{source_sev_id}/links/{target_sev_id}"
+    };
+  }
+  rpc ListLinkedSEVs(ListLinkedSEVsRequest) returns (ListLinkedSEVsResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/links"
+    };
+  }
+}
+
+message SEVLinkResponse {
+  int64 id = 1;
+  string source_sev_id = 2;
+  string target_sev_id = 3;
+  // relationship_type is one of: related, caused-by, duplicate, recurrence-of
+  string relationship_type = 4;
+  google.protobuf.Timestamp created_at = 5;
+  string created_by = 6;
+}
+
+message LinkSEVsRequest {
+  string source_sev_id = 1;
+  string target_sev_id = 2;
+  // relationship_type must be one of: related, caused-by, duplicate, recurrence-of
+  string relationship_type = 3;
+  string created_by = 4;
+}
+
+message UnlinkSEVsRequest {
+  string source_sev_id = 1;
+  string target_sev_id = 2;
+  // relationship_type must be one of: related, caused-by, duplicate, recurrence-of
+  string relationship_type = 3;
+}
+
+message ListLinkedSEVsRequest {
+  string sev_id = 1;
+}
+
+message ListLinkedSEVsResponse {
+  repeated SEVLinkResponse links = 1;
+}

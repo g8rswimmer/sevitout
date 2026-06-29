@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// ChatService manages chat log entries captured during an incident.
+service ChatService {
+  rpc AddChatEntry(AddChatEntryRequest) returns (ChatEntryResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/chat"
+      body: "*"
+    };
+  }
+  rpc ListChatEntries(ListChatEntriesRequest) returns (ListChatEntriesResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/chat"
+    };
+  }
+}
+
+message ChatEntryResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  google.protobuf.Timestamp occurred_at = 3;
+  string source = 4;
+  string author = 5;
+  string content = 6;
+  google.protobuf.Timestamp added_at = 7;
+  string added_by = 8;
+}
+
+message AddChatEntryRequest {
+  string sev_id = 1;
+  // occurred_at is when the message was originally sent in the chat channel.
+  google.protobuf.Timestamp occurred_at = 2;
+  // source identifies the chat platform (e.g., slack, email).
+  string source = 3;
+  string author = 4;
+  string content = 5;
+  string added_by = 6;
+}
+
+message ListChatEntriesRequest {
+  string sev_id = 1;
+}
+
+message ListChatEntriesResponse {
+  repeated ChatEntryResponse entries = 1;
+}

@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// AnnouncementService manages time-ordered status updates on a SEV.
+service AnnouncementService {
+  rpc CreateAnnouncement(CreateAnnouncementRequest) returns (AnnouncementResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/announcements"
+      body: "*"
+    };
+  }
+  rpc ListAnnouncements(ListAnnouncementsRequest) returns (ListAnnouncementsResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/announcements"
+    };
+  }
+}
+
+message AnnouncementResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  string author_id = 3;
+  string message = 4;
+  // audience is one of: internal, external, status-page
+  string audience = 5;
+  bool is_milestone = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message CreateAnnouncementRequest {
+  string sev_id = 1;
+  string message = 2;
+  // audience must be one of: internal, external, status-page
+  string audience = 3;
+  bool is_milestone = 4;
+  string author_id = 5;
+}
+
+message ListAnnouncementsRequest {
+  string sev_id = 1;
+  // audience is an optional filter; omit to return all audiences
+  string audience = 2;
+}
+
+message ListAnnouncementsResponse {
+  repeated AnnouncementResponse announcements = 1;
+}

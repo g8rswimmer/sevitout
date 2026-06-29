@@ -34,7 +34,8 @@ func main() {
 	ctx := context.Background()
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore := buildStores(ctx, log)
+	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore,
+		announcementStore, chatStore, sevLinkStore := buildStores(ctx, log)
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
@@ -66,6 +67,9 @@ func main() {
 	authServer := grpchandler.NewAuthServer(userStore)
 	roleServer := grpchandler.NewRoleServer(roleStore, sevStore, auditStore)
 	postmortemServer := grpchandler.NewPostmortemServer(postmortemStore, sevStore, auditStore, unlockSigner)
+	announcementServer := grpchandler.NewAnnouncementServer(announcementStore, sevStore)
+	chatServer := grpchandler.NewChatServer(chatStore, sevStore)
+	sevLinkServer := grpchandler.NewSEVLinkServer(sevLinkStore, sevStore, auditStore)
 
 	grpcSrv := grpc.NewServer(
 		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
@@ -76,6 +80,9 @@ func main() {
 	pb.RegisterAuthServiceServer(grpcSrv, authServer)
 	pb.RegisterRoleServiceServer(grpcSrv, roleServer)
 	pb.RegisterPostmortemServiceServer(grpcSrv, postmortemServer)
+	pb.RegisterAnnouncementServiceServer(grpcSrv, announcementServer)
+	pb.RegisterChatServiceServer(grpcSrv, chatServer)
+	pb.RegisterSEVLinkServiceServer(grpcSrv, sevLinkServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -123,6 +130,18 @@ func main() {
 	}
 	if err := pb.RegisterPostmortemServiceHandlerClient(ctx, gwMux, pb.NewPostmortemServiceClient(conn)); err != nil {
 		log.Error("register postmortem gateway", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterAnnouncementServiceHandlerClient(ctx, gwMux, pb.NewAnnouncementServiceClient(conn)); err != nil {
+		log.Error("register announcement gateway", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterChatServiceHandlerClient(ctx, gwMux, pb.NewChatServiceClient(conn)); err != nil {
+		log.Error("register chat gateway", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterSEVLinkServiceHandlerClient(ctx, gwMux, pb.NewSEVLinkServiceClient(conn)); err != nil {
+		log.Error("register sev-link gateway", "err", err)
 		os.Exit(1)
 	}
 
@@ -174,6 +193,9 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 	store.RoleStore,
 	store.ServiceStore,
 	store.PostmortemStore,
+	store.AnnouncementStore,
+	store.ChatStore,
+	store.SEVLinkStore,
 ) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -184,7 +206,10 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 			memory.NewUserStore(),
 			memory.NewRoleStore(),
 			memory.NewServiceStore(),
-			memory.NewPostmortemStore()
+			memory.NewPostmortemStore(),
+			memory.NewAnnouncementStore(),
+			memory.NewChatStore(),
+			memory.NewSEVLinkStore()
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
@@ -198,5 +223,8 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		postgres.NewUserStore(pool),
 		postgres.NewRoleStore(pool),
 		memory.NewServiceStore(), // postgres ServiceStore is part of M10 Config API
-		memory.NewPostmortemStore() // postgres PostmortemStore is part of a future milestone
+		memory.NewPostmortemStore(), // postgres PostmortemStore is part of a future milestone
+		memory.NewAnnouncementStore(), // postgres AnnouncementStore is part of a future milestone
+		memory.NewChatStore(), // postgres ChatStore is part of a future milestone
+		memory.NewSEVLinkStore() // postgres SEVLinkStore is part of a future milestone
 }

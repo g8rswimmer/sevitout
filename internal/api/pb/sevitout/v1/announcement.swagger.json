@@ -1,0 +1,182 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "sevitout/v1/announcement.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "AnnouncementService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/sevs/{sevId}/announcements": {
+      "get": {
+        "operationId": "AnnouncementService_ListAnnouncements",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAnnouncementsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "audience",
+            "description": "audience is an optional filter; omit to return all audiences",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AnnouncementService"
+        ]
+      },
+      "post": {
+        "operationId": "AnnouncementService_CreateAnnouncement",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AnnouncementResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AnnouncementServiceCreateAnnouncementBody"
+            }
+          }
+        ],
+        "tags": [
+          "AnnouncementService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "AnnouncementServiceCreateAnnouncementBody": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "audience": {
+          "type": "string",
+          "title": "audience must be one of: internal, external, status-page"
+        },
+        "isMilestone": {
+          "type": "boolean"
+        },
+        "authorId": {
+          "type": "string"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AnnouncementResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "authorId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "audience": {
+          "type": "string",
+          "title": "audience is one of: internal, external, status-page"
+        },
+        "isMilestone": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1ListAnnouncementsResponse": {
+      "type": "object",
+      "properties": {
+        "announcements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AnnouncementResponse"
+          }
+        }
+      }
+    }
+  }
+}
