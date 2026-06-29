@@ -43,6 +43,26 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleAdmin, "/sevitout.v1.AuditService/ListAuditEntries", true},
 		{store.OrgRoleAdmin, "/sevitout.v1.AuthService/WhoAmI", true},
 
+		// Announcement service
+		{store.OrgRoleViewer, "/sevitout.v1.AnnouncementService/ListAnnouncements", true},
+		{store.OrgRoleViewer, "/sevitout.v1.AnnouncementService/CreateAnnouncement", false},
+		{store.OrgRoleResponder, "/sevitout.v1.AnnouncementService/CreateAnnouncement", true},
+		{store.OrgRoleResponder, "/sevitout.v1.AnnouncementService/ListAnnouncements", true},
+
+		// Chat service
+		{store.OrgRoleViewer, "/sevitout.v1.ChatService/ListChatEntries", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ChatService/AddChatEntry", false},
+		{store.OrgRoleResponder, "/sevitout.v1.ChatService/AddChatEntry", true},
+		{store.OrgRoleResponder, "/sevitout.v1.ChatService/ListChatEntries", true},
+
+		// SEV link service
+		{store.OrgRoleViewer, "/sevitout.v1.SEVLinkService/ListLinkedSEVs", true},
+		{store.OrgRoleViewer, "/sevitout.v1.SEVLinkService/LinkSEVs", false},
+		{store.OrgRoleViewer, "/sevitout.v1.SEVLinkService/UnlinkSEVs", false},
+		{store.OrgRoleResponder, "/sevitout.v1.SEVLinkService/LinkSEVs", true},
+		{store.OrgRoleResponder, "/sevitout.v1.SEVLinkService/UnlinkSEVs", true},
+		{store.OrgRoleResponder, "/sevitout.v1.SEVLinkService/ListLinkedSEVs", true},
+
 		// Unknown RPC is denied to everyone
 		{store.OrgRoleAdmin, "/sevitout.v1.UnknownService/DoSomething", false},
 		{store.OrgRoleViewer, "/sevitout.v1.UnknownService/DoSomething", false},

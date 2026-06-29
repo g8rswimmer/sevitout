@@ -38,16 +38,14 @@ go run ./cmd/server
 
 All commands below assume the server is running on `localhost:8080`.
 
-### 1. Register and log in
+### 1. Obtain a JWT (admin from M03/M05)
+
+The admin account was registered in M03. Log in with those credentials (minimum role required for write operations is **Responder**; Admin works for everything):
 
 ```bash
-curl -s -X POST http://localhost:8080/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"alice@example.com","password":"s3cr3t","name":"Alice"}' | jq .
-
 TOKEN=$(curl -s -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"alice@example.com","password":"s3cr3t"}' | jq -r .token)
+  -d '{"email":"admin@example.com","password":"changeme123"}' | jq -r .token)
 
 echo "token: $TOKEN"
 ```
