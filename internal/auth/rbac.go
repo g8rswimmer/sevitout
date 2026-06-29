@@ -33,6 +33,16 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.PostmortemService/UpdatePostmortem":           store.OrgRoleResponder,
 	"/sevitout.v1.PostmortemService/TransitionPostmortemStatus": store.OrgRoleIncidentCommander,
 	"/sevitout.v1.PostmortemService/UnlockSEV":                  store.OrgRoleIncidentCommander,
+	// Announcement service
+	"/sevitout.v1.AnnouncementService/CreateAnnouncement": store.OrgRoleResponder,
+	"/sevitout.v1.AnnouncementService/ListAnnouncements":  store.OrgRoleViewer,
+	// Chat service
+	"/sevitout.v1.ChatService/AddChatEntry":    store.OrgRoleResponder,
+	"/sevitout.v1.ChatService/ListChatEntries": store.OrgRoleViewer,
+	// SEV link service
+	"/sevitout.v1.SEVLinkService/LinkSEVs":       store.OrgRoleResponder,
+	"/sevitout.v1.SEVLinkService/UnlinkSEVs":     store.OrgRoleResponder,
+	"/sevitout.v1.SEVLinkService/ListLinkedSEVs": store.OrgRoleViewer,
 	// gRPC reflection (both v1alpha and v1 registered by grpc-go)
 	"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": store.OrgRoleViewer,
 	"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      store.OrgRoleViewer,
