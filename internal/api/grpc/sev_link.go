@@ -69,30 +69,18 @@ func (s *SEVLinkServer) LinkSEVs(ctx context.Context, req *pb.LinkSEVsRequest) (
 	}
 
 	now := time.Now()
-	forward := &store.SEVLink{
+	link := &store.SEVLink{
 		SourceSEVID:      req.GetSourceSevId(),
 		TargetSEVID:      req.GetTargetSevId(),
 		RelationshipType: relType,
 		CreatedAt:        now,
 		CreatedBy:        callerID,
 	}
-	if err := s.links.Create(ctx, forward); err != nil {
+	if err := s.links.Create(ctx, link); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return nil, status.Error(codes.AlreadyExists, "link already exists")
 		}
 		return nil, status.Error(codes.Internal, "failed to create link")
-	}
-
-	// Bidirectional: insert the reverse direction as well.
-	reverse := &store.SEVLink{
-		SourceSEVID:      req.GetTargetSevId(),
-		TargetSEVID:      req.GetSourceSevId(),
-		RelationshipType: relType,
-		CreatedAt:        now,
-		CreatedBy:        callerID,
-	}
-	if err := s.links.Create(ctx, reverse); err != nil && !errors.Is(err, store.ErrConflict) {
-		return nil, status.Error(codes.Internal, "failed to create reverse link")
 	}
 
 	_ = s.audit.Append(ctx, &store.AuditEntry{
@@ -103,7 +91,7 @@ func (s *SEVLinkServer) LinkSEVs(ctx context.Context, req *pb.LinkSEVsRequest) (
 		CreatedAt: now,
 	})
 
-	return sevLinkToProto(forward), nil
+	return sevLinkToProto(link), nil
 }
 
 func (s *SEVLinkServer) UnlinkSEVs(ctx context.Context, req *pb.UnlinkSEVsRequest) (*emptypb.Empty, error) {
@@ -125,26 +113,31 @@ func (s *SEVLinkServer) UnlinkSEVs(ctx context.Context, req *pb.UnlinkSEVsReques
 		return nil, status.Error(codes.InvalidArgument, "relationship_type must be one of: related, caused-by, duplicate, recurrence-of")
 	}
 
-	if err := s.links.Delete(ctx, req.GetSourceSevId(), req.GetTargetSevId(), relType); err != nil {
+	callerID := ""
+	if uc, ok := auth.UserFromContext(ctx); ok {
+		callerID = uc.UserID
+	}
+	now := time.Now()
+
+	// Links are stored as a single canonical row; the caller may pass either
+	// ordering, so try both directions before giving up.
+	err := s.links.Delete(ctx, req.GetSourceSevId(), req.GetTargetSevId(), relType)
+	if errors.Is(err, store.ErrNotFound) {
+		err = s.links.Delete(ctx, req.GetTargetSevId(), req.GetSourceSevId(), relType)
+	}
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "link not found")
 		}
 		return nil, status.Error(codes.Internal, "failed to delete link")
 	}
 
-	// Remove the reverse direction; ignore not-found in case it was already cleaned up.
-	_ = s.links.Delete(ctx, req.GetTargetSevId(), req.GetSourceSevId(), relType)
-
-	callerID := ""
-	if uc, ok := auth.UserFromContext(ctx); ok {
-		callerID = uc.UserID
-	}
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     req.GetSourceSevId(),
 		UserID:    callerID,
 		Action:    "sev.unlinked",
 		OldValue:  strPtr(req.GetTargetSevId()),
-		CreatedAt: time.Now(),
+		CreatedAt: now,
 	})
 
 	return &emptypb.Empty{}, nil

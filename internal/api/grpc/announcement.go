@@ -55,6 +55,9 @@ func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.Cre
 	if uc, ok := auth.UserFromContext(ctx); ok {
 		authorID = uc.UserID
 	}
+	if authorID == "" {
+		return nil, status.Error(codes.InvalidArgument, "author_id is required")
+	}
 
 	a := &store.Announcement{
 		SEVID:       req.GetSevId(),
@@ -90,6 +93,14 @@ func (s *AnnouncementServer) ListAnnouncements(ctx context.Context, req *pb.List
 	}
 
 	audienceFilter := store.AudienceType(req.GetAudience())
+	if audienceFilter != "" {
+		switch audienceFilter {
+		case store.AudienceInternal, store.AudienceExternal, store.AudienceStatusPage:
+		default:
+			return nil, status.Error(codes.InvalidArgument, "audience must be one of: internal, external, status-page")
+		}
+	}
+
 	resp := &pb.ListAnnouncementsResponse{}
 	for _, a := range all {
 		if audienceFilter != "" && a.Audience != audienceFilter {

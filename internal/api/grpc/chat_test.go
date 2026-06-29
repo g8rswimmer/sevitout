@@ -94,6 +94,7 @@ func TestAddChatEntry_DefaultsOccurredAtToNow(t *testing.T) {
 		Source:  "slack",
 		Author:  "bob",
 		Content: "on it",
+		AddedBy: "user-1",
 	})
 	after := time.Now()
 
@@ -190,6 +191,7 @@ func TestListChatEntries_Ordering(t *testing.T) {
 			Source:  "slack",
 			Author:  "alice",
 			Content: c,
+			AddedBy: "user-1",
 		})
 		if err != nil {
 			t.Fatalf("AddChatEntry %q: %v", c, err)

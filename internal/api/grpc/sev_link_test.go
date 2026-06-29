@@ -102,13 +102,38 @@ func TestLinkSEVs_Bidirectional(t *testing.T) {
 		t.Fatalf("ListLinkedSEVs(B): %v", err)
 	}
 
-	// The store's ListBySEVID returns links where sevID is source OR target,
-	// but we insert two rows so each side is listed as a source link.
+	// A single row is stored; ListBySEVID matches source OR target so both sides see it.
 	if len(respA.GetLinks()) == 0 {
 		t.Error("SEV A should have at least one link")
 	}
 	if len(respB.GetLinks()) == 0 {
-		t.Error("SEV B should have at least one link (bidirectional)")
+		t.Error("SEV B should have at least one link (bidirectional via OR query)")
+	}
+}
+
+func TestLinkSEVs_NoDuplicates(t *testing.T) {
+	ts := newTestSEVLinkServer()
+	ctx := context.Background()
+	sevA := seedSEVForLink(t, ts, "SEV A")
+	sevB := seedSEVForLink(t, ts, "SEV B")
+
+	_, err := ts.server.LinkSEVs(ctx, &pb.LinkSEVsRequest{
+		SourceSevId:      sevA,
+		TargetSevId:      sevB,
+		RelationshipType: string(store.SEVRelationshipRelated),
+	})
+	if err != nil {
+		t.Fatalf("LinkSEVs: %v", err)
+	}
+
+	respA, _ := ts.server.ListLinkedSEVs(ctx, &pb.ListLinkedSEVsRequest{SevId: sevA})
+	respB, _ := ts.server.ListLinkedSEVs(ctx, &pb.ListLinkedSEVsRequest{SevId: sevB})
+
+	if len(respA.GetLinks()) != 1 {
+		t.Errorf("SEV A: want exactly 1 link, got %d", len(respA.GetLinks()))
+	}
+	if len(respB.GetLinks()) != 1 {
+		t.Errorf("SEV B: want exactly 1 link, got %d", len(respB.GetLinks()))
 	}
 }
 

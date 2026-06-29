@@ -217,14 +217,15 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
+	log.Warn("service, postmortem, announcement, chat, and sev-link stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
 	return postgres.NewSEVStore(pool),
 		postgres.NewAuditStore(pool),
 		postgres.NewStatusHistoryStore(pool),
 		postgres.NewUserStore(pool),
 		postgres.NewRoleStore(pool),
-		memory.NewServiceStore(), // postgres ServiceStore is part of M10 Config API
-		memory.NewPostmortemStore(), // postgres PostmortemStore is part of a future milestone
-		memory.NewAnnouncementStore(), // postgres AnnouncementStore is part of a future milestone
-		memory.NewChatStore(), // postgres ChatStore is part of a future milestone
-		memory.NewSEVLinkStore() // postgres SEVLinkStore is part of a future milestone
+		memory.NewServiceStore(),
+		memory.NewPostmortemStore(),
+		memory.NewAnnouncementStore(),
+		memory.NewChatStore(),
+		memory.NewSEVLinkStore()
 }

@@ -85,6 +85,7 @@ func TestCreateAnnouncement_ValidExternal(t *testing.T) {
 		SevId:    sevID,
 		Message:  "We are aware of an issue affecting some users.",
 		Audience: string(store.AudienceExternal),
+		AuthorId: "user-1",
 	})
 	if err != nil {
 		t.Fatalf("CreateAnnouncement: %v", err)
@@ -103,6 +104,7 @@ func TestCreateAnnouncement_ValidStatusPage(t *testing.T) {
 		SevId:    sevID,
 		Message:  "Service disruption in progress.",
 		Audience: string(store.AudienceStatusPage),
+		AuthorId: "user-1",
 	})
 	if err != nil {
 		t.Fatalf("CreateAnnouncement: %v", err)
@@ -122,6 +124,7 @@ func TestCreateAnnouncement_MilestoneFlag(t *testing.T) {
 		Message:     "Mitigation complete.",
 		Audience:    string(store.AudienceInternal),
 		IsMilestone: true,
+		AuthorId:    "user-1",
 	})
 	if err != nil {
 		t.Fatalf("CreateAnnouncement: %v", err)
@@ -210,6 +213,7 @@ func TestListAnnouncements_Ordering(t *testing.T) {
 			SevId:    sevID,
 			Message:  msg,
 			Audience: string(store.AudienceInternal),
+			AuthorId: "user-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateAnnouncement %q: %v", msg, err)
@@ -246,6 +250,7 @@ func TestListAnnouncements_AudienceFilter(t *testing.T) {
 			SevId:    sevID,
 			Message:  "msg for " + string(aud),
 			Audience: string(aud),
+			AuthorId: "user-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateAnnouncement: %v", err)
@@ -304,5 +309,19 @@ func TestListAnnouncements_Empty(t *testing.T) {
 	}
 	if len(resp.GetAnnouncements()) != 0 {
 		t.Errorf("want 0 announcements, got %d", len(resp.GetAnnouncements()))
+	}
+}
+
+func TestListAnnouncements_InvalidAudienceFilter(t *testing.T) {
+	ts := newTestAnnouncementServer()
+	ctx := context.Background()
+	sevID := seedSEVForAnnouncement(t, ts)
+
+	_, err := ts.server.ListAnnouncements(ctx, &pb.ListAnnouncementsRequest{
+		SevId:    sevID,
+		Audience: "public",
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument for invalid audience filter, got %v", grpcCode(err))
 	}
 }

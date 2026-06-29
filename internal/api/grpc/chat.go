@@ -51,6 +51,9 @@ func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryReque
 	if uc, ok := auth.UserFromContext(ctx); ok {
 		addedBy = uc.UserID
 	}
+	if addedBy == "" {
+		return nil, status.Error(codes.InvalidArgument, "added_by is required")
+	}
 
 	now := time.Now()
 	occurredAt := now
