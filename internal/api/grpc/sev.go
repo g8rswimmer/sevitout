@@ -33,7 +33,7 @@ type SEVServer struct {
 	services    store.ServiceStore
 	postmortems store.PostmortemStore
 	onCaller    OnCaller // nil when PagerDuty is not configured
-	unlock      Unlocker // nil when lock enforcement is not needed (tests)
+	unlock      Unlocker
 }
 
 func NewSEVServer(
@@ -120,15 +120,14 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		CreatedAt: now,
 	})
 
-	// Auto-create an empty Draft postmortem for every new SEV.
-	if s.postmortems != nil {
-		_ = s.postmortems.Create(ctx, &store.Postmortem{
-			SEVID:     record.ID,
-			Status:    store.PostmortemStatusDraft,
-			Content:   "",
-			CreatedAt: now,
-			UpdatedAt: now,
-		})
+	if err := s.postmortems.Create(ctx, &store.Postmortem{
+		SEVID:     record.ID,
+		Status:    store.PostmortemStatusDraft,
+		Content:   "",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		return nil, status.Error(codes.Internal, "failed to create postmortem for SEV")
 	}
 
 	// Best-effort on-call auto-population. Never blocks or fails the response.
@@ -178,7 +177,7 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		return nil, status.Error(codes.Internal, "failed to get SEV")
 	}
 
-	if record.Locked && s.unlock != nil {
+	if record.Locked {
 		if err := validateUnlock(s.unlock, req.GetUnlockToken(), req.GetId()); err != nil {
 			return nil, err
 		}
@@ -328,8 +327,8 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		return nil, status.Error(codes.Internal, "failed to get SEV")
 	}
 
-	// A locked SEV can only be re-opened with a valid unlock token.
-	if record.Locked && s.unlock != nil {
+	// A locked SEV requires a valid unlock token for any transition.
+	if record.Locked {
 		if err := validateUnlock(s.unlock, req.GetUnlockToken(), req.GetId()); err != nil {
 			return nil, err
 		}
@@ -355,17 +354,21 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		record.PostmortemCompletedAt = &t
 	}
 
-	// Auto-set PostmortemCompletedAt and lock the SEV when reaching terminal status.
+	now := time.Now()
+
+	// Lock the SEV on entering PostmortemComplete; clear the lock when leaving
+	// (e.g. re-open after postmortem review). The unlock token was already
+	// validated above when record.Locked was true.
 	if toStatus == store.SEVStatusPostmortemComplete {
-		now2 := time.Now()
 		if record.PostmortemCompletedAt == nil {
-			record.PostmortemCompletedAt = &now2
+			record.PostmortemCompletedAt = &now
 		}
 		record.Locked = true
+	} else {
+		record.Locked = false
 	}
 
 	sev.ComputeMetrics(record)
-	now := time.Now()
 	record.UpdatedAt = now
 
 	transitionerID := req.GetUserId()
@@ -401,6 +404,9 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 
 // validateUnlock returns a gRPC status error when the token is missing or invalid for sevID.
 func validateUnlock(u Unlocker, token, sevID string) error {
+	if u == nil {
+		return status.Error(codes.Internal, "lock enforcement not configured")
+	}
 	if token == "" {
 		return status.Error(codes.PermissionDenied, "SEV is locked; provide an unlock_token")
 	}

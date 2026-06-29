@@ -74,7 +74,7 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 	}
 
 	if sev.Locked {
-		if err := s.validateUnlockToken(req.GetUnlockToken(), req.GetSevId()); err != nil {
+		if err := validateUnlock(s.unlock, req.GetUnlockToken(), req.GetSevId()); err != nil {
 			return nil, err
 		}
 	}
@@ -95,7 +95,9 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 	now := time.Now()
 	pm.Content = req.GetContent()
 	pm.UpdatedAt = now
-	pm.UpdatedBy = &callerID
+	if callerID != "" {
+		pm.UpdatedBy = &callerID
+	}
 
 	if err := s.postmortems.Update(ctx, pm); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update postmortem")
@@ -120,11 +122,6 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 	}
 
 	toStatus := store.PostmortemStatus(req.GetToStatus())
-	switch toStatus {
-	case store.PostmortemStatusDraft, store.PostmortemStatusInReview, store.PostmortemStatusApproved:
-	default:
-		return nil, status.Error(codes.InvalidArgument, "unknown postmortem to_status")
-	}
 
 	pm, err := s.postmortems.GetBySEVID(ctx, req.GetSevId())
 	if err != nil {
@@ -147,7 +144,9 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 	fromStatus := pm.Status
 	pm.Status = toStatus
 	pm.UpdatedAt = now
-	pm.UpdatedBy = &callerID
+	if callerID != "" {
+		pm.UpdatedBy = &callerID
+	}
 
 	if err := s.postmortems.Update(ctx, pm); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update postmortem")
@@ -193,6 +192,11 @@ func (s *PostmortemServer) UnlockSEV(ctx context.Context, req *pb.UnlockSEVReque
 		callerID = uc.UserID
 	}
 
+	token, err := s.unlock.Sign(req.GetSevId())
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to generate unlock token")
+	}
+
 	reason := req.GetReason()
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
@@ -202,29 +206,7 @@ func (s *PostmortemServer) UnlockSEV(ctx context.Context, req *pb.UnlockSEVReque
 		CreatedAt: time.Now(),
 	})
 
-	token, err := s.unlock.Sign(req.GetSevId())
-	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to generate unlock token")
-	}
-
 	return &pb.UnlockSEVResponse{UnlockToken: token}, nil
-}
-
-// validateUnlockToken returns a gRPC status error when the token is missing or invalid.
-func (s *PostmortemServer) validateUnlockToken(token, sevID string) error {
-	if token == "" {
-		return status.Error(codes.PermissionDenied, "SEV is locked; provide an unlock_token")
-	}
-	if err := s.unlock.Validate(token, sevID); err != nil {
-		if errors.Is(err, postmortem.ErrUnlockTokenExpired) {
-			return status.Error(codes.PermissionDenied, "unlock token has expired")
-		}
-		if errors.Is(err, postmortem.ErrUnlockTokenSEVMismatch) {
-			return status.Error(codes.PermissionDenied, "unlock token is not valid for this SEV")
-		}
-		return status.Error(codes.PermissionDenied, "invalid unlock token")
-	}
-	return nil
 }
 
 func postmortemToProto(pm *store.Postmortem) *pb.PostmortemResponse {

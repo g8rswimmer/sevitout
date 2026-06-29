@@ -17,7 +17,7 @@ Store the JWT in a shell variable for convenience:
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8080/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@example.com","password":"changeme"}' | jq -r .token)
+  -d '{"email":"admin@example.com","password":"changeme123"}' | jq -r .token)
 ```
 
 ## Start the stack
