@@ -48,7 +48,7 @@ func main() {
 	// --- GitHub client (optional) ---
 	var issueClient grpchandler.IssueClient
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		issueClient = github.NewClient(token)
+		issueClient = &githubIssueClient{c: github.NewClient(token)}
 		log.Info("GitHub Issues integration enabled")
 	} else {
 		log.Info("GitHub Issues integration DISABLED")
@@ -247,4 +247,30 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		memory.NewChatStore(),
 		memory.NewSEVLinkStore(),
 		memory.NewTaskStore()
+}
+
+// githubIssueClient adapts *github.Client to grpchandler.IssueClient,
+// keeping the grpc package's interface decoupled from this integration's
+// concrete request/response types.
+type githubIssueClient struct {
+	c *github.Client
+}
+
+func (a *githubIssueClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*grpchandler.CreatedIssue, error) {
+	issue, err := a.c.CreateIssue(ctx, github.CreateIssueRequest{
+		Owner:  owner,
+		Repo:   repo,
+		Title:  title,
+		Body:   body,
+		Labels: labels,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &grpchandler.CreatedIssue{
+		Number: issue.Number,
+		Title:  issue.Title,
+		Body:   issue.Body,
+		URL:    issue.HTMLURL,
+	}, nil
 }

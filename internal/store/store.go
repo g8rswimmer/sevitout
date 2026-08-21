@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Sentinel errors returned by all store implementations.
@@ -52,6 +53,11 @@ type TaskStore interface {
 	Create(ctx context.Context, task *LinkedTask) error
 	Get(ctx context.Context, id int64) (*LinkedTask, error)
 	Update(ctx context.Context, task *LinkedTask) error
+	// SetDueDateIfUnset atomically sets a task's due date only if it doesn't
+	// already have one, reporting whether the write was applied. Used to
+	// back-fill a due date once without racing concurrent callers doing the
+	// same back-fill for the same task.
+	SetDueDateIfUnset(ctx context.Context, id int64, dueDate time.Time) (applied bool, err error)
 	Delete(ctx context.Context, id int64) error
 	ListBySEVID(ctx context.Context, sevID string) ([]*LinkedTask, error)
 }

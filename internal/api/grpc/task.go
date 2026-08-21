@@ -14,15 +14,32 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
-	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
-// IssueClient can get and create GitHub Issues.
-// Implementations must be safe for concurrent use.
+// CreatedIssue is the shape TaskServer needs back from creating an external
+// issue. It is owned by this package (the consumer), not by any tracker
+// integration, so IssueClient implementations stay decoupled from
+// integration-specific types.
+type CreatedIssue struct {
+	Number int
+	Title  string
+	Body   string
+	URL    string
+}
+
+// IssueClient creates issues in an external task tracker (e.g. GitHub
+// Issues). Implementations must be safe for concurrent use.
 type IssueClient interface {
-	GetIssue(ctx context.Context, owner, repo string, number int) (*github.Issue, error)
-	CreateIssue(ctx context.Context, req github.CreateIssueRequest) (*github.Issue, error)
+	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*CreatedIssue, error)
+}
+
+// httpStatusError is implemented by integration errors that carry an
+// HTTP-like status code. Declaring it here (rather than importing an
+// integration package's concrete error type) keeps this package decoupled
+// from any specific tracker implementation.
+type httpStatusError interface {
+	HTTPStatus() int
 }
 
 // TaskServer implements pb.TaskServiceServer.
@@ -183,22 +200,37 @@ func (s *TaskServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*
 		return nil, status.Error(codes.Internal, "failed to list tasks")
 	}
 
+	callerID := ""
+	if uc, ok := auth.UserFromContext(ctx); ok {
+		callerID = uc.UserID
+	}
+
 	now := time.Now()
 	resp := &pb.ListTasksResponse{}
 	for _, t := range tasks {
 		// If the SEV is now resolved but this task still has no due date,
-		// assign and persist it once. Best-effort: if the store write fails,
-		// the computed due date is still returned in this response but will
-		// not be persisted (see demo docs "Known limitations").
+		// assign and persist it once. SetDueDateIfUnset only applies the
+		// write (and reports true) if no other concurrent caller already
+		// backfilled it, so ListTasks can't produce duplicate audit entries
+		// for a single logical backfill event.
 		if t.DueDate == nil && sev.ResolvedAt != nil {
-			t.DueDate = computeDueDate(t.Priority, sev.ResolvedAt)
-			if err := s.tasks.Update(ctx, t); err == nil {
-				_ = s.audit.Append(ctx, &store.AuditEntry{
-					SEVID:     req.GetSevId(),
-					Action:    "task.due_date_backfilled",
-					NewValue:  strPtr(t.DueDate.Format(time.RFC3339)),
-					CreatedAt: now,
-				})
+			computed := computeDueDate(t.Priority, sev.ResolvedAt)
+			applied, err := s.tasks.SetDueDateIfUnset(ctx, t.ID, *computed)
+			if err == nil {
+				if applied {
+					t.DueDate = computed
+					_ = s.audit.Append(ctx, &store.AuditEntry{
+						SEVID:     req.GetSevId(),
+						UserID:    callerID,
+						Action:    "task.due_date_backfilled",
+						NewValue:  strPtr(computed.Format(time.RFC3339)),
+						CreatedAt: now,
+					})
+				} else if fresh, gerr := s.tasks.Get(ctx, t.ID); gerr == nil {
+					// Another concurrent call already backfilled it — reflect
+					// the persisted value instead of the one we computed.
+					t.DueDate = fresh.DueDate
+				}
 			}
 		}
 		resp.Tasks = append(resp.Tasks, taskToProto(t, now))
@@ -286,13 +318,13 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 	priority := store.TaskPriority(req.GetPriority())
 	labels := []string{req.GetSevId(), string(priority)}
 
-	issue, err := s.github.CreateIssue(ctx, github.CreateIssueRequest{
-		Owner:  req.GetOwner(),
-		Repo:   req.GetRepo(),
-		Title:  req.GetTitle(),
-		Body:   req.GetBody(),
-		Labels: labels,
-	})
+	issue, err := s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), labels)
+	if err != nil && isUnprocessable(err) {
+		// A 422 here is most often caused by a label that doesn't already
+		// exist and the org restricting who can create new labels. Don't
+		// let a cosmetic labeling failure block issue creation.
+		issue, err = s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), nil)
+	}
 	if err != nil {
 		return nil, githubIssueError(err)
 	}
@@ -310,7 +342,7 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		SEVID:            req.GetSevId(),
 		ExternalSystem:   "github",
 		TaskID:           taskID,
-		URL:              issue.HTMLURL,
+		URL:              issue.URL,
 		Title:            issue.Title,
 		Description:      &body,
 		RelationshipType: store.TaskRelationshipType(req.GetRelationshipType()),
@@ -321,40 +353,52 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 	}
 
 	if err := s.tasks.Create(ctx, task); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return nil, status.Errorf(codes.AlreadyExists,
+				"GitHub issue %s was created but is already linked to this SEV", issue.URL)
+		}
 		// The GitHub issue already exists at this point and cannot be
 		// silently retried without risking a duplicate; surface its URL so
 		// the caller can link it manually via LinkTask.
 		return nil, status.Errorf(codes.Internal,
-			"GitHub issue %s was created but could not be linked to the SEV: %v", issue.HTMLURL, err)
+			"GitHub issue %s was created but could not be linked to the SEV: %v", issue.URL, err)
 	}
 
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "task.github_issue_created",
-		NewValue:  strPtr(issue.HTMLURL),
+		NewValue:  strPtr(issue.URL),
 		CreatedAt: now,
 	})
 
 	return taskToProto(task, now), nil
 }
 
-// githubIssueError maps a github.Client error to the most accurate gRPC
-// status available, so callers can distinguish a bad request/permission
-// problem from a genuine internal failure instead of seeing a bare
-// "unexpected status" with no indication of the actual cause.
+// isUnprocessable reports whether err represents an HTTP 422 response.
+func isUnprocessable(err error) bool {
+	var statusErr httpStatusError
+	return errors.As(err, &statusErr) && statusErr.HTTPStatus() == http.StatusUnprocessableEntity
+}
+
+// githubIssueError maps an integration error's HTTP status to the most
+// accurate gRPC status available, so callers can distinguish a bad
+// request/permission problem from a genuine internal failure instead of
+// seeing a bare "unexpected status" with no indication of the actual cause.
 func githubIssueError(err error) error {
-	var apiErr *github.APIError
-	if errors.As(err, &apiErr) {
-		switch apiErr.StatusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			return status.Errorf(codes.PermissionDenied, "GitHub rejected the request: %s", apiErr.Error())
+	var statusErr httpStatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.HTTPStatus() {
+		case http.StatusUnauthorized:
+			return status.Errorf(codes.Unauthenticated, "GitHub rejected the request: %s", err.Error())
+		case http.StatusForbidden:
+			return status.Errorf(codes.PermissionDenied, "GitHub rejected the request: %s", err.Error())
 		case http.StatusNotFound:
-			return status.Errorf(codes.NotFound, "GitHub repository not found: %s", apiErr.Error())
+			return status.Errorf(codes.NotFound, "GitHub repository not found: %s", err.Error())
 		case http.StatusUnprocessableEntity:
-			return status.Errorf(codes.InvalidArgument, "GitHub rejected the request: %s", apiErr.Error())
+			return status.Errorf(codes.InvalidArgument, "GitHub rejected the request: %s", err.Error())
 		case http.StatusTooManyRequests:
-			return status.Errorf(codes.ResourceExhausted, "GitHub rate limit exceeded: %s", apiErr.Error())
+			return status.Errorf(codes.ResourceExhausted, "GitHub rate limit exceeded: %s", err.Error())
 		}
 	}
 	return status.Errorf(codes.Internal, "failed to create GitHub issue: %v", err)

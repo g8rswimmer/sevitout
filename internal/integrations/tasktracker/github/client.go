@@ -51,6 +51,10 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("github: unexpected status %d", e.StatusCode)
 }
 
+// HTTPStatus returns the response status code, letting callers branch on it
+// without depending on this package's concrete APIError type.
+func (e *APIError) HTTPStatus() int { return e.StatusCode }
+
 // Client calls the GitHub REST API v3.
 type Client struct {
 	token   string

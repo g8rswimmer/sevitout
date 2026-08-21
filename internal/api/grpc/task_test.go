@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
@@ -20,18 +22,32 @@ import (
 
 // ── fake IssueClient ─────────────────────────────────────────────────────────
 
+// capturedCreateIssue records one CreateIssue invocation on fakeIssueClient.
+type capturedCreateIssue struct {
+	Owner, Repo, Title, Body string
+	Labels                   []string
+}
+
 type fakeIssueClient struct {
-	issue *github.Issue
+	issue *grpchandler.CreatedIssue
 	err   error
 
-	lastCreateReq github.CreateIssueRequest
+	// errsByCall, if set, returns a per-call error by call index (0-based);
+	// once exhausted, subsequent calls fall back to issue/err. Lets tests
+	// simulate "fails once, then succeeds on retry."
+	errsByCall []error
+
+	calls []capturedCreateIssue
 }
 
-func (f *fakeIssueClient) GetIssue(_ context.Context, _, _ string, _ int) (*github.Issue, error) {
-	return f.issue, f.err
-}
-func (f *fakeIssueClient) CreateIssue(_ context.Context, req github.CreateIssueRequest) (*github.Issue, error) {
-	f.lastCreateReq = req
+func (f *fakeIssueClient) CreateIssue(_ context.Context, owner, repo, title, body string, labels []string) (*grpchandler.CreatedIssue, error) {
+	idx := len(f.calls)
+	f.calls = append(f.calls, capturedCreateIssue{owner, repo, title, body, labels})
+	if idx < len(f.errsByCall) {
+		if err := f.errsByCall[idx]; err != nil {
+			return nil, err
+		}
+	}
 	return f.issue, f.err
 }
 
@@ -168,7 +184,7 @@ func TestComputeDueDate_ManualOverride(t *testing.T) {
 // When a SEV resolves after tasks are linked, ListTasks should back-fill due dates.
 func TestListTasks_BackfillsDueDateOnResolve(t *testing.T) {
 	ts := newTestTaskServer(nil)
-	ctx := context.Background()
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-viewing"})
 
 	sevID := seedSEVForTask(t, ts, nil) // unresolved
 	req := linkTaskReq(sevID, "critical", "action-item")
@@ -205,10 +221,55 @@ func TestListTasks_BackfillsDueDateOnResolve(t *testing.T) {
 	for _, e := range entries {
 		if e.Action == "task.due_date_backfilled" {
 			found = true
+			if e.UserID != "user-viewing" {
+				t.Errorf("backfill audit entry UserID: got %q, want %q", e.UserID, "user-viewing")
+			}
 		}
 	}
 	if !found {
 		t.Error("no audit entry with action task.due_date_backfilled")
+	}
+}
+
+// Concurrent ListTasks calls for the same just-resolved SEV must not each
+// independently backfill and audit the same task.
+func TestListTasks_ConcurrentBackfillIsNotDuplicated(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+
+	sevID := seedSEVForTask(t, ts, nil) // unresolved
+	if _, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item")); err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+
+	resolved := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	sv, _ := ts.sevs.Get(ctx, sevID)
+	sv.ResolvedAt = &resolved
+	sv.Status = store.SEVStatusResolved
+	_ = ts.sevs.Update(ctx, sv)
+
+	const concurrency = 20
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			defer wg.Done()
+			if _, err := ts.server.ListTasks(ctx, &pb.ListTasksRequest{SevId: sevID}); err != nil {
+				t.Errorf("ListTasks: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	entries, _ := ts.audit.ListBySEVID(ctx, sevID)
+	backfills := 0
+	for _, e := range entries {
+		if e.Action == "task.due_date_backfilled" {
+			backfills++
+		}
+	}
+	if backfills != 1 {
+		t.Errorf("want exactly 1 task.due_date_backfilled audit entry across %d concurrent ListTasks calls, got %d", concurrency, backfills)
 	}
 }
 
@@ -518,12 +579,11 @@ func TestUpdateTaskDueDate_NotFound(t *testing.T) {
 
 func TestCreateGitHubIssue_Valid(t *testing.T) {
 	gh := &fakeIssueClient{
-		issue: &github.Issue{
-			Number:  42,
-			Title:   "SEV follow-up",
-			Body:    "details",
-			State:   "open",
-			HTMLURL: "https://github.com/acme/api/issues/42",
+		issue: &grpchandler.CreatedIssue{
+			Number: 42,
+			Title:  "SEV follow-up",
+			Body:   "details",
+			URL:    "https://github.com/acme/api/issues/42",
 		},
 	}
 	ts := newTestTaskServer(gh)
@@ -558,8 +618,45 @@ func TestCreateGitHubIssue_Valid(t *testing.T) {
 		t.Error("task should not be overdue immediately after creation")
 	}
 	wantLabels := []string{sevID, "critical"}
-	if !reflect.DeepEqual(gh.lastCreateReq.Labels, wantLabels) {
-		t.Errorf("labels: got %v, want %v", gh.lastCreateReq.Labels, wantLabels)
+	if len(gh.calls) != 1 {
+		t.Fatalf("want 1 CreateIssue call, got %d", len(gh.calls))
+	}
+	if !reflect.DeepEqual(gh.calls[0].Labels, wantLabels) {
+		t.Errorf("labels: got %v, want %v", gh.calls[0].Labels, wantLabels)
+	}
+}
+
+func TestCreateGitHubIssue_RetriesWithoutLabelsOn422(t *testing.T) {
+	gh := &fakeIssueClient{
+		issue:      &grpchandler.CreatedIssue{Number: 7, Title: "t", URL: "https://github.com/acme/api/issues/7"},
+		errsByCall: []error{&github.APIError{StatusCode: http.StatusUnprocessableEntity, Message: "label not found"}},
+	}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	resp, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId:            sevID,
+		Owner:            "acme",
+		Repo:             "api",
+		Title:            "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue should succeed after retrying without labels: %v", err)
+	}
+	if resp.GetUrl() != "https://github.com/acme/api/issues/7" {
+		t.Errorf("url mismatch: got %q", resp.GetUrl())
+	}
+	if len(gh.calls) != 2 {
+		t.Fatalf("want 2 CreateIssue calls (initial + retry), got %d", len(gh.calls))
+	}
+	if len(gh.calls[0].Labels) == 0 {
+		t.Error("first call should have included labels")
+	}
+	if len(gh.calls[1].Labels) != 0 {
+		t.Errorf("retry call should omit labels, got %v", gh.calls[1].Labels)
 	}
 }
 
@@ -588,7 +685,7 @@ func TestCreateGitHubIssue_GitHubAPIError_MapsToStatusCode(t *testing.T) {
 		want       codes.Code
 	}{
 		{"forbidden", http.StatusForbidden, codes.PermissionDenied},
-		{"unauthorized", http.StatusUnauthorized, codes.PermissionDenied},
+		{"unauthorized", http.StatusUnauthorized, codes.Unauthenticated},
 		{"not found", http.StatusNotFound, codes.NotFound},
 		{"unprocessable", http.StatusUnprocessableEntity, codes.InvalidArgument},
 		{"rate limited", http.StatusTooManyRequests, codes.ResourceExhausted},
@@ -634,8 +731,42 @@ func TestCreateGitHubIssue_GitHubError(t *testing.T) {
 	}
 }
 
+func TestCreateGitHubIssue_DuplicateLinkReturnsAlreadyExists(t *testing.T) {
+	gh := &fakeIssueClient{issue: &grpchandler.CreatedIssue{Number: 1, Title: "t", URL: "https://github.com/acme/api/issues/1"}}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	// Pre-register the same (sev_id, "github", "acme/api#1") reference via
+	// LinkTask so CreateGitHubIssue's Create call hits the same conflict
+	// memory.TaskStore already enforces for LinkTask.
+	if _, err := ts.server.LinkTask(ctx, &pb.LinkTaskRequest{
+		SevId:            sevID,
+		ExternalSystem:   "github",
+		TaskId:           "acme/api#1",
+		Url:              "https://github.com/acme/api/issues/1",
+		Title:            "pre-existing",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	}); err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+
+	_, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId:            sevID,
+		Owner:            "acme",
+		Repo:             "api",
+		Title:            "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if grpcCode(err) != codes.AlreadyExists {
+		t.Errorf("want AlreadyExists for duplicate (sev_id, external_system, task_id), got %v", grpcCode(err))
+	}
+}
+
 func TestCreateGitHubIssue_SEVNotFound(t *testing.T) {
-	gh := &fakeIssueClient{issue: &github.Issue{Number: 1, Title: "t", HTMLURL: "u"}}
+	gh := &fakeIssueClient{issue: &grpchandler.CreatedIssue{Number: 1, Title: "t", URL: "u"}}
 	ts := newTestTaskServer(gh)
 
 	_, err := ts.server.CreateGitHubIssue(context.Background(), &pb.CreateGitHubIssueRequest{
