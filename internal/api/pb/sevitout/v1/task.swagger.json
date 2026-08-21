@@ -1,0 +1,379 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "sevitout/v1/task.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "TaskService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/sevs/{sevId}/github-issues": {
+      "post": {
+        "summary": "CreateGitHubIssue creates a new GitHub Issue pre-filled with SEV context,\nlinks it to the SEV, and returns the linked task record.",
+        "operationId": "TaskService_CreateGitHubIssue",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceCreateGitHubIssueBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/tasks": {
+      "get": {
+        "summary": "ListTasks returns all tasks linked to a SEV.",
+        "operationId": "TaskService_ListTasks",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListTasksResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      },
+      "post": {
+        "summary": "LinkTask links an existing external task (e.g. a GitHub Issue URL) to a SEV.",
+        "operationId": "TaskService_LinkTask",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceLinkTaskBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/tasks/{id}": {
+      "delete": {
+        "summary": "UnlinkTask removes a linked task from a SEV by its database ID.",
+        "operationId": "TaskService_UnlinkTask",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/tasks/{id}/due-date": {
+      "patch": {
+        "summary": "UpdateTaskDueDate overrides the SLA-computed due date for a linked task.",
+        "operationId": "TaskService_UpdateTaskDueDate",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceUpdateTaskDueDateBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "TaskServiceCreateGitHubIssueBody": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "owner is the GitHub organisation or user (e.g. \"acme-corp\")."
+        },
+        "repo": {
+          "type": "string",
+          "description": "repo is the repository name (e.g. \"my-service\")."
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string",
+          "description": "body is the issue description; callers should pre-fill with SEV context."
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "description": "priority: critical | non-critical (controls default SLA due date)."
+        }
+      }
+    },
+    "TaskServiceLinkTaskBody": {
+      "type": "object",
+      "properties": {
+        "externalSystem": {
+          "type": "string",
+          "description": "external_system identifies the tracker (e.g. \"github\", \"generic\")."
+        },
+        "taskId": {
+          "type": "string",
+          "description": "task_id is the external identifier (e.g. \"owner/repo#42\")."
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "dueDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "due_date overrides the computed SLA due date when provided."
+        }
+      }
+    },
+    "TaskServiceUpdateTaskDueDateBody": {
+      "type": "object",
+      "properties": {
+        "dueDate": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1ListTasksResponse": {
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1TaskResponse"
+          }
+        }
+      }
+    },
+    "v1TaskResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "externalSystem": {
+          "type": "string",
+          "description": "external_system identifies the tracker (e.g. \"github\", \"generic\")."
+        },
+        "taskId": {
+          "type": "string",
+          "description": "task_id is the external identifier (e.g. \"owner/repo#42\" for GitHub Issues)."
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "title": "priority: critical | non-critical"
+        },
+        "dueDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "due_date is null when the SEV has not yet been resolved."
+        },
+        "overdue": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      },
+      "description": "TaskResponse is the linked task record returned by all TaskService RPCs."
+    }
+  }
+}

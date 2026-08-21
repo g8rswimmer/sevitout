@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// TaskService manages external task references linked to a SEV.
+service TaskService {
+  // LinkTask links an existing external task (e.g. a GitHub Issue URL) to a SEV.
+  rpc LinkTask(LinkTaskRequest) returns (TaskResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/tasks"
+      body: "*"
+    };
+  }
+
+  // UnlinkTask removes a linked task from a SEV by its database ID.
+  rpc UnlinkTask(UnlinkTaskRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/sevs/{sev_id}/tasks/{id}"
+    };
+  }
+
+  // ListTasks returns all tasks linked to a SEV.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/tasks"
+    };
+  }
+
+  // UpdateTaskDueDate overrides the SLA-computed due date for a linked task.
+  rpc UpdateTaskDueDate(UpdateTaskDueDateRequest) returns (TaskResponse) {
+    option (google.api.http) = {
+      patch: "/v1/sevs/{sev_id}/tasks/{id}/due-date"
+      body: "*"
+    };
+  }
+
+  // CreateGitHubIssue creates a new GitHub Issue pre-filled with SEV context,
+  // links it to the SEV, and returns the linked task record.
+  rpc CreateGitHubIssue(CreateGitHubIssueRequest) returns (TaskResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/github-issues"
+      body: "*"
+    };
+  }
+}
+
+// TaskResponse is the linked task record returned by all TaskService RPCs.
+message TaskResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  // external_system identifies the tracker (e.g. "github", "generic").
+  string external_system = 3;
+  // task_id is the external identifier (e.g. "owner/repo#42" for GitHub Issues).
+  string task_id = 4;
+  string url = 5;
+  string title = 6;
+  string description = 7;
+  // relationship_type: action-item | contributing-factor | follow-up | dependency
+  string relationship_type = 8;
+  // priority: critical | non-critical
+  string priority = 9;
+  // due_date is null when the SEV has not yet been resolved.
+  google.protobuf.Timestamp due_date = 10;
+  bool overdue = 11;
+  google.protobuf.Timestamp created_at = 12;
+  string created_by = 13;
+}
+
+message LinkTaskRequest {
+  string sev_id = 1;
+  // external_system identifies the tracker (e.g. "github", "generic").
+  string external_system = 2;
+  // task_id is the external identifier (e.g. "owner/repo#42").
+  string task_id = 3;
+  string url = 4;
+  string title = 5;
+  string description = 6;
+  // relationship_type: action-item | contributing-factor | follow-up | dependency
+  string relationship_type = 7;
+  // priority: critical | non-critical (controls default SLA due date).
+  string priority = 8;
+  // due_date overrides the computed SLA due date when provided.
+  google.protobuf.Timestamp due_date = 9;
+}
+
+message UnlinkTaskRequest {
+  string sev_id = 1;
+  int64 id = 2;
+}
+
+message ListTasksRequest {
+  string sev_id = 1;
+}
+
+message ListTasksResponse {
+  repeated TaskResponse tasks = 1;
+}
+
+message UpdateTaskDueDateRequest {
+  string sev_id = 1;
+  int64 id = 2;
+  google.protobuf.Timestamp due_date = 3;
+}
+
+message CreateGitHubIssueRequest {
+  string sev_id = 1;
+  // owner is the GitHub organisation or user (e.g. "acme-corp").
+  string owner = 2;
+  // repo is the repository name (e.g. "my-service").
+  string repo = 3;
+  string title = 4;
+  // body is the issue description; callers should pre-fill with SEV context.
+  string body = 5;
+  // relationship_type: action-item | contributing-factor | follow-up | dependency
+  string relationship_type = 6;
+  // priority: critical | non-critical (controls default SLA due date).
+  string priority = 7;
+}
