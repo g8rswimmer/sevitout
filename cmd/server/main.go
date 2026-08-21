@@ -51,6 +51,8 @@ func main() {
 		gh := github.NewClient(token)
 		issueClient = &githubClientAdapter{gh}
 		log.Info("GitHub Issues integration enabled")
+	} else {
+		log.Info("GitHub Issues integration DISABLED")
 	}
 
 	// --- JWT signer ---

@@ -32,6 +32,8 @@ services:
     command: ["/app/server"]
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
     depends_on:
