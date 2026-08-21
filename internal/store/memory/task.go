@@ -24,6 +24,13 @@ var _ store.TaskStore = (*TaskStore)(nil)
 func (s *TaskStore) Create(_ context.Context, task *store.LinkedTask) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, existing := range s.data {
+		if existing.SEVID == task.SEVID &&
+			existing.ExternalSystem == task.ExternalSystem &&
+			existing.TaskID == task.TaskID {
+			return store.ErrConflict
+		}
+	}
 	task.ID = s.seq.Add(1)
 	cp := *task
 	s.data[task.ID] = &cp

@@ -32,10 +32,12 @@ services:
     command: ["/app/server"]
     ports:
       - "8080:8080"
-    env_file:
-      - .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL_HOURS: ${JWT_TTL_HOURS}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      PAGERDUTY_API_KEY: ${PAGERDUTY_API_KEY}
     depends_on:
       migrate:
         condition: service_completed_successfully

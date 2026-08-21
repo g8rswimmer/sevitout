@@ -20,8 +20,8 @@ import (
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
-	"github.com/g8rswimmer/sevitout/internal/integrations/github"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
+	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
@@ -48,8 +48,7 @@ func main() {
 	// --- GitHub client (optional) ---
 	var issueClient grpchandler.IssueClient
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		gh := github.NewClient(token)
-		issueClient = &githubClientAdapter{gh}
+		issueClient = github.NewClient(token)
 		log.Info("GitHub Issues integration enabled")
 	} else {
 		log.Info("GitHub Issues integration DISABLED")
@@ -248,37 +247,4 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		memory.NewChatStore(),
 		memory.NewSEVLinkStore(),
 		memory.NewTaskStore()
-}
-
-// githubClientAdapter adapts the github.Client to the grpchandler.IssueClient interface.
-type githubClientAdapter struct {
-	c *github.Client
-}
-
-func (a *githubClientAdapter) GetIssue(ctx context.Context, owner, repo string, number int) (*grpchandler.GitHubIssue, error) {
-	issue, err := a.c.GetIssue(ctx, owner, repo, number)
-	if err != nil {
-		return nil, err
-	}
-	return &grpchandler.GitHubIssue{
-		Number:  issue.Number,
-		Title:   issue.Title,
-		Body:    issue.Body,
-		State:   issue.State,
-		HTMLURL: issue.HTMLURL,
-	}, nil
-}
-
-func (a *githubClientAdapter) CreateIssue(ctx context.Context, owner, repo, title, body string) (*grpchandler.GitHubIssue, error) {
-	issue, err := a.c.CreateIssue(ctx, owner, repo, title, body)
-	if err != nil {
-		return nil, err
-	}
-	return &grpchandler.GitHubIssue{
-		Number:  issue.Number,
-		Title:   issue.Title,
-		Body:    issue.Body,
-		State:   issue.State,
-		HTMLURL: issue.HTMLURL,
-	}, nil
 }

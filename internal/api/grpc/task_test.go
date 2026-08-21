@@ -3,6 +3,7 @@ package grpc_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
@@ -18,14 +20,14 @@ import (
 // ── fake IssueClient ─────────────────────────────────────────────────────────
 
 type fakeIssueClient struct {
-	issue *grpchandler.GitHubIssue
+	issue *github.Issue
 	err   error
 }
 
-func (f *fakeIssueClient) GetIssue(_ context.Context, _, _ string, _ int) (*grpchandler.GitHubIssue, error) {
+func (f *fakeIssueClient) GetIssue(_ context.Context, _, _ string, _ int) (*github.Issue, error) {
 	return f.issue, f.err
 }
-func (f *fakeIssueClient) CreateIssue(_ context.Context, _, _, _, _ string) (*grpchandler.GitHubIssue, error) {
+func (f *fakeIssueClient) CreateIssue(_ context.Context, _, _, _, _ string) (*github.Issue, error) {
 	return f.issue, f.err
 }
 
@@ -193,6 +195,17 @@ func TestListTasks_BackfillsDueDateOnResolve(t *testing.T) {
 	if !gotTime.Equal(want) {
 		t.Errorf("back-filled due date: got %v, want %v", gotTime, want)
 	}
+
+	entries, _ := ts.audit.ListBySEVID(ctx, sevID)
+	found := false
+	for _, e := range entries {
+		if e.Action == "task.due_date_backfilled" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no audit entry with action task.due_date_backfilled")
+	}
 }
 
 // ── Overdue detection ─────────────────────────────────────────────────────────
@@ -294,6 +307,48 @@ func TestLinkTask_InvalidPriority(t *testing.T) {
 	_, err := ts.server.LinkTask(ctx, req)
 	if grpcCode(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestLinkTask_MissingExternalSystem(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	req := linkTaskReq(sevID, "critical", "action-item")
+	req.ExternalSystem = ""
+	_, err := ts.server.LinkTask(ctx, req)
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestLinkTask_MissingTaskID(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	req := linkTaskReq(sevID, "critical", "action-item")
+	req.TaskId = ""
+	_, err := ts.server.LinkTask(ctx, req)
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestLinkTask_DuplicateRejected(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	req := linkTaskReq(sevID, "critical", "action-item")
+	if _, err := ts.server.LinkTask(ctx, req); err != nil {
+		t.Fatalf("first LinkTask: %v", err)
+	}
+
+	_, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item"))
+	if grpcCode(err) != codes.AlreadyExists {
+		t.Errorf("want AlreadyExists for duplicate (sev_id, external_system, task_id), got %v", grpcCode(err))
 	}
 }
 
@@ -459,7 +514,7 @@ func TestUpdateTaskDueDate_NotFound(t *testing.T) {
 
 func TestCreateGitHubIssue_Valid(t *testing.T) {
 	gh := &fakeIssueClient{
-		issue: &grpchandler.GitHubIssue{
+		issue: &github.Issue{
 			Number:  42,
 			Title:   "SEV follow-up",
 			Body:    "details",
@@ -518,6 +573,40 @@ func TestCreateGitHubIssue_NotConfigured(t *testing.T) {
 	}
 }
 
+func TestCreateGitHubIssue_GitHubAPIError_MapsToStatusCode(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		want       codes.Code
+	}{
+		{"forbidden", http.StatusForbidden, codes.PermissionDenied},
+		{"unauthorized", http.StatusUnauthorized, codes.PermissionDenied},
+		{"not found", http.StatusNotFound, codes.NotFound},
+		{"unprocessable", http.StatusUnprocessableEntity, codes.InvalidArgument},
+		{"rate limited", http.StatusTooManyRequests, codes.ResourceExhausted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gh := &fakeIssueClient{err: &github.APIError{StatusCode: tt.statusCode, Message: "denied"}}
+			ts := newTestTaskServer(gh)
+			ctx := context.Background()
+			sevID := seedSEVForTask(t, ts, nil)
+
+			_, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+				SevId:            sevID,
+				Owner:            "acme",
+				Repo:             "api",
+				Title:            "issue",
+				RelationshipType: "action-item",
+				Priority:         "critical",
+			})
+			if grpcCode(err) != tt.want {
+				t.Errorf("status %d: want %v, got %v (%v)", tt.statusCode, tt.want, grpcCode(err), err)
+			}
+		})
+	}
+}
+
 func TestCreateGitHubIssue_GitHubError(t *testing.T) {
 	gh := &fakeIssueClient{err: errors.New("403 forbidden")}
 	ts := newTestTaskServer(gh)
@@ -538,7 +627,7 @@ func TestCreateGitHubIssue_GitHubError(t *testing.T) {
 }
 
 func TestCreateGitHubIssue_SEVNotFound(t *testing.T) {
-	gh := &fakeIssueClient{issue: &grpchandler.GitHubIssue{Number: 1, Title: "t", HTMLURL: "u"}}
+	gh := &fakeIssueClient{issue: &github.Issue{Number: 1, Title: "t", HTMLURL: "u"}}
 	ts := newTestTaskServer(gh)
 
 	_, err := ts.server.CreateGitHubIssue(context.Background(), &pb.CreateGitHubIssueRequest{

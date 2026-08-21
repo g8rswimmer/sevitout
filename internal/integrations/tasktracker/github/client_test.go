@@ -3,11 +3,12 @@ package github_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/g8rswimmer/sevitout/internal/integrations/github"
+	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 )
 
 func issueHandler(t *testing.T, number int, title, state string) http.HandlerFunc {
@@ -105,5 +106,52 @@ func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	_, err := c.CreateIssue(context.Background(), "owner", "repo", "title", "body")
 	if err == nil {
 		t.Fatal("expected error for non-201 status, got nil")
+	}
+}
+
+func TestCreateIssue_UnexpectedStatus_SurfacesAPIMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "Resource not accessible by personal access token"})
+	}))
+	defer srv.Close()
+
+	c := github.NewClientWithBaseURL("test-token", srv.URL)
+	_, err := c.CreateIssue(context.Background(), "owner", "repo", "title", "body")
+
+	var apiErr *github.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *github.APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusForbidden {
+		t.Errorf("status code: got %d, want %d", apiErr.StatusCode, http.StatusForbidden)
+	}
+	if apiErr.Message != "Resource not accessible by personal access token" {
+		t.Errorf("message: got %q, want the GitHub-provided message", apiErr.Message)
+	}
+}
+
+func TestCreateIssue_EscapesOwnerAndRepo(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": 1, "html_url": "https://github.com/x/y/issues/1"})
+	}))
+	defer srv.Close()
+
+	c := github.NewClientWithBaseURL("test-token", srv.URL)
+	if _, err := c.CreateIssue(context.Background(), "foo/../bar", "repo?evil=1", "title", "body"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "/repos/foo%2F..%2Fbar/repo%3Fevil=1/issues"
+	if gotPath != want {
+		t.Errorf("request path: got %q, want %q (owner/repo must be escaped, not interpreted as path separators)", gotPath, want)
+	}
+	if gotQuery != "" {
+		t.Errorf("request query: got %q, want empty (repo's literal \"?\" must not start a query string)", gotQuery)
 	}
 }

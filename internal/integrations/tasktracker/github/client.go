@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -13,6 +15,7 @@ const (
 	defaultBaseURL   = "https://api.github.com"
 	requestTimeout   = 10 * time.Second
 	githubAPIVersion = "2022-11-28"
+	maxErrorBodyLen  = 4096
 )
 
 // Issue is a GitHub Issue as returned by the client.
@@ -22,6 +25,21 @@ type Issue struct {
 	Body    string
 	State   string // "open" or "closed"
 	HTMLURL string
+}
+
+// APIError is returned when the GitHub API responds with a non-success
+// status code. StatusCode and Message let callers distinguish client errors
+// (401/403/404/422) from genuine server-side failures.
+type APIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *APIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("github: status %d: %s", e.StatusCode, e.Message)
+	}
+	return fmt.Sprintf("github: unexpected status %d", e.StatusCode)
 }
 
 // Client calls the GitHub REST API v3.
@@ -53,8 +71,8 @@ func NewClientWithBaseURL(token, baseURL string) *Client {
 
 // GetIssue fetches a single GitHub Issue by owner, repo, and issue number.
 func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d", c.baseURL, owner, repo, number)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d", c.baseURL, url.PathEscape(owner), url.PathEscape(repo), number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("github: build request: %w", err)
 	}
@@ -66,30 +84,10 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("github: issue %s/%s#%d not found", owner, repo, number)
-	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: unexpected status %d", resp.StatusCode)
+		return nil, newAPIError(resp)
 	}
-
-	var body struct {
-		Number  int    `json:"number"`
-		Title   string `json:"title"`
-		Body    string `json:"body"`
-		State   string `json:"state"`
-		HTMLURL string `json:"html_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("github: decode response: %w", err)
-	}
-	return &Issue{
-		Number:  body.Number,
-		Title:   body.Title,
-		Body:    body.Body,
-		State:   body.State,
-		HTMLURL: body.HTMLURL,
-	}, nil
+	return decodeIssue(resp.Body)
 }
 
 // CreateIssue creates a new GitHub Issue in the given repository and returns
@@ -103,8 +101,8 @@ func (c *Client) CreateIssue(ctx context.Context, owner, repo, title, body strin
 		return nil, fmt.Errorf("github: marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/repos/%s/%s/issues", c.baseURL, owner, repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues", c.baseURL, url.PathEscape(owner), url.PathEscape(repo))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("github: build request: %w", err)
 	}
@@ -118,30 +116,50 @@ func (c *Client) CreateIssue(ctx context.Context, owner, repo, title, body strin
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("github: unexpected status %d", resp.StatusCode)
+		return nil, newAPIError(resp)
 	}
-
-	var created struct {
-		Number  int    `json:"number"`
-		Title   string `json:"title"`
-		Body    string `json:"body"`
-		State   string `json:"state"`
-		HTMLURL string `json:"html_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		return nil, fmt.Errorf("github: decode response: %w", err)
-	}
-	return &Issue{
-		Number:  created.Number,
-		Title:   created.Title,
-		Body:    created.Body,
-		State:   created.State,
-		HTMLURL: created.HTMLURL,
-	}, nil
+	return decodeIssue(resp.Body)
 }
 
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+}
+
+type issueDTO struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	Body    string `json:"body"`
+	State   string `json:"state"`
+	HTMLURL string `json:"html_url"`
+}
+
+func decodeIssue(r io.Reader) (*Issue, error) {
+	var dto issueDTO
+	if err := json.NewDecoder(r).Decode(&dto); err != nil {
+		return nil, fmt.Errorf("github: decode response: %w", err)
+	}
+	return &Issue{
+		Number:  dto.Number,
+		Title:   dto.Title,
+		Body:    dto.Body,
+		State:   dto.State,
+		HTMLURL: dto.HTMLURL,
+	}, nil
+}
+
+// newAPIError builds an *APIError from a non-success response, attempting to
+// extract GitHub's own error message so callers see the actual failure reason
+// (bad scope, rate limit, validation error) rather than a bare status code.
+func newAPIError(resp *http.Response) *APIError {
+	limited := io.LimitReader(resp.Body, maxErrorBodyLen)
+	raw, _ := io.ReadAll(limited)
+
+	var body struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(raw, &body)
+
+	return &APIError{StatusCode: resp.StatusCode, Message: body.Message}
 }
