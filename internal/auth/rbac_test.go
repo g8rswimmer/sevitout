@@ -63,6 +63,18 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleResponder, "/sevitout.v1.SEVLinkService/UnlinkSEVs", true},
 		{store.OrgRoleResponder, "/sevitout.v1.SEVLinkService/ListLinkedSEVs", true},
 
+		// Task service
+		{store.OrgRoleViewer, "/sevitout.v1.TaskService/ListTasks", true},
+		{store.OrgRoleViewer, "/sevitout.v1.TaskService/LinkTask", false},
+		{store.OrgRoleViewer, "/sevitout.v1.TaskService/UnlinkTask", false},
+		{store.OrgRoleViewer, "/sevitout.v1.TaskService/UpdateTaskDueDate", false},
+		{store.OrgRoleViewer, "/sevitout.v1.TaskService/CreateGitHubIssue", false},
+		{store.OrgRoleResponder, "/sevitout.v1.TaskService/LinkTask", true},
+		{store.OrgRoleResponder, "/sevitout.v1.TaskService/UnlinkTask", true},
+		{store.OrgRoleResponder, "/sevitout.v1.TaskService/ListTasks", true},
+		{store.OrgRoleResponder, "/sevitout.v1.TaskService/UpdateTaskDueDate", true},
+		{store.OrgRoleResponder, "/sevitout.v1.TaskService/CreateGitHubIssue", true},
+
 		// Unknown RPC is denied to everyone
 		{store.OrgRoleAdmin, "/sevitout.v1.UnknownService/DoSomething", false},
 		{store.OrgRoleViewer, "/sevitout.v1.UnknownService/DoSomething", false},

@@ -21,6 +21,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
+	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
@@ -35,13 +36,22 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore,
-		announcementStore, chatStore, sevLinkStore := buildStores(ctx, log)
+		announcementStore, chatStore, sevLinkStore, taskStore := buildStores(ctx, log)
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
 	if apiKey := os.Getenv("PAGERDUTY_API_KEY"); apiKey != "" {
 		onCaller = pagerduty.NewClient(apiKey)
 		log.Info("PagerDuty on-call integration enabled")
+	}
+
+	// --- GitHub client (optional) ---
+	var issueClient grpchandler.IssueClient
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		issueClient = &githubIssueClient{c: github.NewClient(token)}
+		log.Info("GitHub Issues integration enabled")
+	} else {
+		log.Info("GitHub Issues integration DISABLED")
 	}
 
 	// --- JWT signer ---
@@ -70,6 +80,7 @@ func main() {
 	announcementServer := grpchandler.NewAnnouncementServer(announcementStore, sevStore)
 	chatServer := grpchandler.NewChatServer(chatStore, sevStore)
 	sevLinkServer := grpchandler.NewSEVLinkServer(sevLinkStore, sevStore, auditStore)
+	taskServer := grpchandler.NewTaskServer(taskStore, sevStore, auditStore, issueClient)
 
 	grpcSrv := grpc.NewServer(
 		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
@@ -83,6 +94,7 @@ func main() {
 	pb.RegisterAnnouncementServiceServer(grpcSrv, announcementServer)
 	pb.RegisterChatServiceServer(grpcSrv, chatServer)
 	pb.RegisterSEVLinkServiceServer(grpcSrv, sevLinkServer)
+	pb.RegisterTaskServiceServer(grpcSrv, taskServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -144,6 +156,10 @@ func main() {
 		log.Error("register sev-link gateway", "err", err)
 		os.Exit(1)
 	}
+	if err := pb.RegisterTaskServiceHandlerClient(ctx, gwMux, pb.NewTaskServiceClient(conn)); err != nil {
+		log.Error("register task gateway", "err", err)
+		os.Exit(1)
+	}
 
 	// --- Password auth handler ---
 	passwordHandler := auth.NewPasswordHandler(jwtSigner, userStore)
@@ -196,6 +212,7 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 	store.AnnouncementStore,
 	store.ChatStore,
 	store.SEVLinkStore,
+	store.TaskStore,
 ) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -209,7 +226,8 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 			memory.NewPostmortemStore(),
 			memory.NewAnnouncementStore(),
 			memory.NewChatStore(),
-			memory.NewSEVLinkStore()
+			memory.NewSEVLinkStore(),
+			memory.NewTaskStore()
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
@@ -217,7 +235,7 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
-	log.Warn("service, postmortem, announcement, chat, and sev-link stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
+	log.Warn("service, postmortem, announcement, chat, sev-link, and task stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
 	return postgres.NewSEVStore(pool),
 		postgres.NewAuditStore(pool),
 		postgres.NewStatusHistoryStore(pool),
@@ -227,5 +245,32 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		memory.NewPostmortemStore(),
 		memory.NewAnnouncementStore(),
 		memory.NewChatStore(),
-		memory.NewSEVLinkStore()
+		memory.NewSEVLinkStore(),
+		memory.NewTaskStore()
+}
+
+// githubIssueClient adapts *github.Client to grpchandler.IssueClient,
+// keeping the grpc package's interface decoupled from this integration's
+// concrete request/response types.
+type githubIssueClient struct {
+	c *github.Client
+}
+
+func (a *githubIssueClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*grpchandler.CreatedIssue, error) {
+	issue, err := a.c.CreateIssue(ctx, github.CreateIssueRequest{
+		Owner:  owner,
+		Repo:   repo,
+		Title:  title,
+		Body:   body,
+		Labels: labels,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &grpchandler.CreatedIssue{
+		Number: issue.Number,
+		Title:  issue.Title,
+		Body:   issue.Body,
+		URL:    issue.HTMLURL,
+	}, nil
 }
