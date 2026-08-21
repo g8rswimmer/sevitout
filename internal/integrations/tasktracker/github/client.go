@@ -27,6 +27,15 @@ type Issue struct {
 	HTMLURL string
 }
 
+// CreateIssueRequest describes a new GitHub Issue to create.
+type CreateIssueRequest struct {
+	Owner  string
+	Repo   string
+	Title  string
+	Body   string
+	Labels []string
+}
+
 // APIError is returned when the GitHub API responds with a non-success
 // status code. StatusCode and Message let callers distinguish client errors
 // (401/403/404/422) from genuine server-side failures.
@@ -91,25 +100,31 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 }
 
 // CreateIssue creates a new GitHub Issue in the given repository and returns
-// the resulting issue.
-func (c *Client) CreateIssue(ctx context.Context, owner, repo, title, body string) (*Issue, error) {
-	payload, err := json.Marshal(map[string]string{
-		"title": title,
-		"body":  body,
-	})
+// the resulting issue. Labels (if any) are set atomically as part of the
+// same creation request.
+func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issue, error) {
+	payload := map[string]any{
+		"title": req.Title,
+		"body":  req.Body,
+	}
+	if len(req.Labels) > 0 {
+		payload["labels"] = req.Labels
+	}
+
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("github: marshal request: %w", err)
 	}
 
-	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues", c.baseURL, url.PathEscape(owner), url.PathEscape(repo))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues", c.baseURL, url.PathEscape(req.Owner), url.PathEscape(req.Repo))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("github: build request: %w", err)
 	}
-	c.setHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
+	c.setHeaders(httpReq)
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(req)
+	resp, err := c.http.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("github: request: %w", err)
 	}

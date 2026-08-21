@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -22,12 +23,15 @@ import (
 type fakeIssueClient struct {
 	issue *github.Issue
 	err   error
+
+	lastCreateReq github.CreateIssueRequest
 }
 
 func (f *fakeIssueClient) GetIssue(_ context.Context, _, _ string, _ int) (*github.Issue, error) {
 	return f.issue, f.err
 }
-func (f *fakeIssueClient) CreateIssue(_ context.Context, _, _, _, _ string) (*github.Issue, error) {
+func (f *fakeIssueClient) CreateIssue(_ context.Context, req github.CreateIssueRequest) (*github.Issue, error) {
+	f.lastCreateReq = req
 	return f.issue, f.err
 }
 
@@ -552,6 +556,10 @@ func TestCreateGitHubIssue_Valid(t *testing.T) {
 	// resolved 1 day ago + 30 day critical SLA = future → not overdue
 	if resp.GetOverdue() {
 		t.Error("task should not be overdue immediately after creation")
+	}
+	wantLabels := []string{sevID, "critical"}
+	if !reflect.DeepEqual(gh.lastCreateReq.Labels, wantLabels) {
+		t.Errorf("labels: got %v, want %v", gh.lastCreateReq.Labels, wantLabels)
 	}
 }
 

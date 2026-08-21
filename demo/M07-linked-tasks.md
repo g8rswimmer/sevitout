@@ -141,6 +141,9 @@ curl -s -X PATCH "http://localhost:8080/v1/sevs/$SEV/tasks/$TASK_ID/due-date" \
 
 ### 5. Create a GitHub Issue and link it in one call (requires GITHUB_TOKEN)
 
+The created issue is automatically labeled with the SEV id (`$SEV`) and its
+criticality (`critical`/`non-critical`).
+
 ```bash
 curl -s -X POST "http://localhost:8080/v1/sevs/$SEV/github-issues" \
   -H "Authorization: Bearer $TOKEN" \

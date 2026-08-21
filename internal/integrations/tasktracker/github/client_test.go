@@ -63,12 +63,12 @@ func TestCreateIssue(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method: got %q, want POST", r.Method)
 		}
-		var body map[string]string
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request body: %v", err)
 		}
 		if body["title"] != "SEV issue" {
-			t.Errorf("title: got %q, want %q", body["title"], "SEV issue")
+			t.Errorf("title: got %v, want %q", body["title"], "SEV issue")
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -84,7 +84,9 @@ func TestCreateIssue(t *testing.T) {
 	defer srv.Close()
 
 	c := github.NewClientWithBaseURL("test-token", srv.URL)
-	issue, err := c.CreateIssue(context.Background(), "owner", "repo", "SEV issue", "details")
+	issue, err := c.CreateIssue(context.Background(), github.CreateIssueRequest{
+		Owner: "owner", Repo: "repo", Title: "SEV issue", Body: "details",
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,6 +98,36 @@ func TestCreateIssue(t *testing.T) {
 	}
 }
 
+func TestCreateIssue_SendsLabels(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": 1, "html_url": "https://github.com/owner/repo/issues/1"})
+	}))
+	defer srv.Close()
+
+	c := github.NewClientWithBaseURL("test-token", srv.URL)
+	_, err := c.CreateIssue(context.Background(), github.CreateIssueRequest{
+		Owner:  "owner",
+		Repo:   "repo",
+		Title:  "SEV issue",
+		Body:   "details",
+		Labels: []string{"SEV-2026-0009", "critical"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	labels, _ := gotBody["labels"].([]any)
+	if len(labels) != 2 || labels[0] != "SEV-2026-0009" || labels[1] != "critical" {
+		t.Errorf("labels: got %v, want [SEV-2026-0009 critical]", gotBody["labels"])
+	}
+}
+
 func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -103,7 +135,7 @@ func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	defer srv.Close()
 
 	c := github.NewClientWithBaseURL("test-token", srv.URL)
-	_, err := c.CreateIssue(context.Background(), "owner", "repo", "title", "body")
+	_, err := c.CreateIssue(context.Background(), github.CreateIssueRequest{Owner: "owner", Repo: "repo", Title: "title", Body: "body"})
 	if err == nil {
 		t.Fatal("expected error for non-201 status, got nil")
 	}
@@ -118,7 +150,7 @@ func TestCreateIssue_UnexpectedStatus_SurfacesAPIMessage(t *testing.T) {
 	defer srv.Close()
 
 	c := github.NewClientWithBaseURL("test-token", srv.URL)
-	_, err := c.CreateIssue(context.Background(), "owner", "repo", "title", "body")
+	_, err := c.CreateIssue(context.Background(), github.CreateIssueRequest{Owner: "owner", Repo: "repo", Title: "title", Body: "body"})
 
 	var apiErr *github.APIError
 	if !errors.As(err, &apiErr) {
@@ -144,7 +176,10 @@ func TestCreateIssue_EscapesOwnerAndRepo(t *testing.T) {
 	defer srv.Close()
 
 	c := github.NewClientWithBaseURL("test-token", srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "foo/../bar", "repo?evil=1", "title", "body"); err != nil {
+	_, err := c.CreateIssue(context.Background(), github.CreateIssueRequest{
+		Owner: "foo/../bar", Repo: "repo?evil=1", Title: "title", Body: "body",
+	})
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := "/repos/foo%2F..%2Fbar/repo%3Fevil=1/issues"

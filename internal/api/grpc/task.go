@@ -22,7 +22,7 @@ import (
 // Implementations must be safe for concurrent use.
 type IssueClient interface {
 	GetIssue(ctx context.Context, owner, repo string, number int) (*github.Issue, error)
-	CreateIssue(ctx context.Context, owner, repo, title, body string) (*github.Issue, error)
+	CreateIssue(ctx context.Context, req github.CreateIssueRequest) (*github.Issue, error)
 }
 
 // TaskServer implements pb.TaskServiceServer.
@@ -283,7 +283,16 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		return nil, status.Error(codes.Internal, "failed to get SEV")
 	}
 
-	issue, err := s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody())
+	priority := store.TaskPriority(req.GetPriority())
+	labels := []string{req.GetSevId(), string(priority)}
+
+	issue, err := s.github.CreateIssue(ctx, github.CreateIssueRequest{
+		Owner:  req.GetOwner(),
+		Repo:   req.GetRepo(),
+		Title:  req.GetTitle(),
+		Body:   req.GetBody(),
+		Labels: labels,
+	})
 	if err != nil {
 		return nil, githubIssueError(err)
 	}
@@ -293,7 +302,6 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		callerID = uc.UserID
 	}
 
-	priority := store.TaskPriority(req.GetPriority())
 	now := time.Now()
 	taskID := fmt.Sprintf("%s/%s#%d", req.GetOwner(), req.GetRepo(), issue.Number)
 	body := issue.Body
