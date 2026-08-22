@@ -81,7 +81,7 @@ func (h *IntegrationsHealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	token := extractBearerToken(r)
+	token := auth.ExtractBearerToken(r)
 	if token == "" {
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return
@@ -130,21 +130,4 @@ func (h *IntegrationsHealthHandler) checkOne(ctx context.Context, cfg *store.Int
 		return integrationStatus{IntegrationType: cfg.IntegrationType, Status: "error", Error: err.Error()}
 	}
 	return integrationStatus{IntegrationType: cfg.IntegrationType, Status: "connected"}
-}
-
-// extractBearerToken mirrors the REST gateway's precedence (see
-// cmd/server/main.go's runtime.WithMetadata / internal/api/ws.extractToken):
-// an Authorization header takes priority over the "token" httpOnly cookie.
-func extractBearerToken(r *http.Request) string {
-	if v := r.Header.Get("Authorization"); v != "" {
-		const prefix = "Bearer "
-		if len(v) > len(prefix) && v[:len(prefix)] == prefix {
-			return v[len(prefix):]
-		}
-		return ""
-	}
-	if c, err := r.Cookie("token"); err == nil {
-		return c.Value
-	}
-	return ""
 }

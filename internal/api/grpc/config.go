@@ -378,9 +378,6 @@ func (s *ConfigServer) UpdateOnCallRotation(ctx context.Context, req *pb.UpdateO
 	if req.GetId() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
-	if err := validateOverrideWindow(req.GetOverrideStart(), req.GetOverrideEnd()); err != nil {
-		return nil, err
-	}
 
 	r, err := s.oncall.Get(ctx, req.GetId())
 	if err != nil {
@@ -412,6 +409,13 @@ func (s *ConfigServer) UpdateOnCallRotation(ctx context.Context, req *pb.UpdateO
 	if req.GetOverrideEnd() != nil {
 		t := req.GetOverrideEnd().AsTime()
 		r.OverrideEnd = &t
+	}
+	// Validate the window that will actually be persisted — a partial update
+	// (e.g. only override_start supplied) merges onto whatever the other
+	// bound already was, so checking the raw request in isolation isn't
+	// enough to catch a resulting start >= end.
+	if err := validateOverrideWindowTimes(r.OverrideStart, r.OverrideEnd); err != nil {
+		return nil, err
 	}
 	r.UpdatedAt = time.Now()
 
@@ -450,12 +454,26 @@ func (s *ConfigServer) ListOnCallRotations(ctx context.Context, _ *pb.ListOnCall
 }
 
 // validateOverrideWindow rejects an override window where the end precedes
-// (or equals) the start; a nil bound on either side is always accepted.
+// (or equals) the start; a nil bound on either side is always accepted. Used
+// by CreateOnCallRotation, where the request fields are the entire window
+// (there's no existing record to merge onto).
 func validateOverrideWindow(start, end *timestamppb.Timestamp) error {
 	if start == nil || end == nil {
 		return nil
 	}
-	if !start.AsTime().Before(end.AsTime()) {
+	s, e := start.AsTime(), end.AsTime()
+	return validateOverrideWindowTimes(&s, &e)
+}
+
+// validateOverrideWindowTimes is validateOverrideWindow's *time.Time
+// equivalent, used by UpdateOnCallRotation to validate the window that
+// results after merging request fields onto the stored record — not just
+// the (possibly partial) fields present on the request in isolation.
+func validateOverrideWindowTimes(start, end *time.Time) error {
+	if start == nil || end == nil {
+		return nil
+	}
+	if !start.Before(*end) {
 		return status.Error(codes.InvalidArgument, "override_start must be before override_end")
 	}
 	return nil
@@ -512,9 +530,10 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 	switch {
 	case err == nil:
 		cfg.EncryptedCredentials = existing.EncryptedCredentials
+		cfg.Settings = existing.Settings
 		cfg.CreatedAt = existing.CreatedAt
 	case errors.Is(err, store.ErrNotFound):
-		// no existing row — cfg keeps its zero-value credentials
+		// no existing row — cfg keeps its zero-value credentials and settings
 	default:
 		return nil, status.Error(codes.Internal, "failed to get integration config")
 	}
@@ -535,11 +554,16 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 		cfg.EncryptedCredentials = sealed
 	}
 
-	settings := make(map[string]any, len(req.GetSettings()))
-	for k, v := range req.GetSettings() {
-		settings[k] = v
+	// Settings, like credentials, are only replaced when the request actually
+	// supplies them — an empty/omitted settings map leaves whatever is
+	// already stored untouched instead of wiping it.
+	if reqSettings := req.GetSettings(); len(reqSettings) > 0 {
+		settings := make(map[string]any, len(reqSettings))
+		for k, v := range reqSettings {
+			settings[k] = v
+		}
+		cfg.Settings = settings
 	}
-	cfg.Settings = settings
 
 	if err := s.integrations.Upsert(ctx, cfg); err != nil {
 		return nil, status.Error(codes.Internal, "failed to save integration config")

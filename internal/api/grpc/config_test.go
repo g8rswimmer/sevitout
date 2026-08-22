@@ -309,6 +309,44 @@ func TestCreateOnCallRotation_InvalidOverrideWindow(t *testing.T) {
 	}
 }
 
+// A partial update supplying only override_start must still be validated
+// against the existing stored override_end — not just against the (possibly
+// nil) fields present on the request in isolation.
+func TestUpdateOnCallRotation_PartialUpdateCannotProduceInvertedWindow(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+
+	start := time.Now().Add(1 * time.Hour)
+	end := time.Now().Add(2 * time.Hour)
+	created, err := ts.server.CreateOnCallRotation(ctx, &pb.CreateOnCallRotationRequest{
+		Name:          "Holiday override",
+		OverrideStart: timestamppb.New(start),
+		OverrideEnd:   timestamppb.New(end),
+	})
+	if err != nil {
+		t.Fatalf("CreateOnCallRotation: %v", err)
+	}
+
+	// Supply only a new override_start, after the existing override_end.
+	newStart := end.Add(1 * time.Hour)
+	_, err = ts.server.UpdateOnCallRotation(ctx, &pb.UpdateOnCallRotationRequest{
+		Id:            created.GetId(),
+		OverrideStart: timestamppb.New(newStart),
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument when the merged window has start after the existing end, got %v", grpcCode(err))
+	}
+
+	// The invalid update must not have been persisted.
+	got, gerr := ts.server.GetOnCallRotation(ctx, &pb.GetOnCallRotationRequest{Id: created.GetId()})
+	if gerr != nil {
+		t.Fatalf("GetOnCallRotation: %v", gerr)
+	}
+	if !got.GetOverrideStart().AsTime().Equal(start) {
+		t.Errorf("override_start should be unchanged after a rejected update, got %v", got.GetOverrideStart().AsTime())
+	}
+}
+
 func TestCreateOnCallRotation_MissingName(t *testing.T) {
 	ts := newTestConfigServer(nil)
 	_, err := ts.server.CreateOnCallRotation(context.Background(), &pb.CreateOnCallRotationRequest{})
@@ -465,6 +503,31 @@ func TestUpsertIntegrationConfig_OmittingCredentialsPreservesExisting(t *testing
 	}
 	if creds["token"] != "ghp_original" {
 		t.Errorf("original credentials should survive a settings-only update, got %q", creds["token"])
+	}
+}
+
+func TestUpsertIntegrationConfig_OmittingSettingsPreservesExisting(t *testing.T) {
+	enc := testEncryptor(t)
+	ts := newTestConfigServer(enc)
+	ctx := context.Background()
+
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Settings:        map[string]string{"default_escalation_policy": "P123"},
+	}); err != nil {
+		t.Fatalf("first UpsertIntegrationConfig: %v", err)
+	}
+
+	// Second call rotates the credential only, omitting settings entirely.
+	resp, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"api_key": "new_key"},
+	})
+	if err != nil {
+		t.Fatalf("second UpsertIntegrationConfig: %v", err)
+	}
+	if resp.GetSettings()["default_escalation_policy"] != "P123" {
+		t.Errorf("settings should survive a credentials-only update, got %v", resp.GetSettings())
 	}
 }
 
