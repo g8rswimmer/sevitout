@@ -79,6 +79,11 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleViewer, "/sevitout.v1.SearchService/SearchSEVs", true},
 		{store.OrgRoleResponder, "/sevitout.v1.SearchService/SearchSEVs", true},
 
+		// WebSocket subscription (pseudo-method checked manually by internal/api/ws)
+		{store.OrgRoleViewer, "/sevitout.v1.WebSocket/Subscribe", true},
+		{store.OrgRoleResponder, "/sevitout.v1.WebSocket/Subscribe", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.WebSocket/Subscribe", true},
+
 		// Unknown RPC is denied to everyone
 		{store.OrgRoleAdmin, "/sevitout.v1.UnknownService/DoSomething", false},
 		{store.OrgRoleViewer, "/sevitout.v1.UnknownService/DoSomething", false},

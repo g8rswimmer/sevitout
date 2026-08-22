@@ -17,13 +17,14 @@ import (
 // ChatServer implements pb.ChatServiceServer.
 type ChatServer struct {
 	pb.UnimplementedChatServiceServer
-	chat store.ChatStore
-	sevs store.SEVStore
+	chat      store.ChatStore
+	sevs      store.SEVStore
+	publisher Publisher // nil when WebSocket support is not wired up
 }
 
 // NewChatServer returns a ChatServer backed by the given stores.
-func NewChatServer(chat store.ChatStore, sevs store.SEVStore) *ChatServer {
-	return &ChatServer{chat: chat, sevs: sevs}
+func NewChatServer(chat store.ChatStore, sevs store.SEVStore, publisher Publisher) *ChatServer {
+	return &ChatServer{chat: chat, sevs: sevs, publisher: publisher}
 }
 
 func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryRequest) (*pb.ChatEntryResponse, error) {
@@ -40,7 +41,8 @@ func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryReque
 		return nil, status.Error(codes.InvalidArgument, "source is required")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+	sevRecord, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
@@ -75,7 +77,12 @@ func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryReque
 		return nil, status.Error(codes.Internal, "failed to add chat entry")
 	}
 
-	return chatEntryToProto(entry), nil
+	resp := chatEntryToProto(entry)
+	if !sevRecord.Sensitive {
+		publishProto(s.publisher, entry.SEVID, "chat.created", resp)
+	}
+
+	return resp, nil
 }
 
 func (s *ChatServer) ListChatEntries(ctx context.Context, req *pb.ListChatEntriesRequest) (*pb.ListChatEntriesResponse, error) {

@@ -58,17 +58,20 @@ type testTaskServer struct {
 	tasks  *memory.TaskStore
 	sevs   *memory.SEVStore
 	audit  *memory.AuditStore
+	pub    *fakePublisher
 }
 
 func newTestTaskServer(gh grpchandler.IssueClient) *testTaskServer {
 	tasks := memory.NewTaskStore()
 	sevs := memory.NewSEVStore()
 	audit := memory.NewAuditStore()
+	pub := &fakePublisher{}
 	return &testTaskServer{
-		server: grpchandler.NewTaskServer(tasks, sevs, audit, gh),
+		server: grpchandler.NewTaskServer(tasks, sevs, audit, gh, pub),
 		tasks:  tasks,
 		sevs:   sevs,
 		audit:  audit,
+		pub:    pub,
 	}
 }
 
@@ -847,5 +850,205 @@ func TestTask_IntegrationFlow(t *testing.T) {
 	}
 	if !overdue.GetOverdue() {
 		t.Error("step 3: task should be overdue after past due date set")
+	}
+}
+
+// ── WebSocket event publishing ────────────────────────────────────────────────
+
+func TestLinkTask_PublishesEvent(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	if _, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item")); err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "task.linked" {
+		t.Errorf("event = %+v, want sev_id=%q type=task.linked", events[0], sevID)
+	}
+}
+
+func TestUnlinkTask_PublishesEvent(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	linked, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item"))
+	if err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+
+	if _, err := ts.server.UnlinkTask(ctx, &pb.UnlinkTaskRequest{SevId: sevID, Id: linked.GetId()}); err != nil {
+		t.Fatalf("UnlinkTask: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 2 {
+		t.Fatalf("published events = %d, want 2 (link + unlink): %+v", len(events), events)
+	}
+	last := events[1]
+	if last.sevID != sevID || last.eventType != "task.updated" {
+		t.Errorf("event = %+v, want sev_id=%q type=task.updated", last, sevID)
+	}
+}
+
+func TestUpdateTaskDueDate_PublishesEvent(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	linked, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item"))
+	if err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+
+	_, err = ts.server.UpdateTaskDueDate(ctx, &pb.UpdateTaskDueDateRequest{
+		SevId:   sevID,
+		Id:      linked.GetId(),
+		DueDate: timestamppb.New(time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("UpdateTaskDueDate: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 2 {
+		t.Fatalf("published events = %d, want 2 (link + due-date update): %+v", len(events), events)
+	}
+	last := events[1]
+	if last.sevID != sevID || last.eventType != "task.updated" {
+		t.Errorf("event = %+v, want sev_id=%q type=task.updated", last, sevID)
+	}
+}
+
+func TestCreateGitHubIssue_PublishesEvent(t *testing.T) {
+	gh := &fakeIssueClient{
+		issue: &grpchandler.CreatedIssue{
+			Number: 42,
+			Title:  "SEV follow-up",
+			Body:   "details",
+			URL:    "https://github.com/acme/api/issues/42",
+		},
+	}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	_, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId:            sevID,
+		Owner:            "acme",
+		Repo:             "api",
+		Title:            "SEV follow-up",
+		Body:             "details",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "task.linked" {
+		t.Errorf("event = %+v, want sev_id=%q type=task.linked", events[0], sevID)
+	}
+}
+
+func seedSensitiveSEVForTask(t *testing.T, ts *testTaskServer) string {
+	t.Helper()
+	now := time.Now()
+	sv := &store.SEV{
+		Title: "Sensitive SEV", SeverityLevel: 2, Status: store.SEVStatusOpen,
+		Sensitive: true, CreatedBy: "user-1", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := ts.sevs.Create(context.Background(), sv); err != nil {
+		t.Fatalf("seedSensitiveSEVForTask: %v", err)
+	}
+	return sv.ID
+}
+
+func TestLinkTask_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSensitiveSEVForTask(t, ts)
+
+	if _, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item")); err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestUnlinkTask_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSensitiveSEVForTask(t, ts)
+
+	linked, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item"))
+	if err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+	if _, err := ts.server.UnlinkTask(ctx, &pb.UnlinkTaskRequest{SevId: sevID, Id: linked.GetId()}); err != nil {
+		t.Fatalf("UnlinkTask: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestUpdateTaskDueDate_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestTaskServer(nil)
+	ctx := context.Background()
+	sevID := seedSensitiveSEVForTask(t, ts)
+
+	linked, err := ts.server.LinkTask(ctx, linkTaskReq(sevID, "critical", "action-item"))
+	if err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+	_, err = ts.server.UpdateTaskDueDate(ctx, &pb.UpdateTaskDueDateRequest{
+		SevId:   sevID,
+		Id:      linked.GetId(),
+		DueDate: timestamppb.New(time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("UpdateTaskDueDate: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestCreateGitHubIssue_SensitiveSEVDoesNotPublish(t *testing.T) {
+	gh := &fakeIssueClient{
+		issue: &grpchandler.CreatedIssue{
+			Number: 42, Title: "SEV follow-up", Body: "details",
+			URL: "https://github.com/acme/api/issues/42",
+		},
+	}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSensitiveSEVForTask(t, ts)
+
+	_, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId: sevID, Owner: "acme", Repo: "api", Title: "SEV follow-up", Body: "details",
+		RelationshipType: "action-item", Priority: "critical",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
 	}
 }

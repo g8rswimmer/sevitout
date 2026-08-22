@@ -29,6 +29,7 @@ type PostmortemServer struct {
 	sevs        store.SEVStore
 	audit       store.AuditStore
 	unlock      Unlocker
+	publisher   Publisher // nil when WebSocket support is not wired up
 }
 
 // NewPostmortemServer returns a PostmortemServer backed by the given stores.
@@ -37,12 +38,14 @@ func NewPostmortemServer(
 	sevs store.SEVStore,
 	audit store.AuditStore,
 	unlock Unlocker,
+	publisher Publisher,
 ) *PostmortemServer {
 	return &PostmortemServer{
 		postmortems: postmortems,
 		sevs:        sevs,
 		audit:       audit,
 		unlock:      unlock,
+		publisher:   publisher,
 	}
 }
 
@@ -110,7 +113,12 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 		CreatedAt: now,
 	})
 
-	return postmortemToProto(pm), nil
+	resp := postmortemToProto(pm)
+	if !sev.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+	}
+
+	return resp, nil
 }
 
 func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *pb.TransitionPostmortemStatusRequest) (*pb.PostmortemResponse, error) {
@@ -162,7 +170,12 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 		CreatedAt: now,
 	})
 
-	return postmortemToProto(pm), nil
+	resp := postmortemToProto(pm)
+	if sev, err := s.sevs.Get(ctx, req.GetSevId()); err == nil && !sev.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+	}
+
+	return resp, nil
 }
 
 // UnlockSEV writes an unlock-reason audit entry and returns a short-lived token

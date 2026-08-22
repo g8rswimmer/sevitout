@@ -51,6 +51,10 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.TaskService/CreateGitHubIssue": store.OrgRoleResponder,
 	// Search service
 	"/sevitout.v1.SearchService/SearchSEVs": store.OrgRoleViewer,
+	// WebSocket: not a real gRPC method — internal/api/ws.Handler checks this
+	// entry directly (via HasPermission) since WS connections bypass the
+	// gRPC interceptor entirely and need their own RBAC floor.
+	"/sevitout.v1.WebSocket/Subscribe": store.OrgRoleViewer,
 	// gRPC reflection (both v1alpha and v1 registered by grpc-go)
 	"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": store.OrgRoleViewer,
 	"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      store.OrgRoleViewer,

@@ -21,6 +21,7 @@ type testPostmortemServer struct {
 	sevs        *memory.SEVStore
 	audit       *memory.AuditStore
 	unlock      *postmortem.UnlockSigner
+	pub         *fakePublisher
 }
 
 func newTestPostmortemServer() *testPostmortemServer {
@@ -28,12 +29,14 @@ func newTestPostmortemServer() *testPostmortemServer {
 	audit := memory.NewAuditStore()
 	pms := memory.NewPostmortemStore()
 	signer := postmortem.NewUnlockSigner("test-secret-at-least-32-chars-long")
+	pub := &fakePublisher{}
 	return &testPostmortemServer{
-		server:      grpchandler.NewPostmortemServer(pms, sevs, audit, signer),
+		server:      grpchandler.NewPostmortemServer(pms, sevs, audit, signer, pub),
 		postmortems: pms,
 		sevs:        sevs,
 		audit:       audit,
 		unlock:      signer,
+		pub:         pub,
 	}
 }
 
@@ -385,5 +388,105 @@ func TestUnlockSEV_AuditLogWritten(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no audit entry with action sev.unlock_requested found")
+	}
+}
+
+// ── WebSocket event publishing ────────────────────────────────────────────────
+
+func TestUpdatePostmortem_PublishesEvent(t *testing.T) {
+	ts := newTestPostmortemServer()
+	ctx := context.Background()
+	sevID := seedUnlockedSEVWithPostmortem(t, ts)
+
+	_, err := ts.server.UpdatePostmortem(ctx, &pb.UpdatePostmortemRequest{
+		SevId:   sevID,
+		Content: "## Summary",
+		UserId:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("UpdatePostmortem: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "postmortem.updated" {
+		t.Errorf("event = %+v, want sev_id=%q type=postmortem.updated", events[0], sevID)
+	}
+}
+
+func TestTransitionPostmortemStatus_PublishesEvent(t *testing.T) {
+	ts := newTestPostmortemServer()
+	ctx := context.Background()
+	sevID := seedUnlockedSEVWithPostmortem(t, ts)
+
+	_, err := ts.server.TransitionPostmortemStatus(ctx, &pb.TransitionPostmortemStatusRequest{
+		SevId:    sevID,
+		ToStatus: string(store.PostmortemStatusInReview),
+		UserId:   "user-ic",
+	})
+	if err != nil {
+		t.Fatalf("TransitionPostmortemStatus: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "postmortem.updated" {
+		t.Errorf("event = %+v, want sev_id=%q type=postmortem.updated", events[0], sevID)
+	}
+}
+
+func seedSensitiveSEVWithPostmortem(t *testing.T, ts *testPostmortemServer) string {
+	t.Helper()
+	now := time.Now()
+	sv := &store.SEV{
+		Title: "Sensitive SEV", SeverityLevel: 2, Status: store.SEVStatusResolved,
+		Sensitive: true, CreatedBy: "user-seed", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := ts.sevs.Create(context.Background(), sv); err != nil {
+		t.Fatalf("seed: create sensitive SEV: %v", err)
+	}
+	if err := ts.postmortems.Create(context.Background(), &store.Postmortem{
+		SEVID: sv.ID, Status: store.PostmortemStatusDraft, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed: create postmortem: %v", err)
+	}
+	return sv.ID
+}
+
+func TestUpdatePostmortem_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestPostmortemServer()
+	ctx := context.Background()
+	sevID := seedSensitiveSEVWithPostmortem(t, ts)
+
+	_, err := ts.server.UpdatePostmortem(ctx, &pb.UpdatePostmortemRequest{
+		SevId: sevID, Content: "## Summary", UserId: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("UpdatePostmortem: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestTransitionPostmortemStatus_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestPostmortemServer()
+	ctx := context.Background()
+	sevID := seedSensitiveSEVWithPostmortem(t, ts)
+
+	_, err := ts.server.TransitionPostmortemStatus(ctx, &pb.TransitionPostmortemStatusRequest{
+		SevId: sevID, ToStatus: string(store.PostmortemStatusInReview), UserId: "user-ic",
+	})
+	if err != nil {
+		t.Fatalf("TransitionPostmortemStatus: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
 	}
 }

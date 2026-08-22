@@ -18,14 +18,15 @@ import (
 // RoleServer implements pb.RoleServiceServer.
 type RoleServer struct {
 	pb.UnimplementedRoleServiceServer
-	roles store.RoleStore
-	sevs  store.SEVStore
-	audit store.AuditStore
+	roles     store.RoleStore
+	sevs      store.SEVStore
+	audit     store.AuditStore
+	publisher Publisher // nil when WebSocket support is not wired up
 }
 
 // NewRoleServer returns a RoleServer backed by the given stores.
-func NewRoleServer(roles store.RoleStore, sevs store.SEVStore, audit store.AuditStore) *RoleServer {
-	return &RoleServer{roles: roles, sevs: sevs, audit: audit}
+func NewRoleServer(roles store.RoleStore, sevs store.SEVStore, audit store.AuditStore, publisher Publisher) *RoleServer {
+	return &RoleServer{roles: roles, sevs: sevs, audit: audit, publisher: publisher}
 }
 
 func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) (*pb.SEVRoleResponse, error) {
@@ -46,7 +47,8 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		return nil, status.Error(codes.InvalidArgument, "unknown role_type")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+	sevRecord, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
@@ -81,7 +83,12 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		CreatedAt: now,
 	})
 
-	return roleToProto(role), nil
+	resp := roleToProto(role)
+	if !sevRecord.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "role.changed", resp)
+	}
+
+	return resp, nil
 }
 
 func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) (*emptypb.Empty, error) {
@@ -92,7 +99,8 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+	sevRecord, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
@@ -117,6 +125,13 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		Action:    "role.removed",
 		CreatedAt: time.Now(),
 	})
+
+	if !sevRecord.Sensitive {
+		publishJSON(s.publisher, req.GetSevId(), "role.changed", map[string]any{
+			"id":      req.GetId(),
+			"removed": true,
+		})
+	}
 
 	return &emptypb.Empty{}, nil
 }

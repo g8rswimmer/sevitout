@@ -17,15 +17,18 @@ type testAnnouncementServer struct {
 	server        *grpchandler.AnnouncementServer
 	announcements *memory.AnnouncementStore
 	sevs          *memory.SEVStore
+	pub           *fakePublisher
 }
 
 func newTestAnnouncementServer() *testAnnouncementServer {
 	announcements := memory.NewAnnouncementStore()
 	sevs := memory.NewSEVStore()
+	pub := &fakePublisher{}
 	return &testAnnouncementServer{
-		server:        grpchandler.NewAnnouncementServer(announcements, sevs),
+		server:        grpchandler.NewAnnouncementServer(announcements, sevs, pub),
 		announcements: announcements,
 		sevs:          sevs,
+		pub:           pub,
 	}
 }
 
@@ -323,5 +326,58 @@ func TestListAnnouncements_InvalidAudienceFilter(t *testing.T) {
 	})
 	if grpcCode(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument for invalid audience filter, got %v", grpcCode(err))
+	}
+}
+
+// ── WebSocket event publishing ────────────────────────────────────────────────
+
+func TestCreateAnnouncement_PublishesEvent(t *testing.T) {
+	ts := newTestAnnouncementServer()
+	ctx := context.Background()
+	sevID := seedSEVForAnnouncement(t, ts)
+
+	_, err := ts.server.CreateAnnouncement(ctx, &pb.CreateAnnouncementRequest{
+		SevId:    sevID,
+		Message:  "We are investigating.",
+		Audience: string(store.AudienceInternal),
+		AuthorId: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateAnnouncement: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "announcement.created" {
+		t.Errorf("event = %+v, want sev_id=%q type=announcement.created", events[0], sevID)
+	}
+}
+
+func TestCreateAnnouncement_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestAnnouncementServer()
+	ctx := context.Background()
+	now := time.Now()
+	sv := &store.SEV{
+		Title: "Sensitive SEV", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		Sensitive: true, CreatedBy: "user-1", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := ts.sevs.Create(ctx, sv); err != nil {
+		t.Fatalf("seed sensitive SEV: %v", err)
+	}
+
+	_, err := ts.server.CreateAnnouncement(ctx, &pb.CreateAnnouncementRequest{
+		SevId:    sv.ID,
+		Message:  "We are investigating.",
+		Audience: string(store.AudienceInternal),
+		AuthorId: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateAnnouncement: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
 	}
 }
