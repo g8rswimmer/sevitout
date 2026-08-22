@@ -18,14 +18,15 @@ import (
 // RoleServer implements pb.RoleServiceServer.
 type RoleServer struct {
 	pb.UnimplementedRoleServiceServer
-	roles store.RoleStore
-	sevs  store.SEVStore
-	audit store.AuditStore
+	roles     store.RoleStore
+	sevs      store.SEVStore
+	audit     store.AuditStore
+	publisher Publisher // nil when WebSocket support is not wired up
 }
 
 // NewRoleServer returns a RoleServer backed by the given stores.
-func NewRoleServer(roles store.RoleStore, sevs store.SEVStore, audit store.AuditStore) *RoleServer {
-	return &RoleServer{roles: roles, sevs: sevs, audit: audit}
+func NewRoleServer(roles store.RoleStore, sevs store.SEVStore, audit store.AuditStore, publisher Publisher) *RoleServer {
+	return &RoleServer{roles: roles, sevs: sevs, audit: audit, publisher: publisher}
 }
 
 func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) (*pb.SEVRoleResponse, error) {
@@ -81,7 +82,10 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		CreatedAt: now,
 	})
 
-	return roleToProto(role), nil
+	resp := roleToProto(role)
+	publishProto(s.publisher, req.GetSevId(), "role.changed", resp)
+
+	return resp, nil
 }
 
 func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) (*emptypb.Empty, error) {
@@ -116,6 +120,12 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		UserID:    callerID,
 		Action:    "role.removed",
 		CreatedAt: time.Now(),
+	})
+
+	publishJSON(s.publisher, req.GetSevId(), "role.changed", map[string]any{
+		"sev_id":  req.GetSevId(),
+		"id":      req.GetId(),
+		"removed": true,
 	})
 
 	return &emptypb.Empty{}, nil

@@ -34,6 +34,7 @@ type SEVServer struct {
 	postmortems store.PostmortemStore
 	onCaller    OnCaller // nil when PagerDuty is not configured
 	unlock      Unlocker
+	publisher   Publisher // nil when WebSocket support is not wired up
 }
 
 func NewSEVServer(
@@ -45,6 +46,7 @@ func NewSEVServer(
 	postmortems store.PostmortemStore,
 	onCaller OnCaller,
 	unlock Unlocker,
+	publisher Publisher,
 ) *SEVServer {
 	return &SEVServer{
 		sevs:        sevs,
@@ -55,6 +57,7 @@ func NewSEVServer(
 		postmortems: postmortems,
 		onCaller:    onCaller,
 		unlock:      unlock,
+		publisher:   publisher,
 	}
 }
 
@@ -263,7 +266,10 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		CreatedAt: record.UpdatedAt,
 	})
 
-	return sevToProto(record), nil
+	resp := sevToProto(record)
+	publishProto(s.publisher, record.ID, "sev.updated", resp)
+
+	return resp, nil
 }
 
 func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.ListSEVsResponse, error) {
@@ -399,7 +405,10 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		CreatedAt: now,
 	})
 
-	return sevToProto(record), nil
+	resp := sevToProto(record)
+	publishProto(s.publisher, record.ID, "sev.status_changed", resp)
+
+	return resp, nil
 }
 
 // validateUnlock returns a gRPC status error when the token is missing or invalid for sevID.

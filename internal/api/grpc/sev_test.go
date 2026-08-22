@@ -20,6 +20,7 @@ type testSEVServer struct {
 	sevs    *memory.SEVStore
 	audit   *memory.AuditStore
 	history *memory.StatusHistoryStore
+	pub     *fakePublisher
 }
 
 // newTestSEVServer returns a fresh SEVServer backed by empty in-memory stores.
@@ -27,11 +28,13 @@ func newTestSEVServer() *testSEVServer {
 	sevs := memory.NewSEVStore()
 	audit := memory.NewAuditStore()
 	history := memory.NewStatusHistoryStore()
+	pub := &fakePublisher{}
 	return &testSEVServer{
-		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), nil, nil),
+		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), nil, nil, pub),
 		sevs:    sevs,
 		audit:   audit,
 		history: history,
+		pub:     pub,
 	}
 }
 
@@ -332,5 +335,43 @@ func TestTransitionStatus_AuditEntryCreated(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no audit entry with action %q found in %d entries", "sev.status_transitioned", len(entries))
+	}
+}
+
+// ── WebSocket event publishing ────────────────────────────────────────────────
+
+func TestUpdateSEV_PublishesEvent(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: sevID, Title: "New title"}); err != nil {
+		t.Fatalf("UpdateSEV: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "sev.updated" {
+		t.Errorf("event = %+v, want sev_id=%q type=sev.updated", events[0], sevID)
+	}
+}
+
+func TestTransitionStatus_PublishesEvent(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{Id: sevID, ToStatus: string(store.SEVStatusInvestigating)}); err != nil {
+		t.Fatalf("TransitionStatus: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "sev.status_changed" {
+		t.Errorf("event = %+v, want sev_id=%q type=sev.status_changed", events[0], sevID)
 	}
 }

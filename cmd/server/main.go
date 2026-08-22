@@ -19,6 +19,7 @@ import (
 
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/api/ws"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
@@ -71,16 +72,19 @@ func main() {
 	// --- Unlock token signer (reuses JWT_SECRET; 15-min TTL) ---
 	unlockSigner := postmortem.NewUnlockSigner(jwtSecret)
 
+	// --- WebSocket hub: room-per-SEV pub/sub fed by the mutation handlers below ---
+	wsHub := ws.NewHub()
+
 	// --- gRPC server with auth interceptors ---
-	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, postmortemStore, onCaller, unlockSigner)
+	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, postmortemStore, onCaller, unlockSigner, wsHub)
 	auditServer := grpchandler.NewAuditServer(auditStore)
 	authServer := grpchandler.NewAuthServer(userStore)
-	roleServer := grpchandler.NewRoleServer(roleStore, sevStore, auditStore)
-	postmortemServer := grpchandler.NewPostmortemServer(postmortemStore, sevStore, auditStore, unlockSigner)
-	announcementServer := grpchandler.NewAnnouncementServer(announcementStore, sevStore)
-	chatServer := grpchandler.NewChatServer(chatStore, sevStore)
+	roleServer := grpchandler.NewRoleServer(roleStore, sevStore, auditStore, wsHub)
+	postmortemServer := grpchandler.NewPostmortemServer(postmortemStore, sevStore, auditStore, unlockSigner, wsHub)
+	announcementServer := grpchandler.NewAnnouncementServer(announcementStore, sevStore, wsHub)
+	chatServer := grpchandler.NewChatServer(chatStore, sevStore, wsHub)
 	sevLinkServer := grpchandler.NewSEVLinkServer(sevLinkStore, sevStore, auditStore)
-	taskServer := grpchandler.NewTaskServer(taskStore, sevStore, auditStore, issueClient)
+	taskServer := grpchandler.NewTaskServer(taskStore, sevStore, auditStore, issueClient, wsHub)
 	searchServer := grpchandler.NewSearchServer(sevStore, roleStore, announcementStore)
 
 	grpcSrv := grpc.NewServer(
@@ -172,8 +176,9 @@ func main() {
 
 	// --- HTTP mux ---
 	httpMux := http.NewServeMux()
-	passwordHandler.RegisterRoutes(httpMux) // POST /auth/register, POST /auth/login
-	httpMux.Handle("/", gwMux)              // gRPC-gateway routes
+	passwordHandler.RegisterRoutes(httpMux)                           // POST /auth/register, POST /auth/login
+	httpMux.Handle("/ws", ws.NewHandler(wsHub, jwtSigner, userStore)) // WebSocket subscriptions
+	httpMux.Handle("/", gwMux)                                        // gRPC-gateway routes
 	httpMux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(openAPISpec)

@@ -17,13 +17,14 @@ import (
 // ChatServer implements pb.ChatServiceServer.
 type ChatServer struct {
 	pb.UnimplementedChatServiceServer
-	chat store.ChatStore
-	sevs store.SEVStore
+	chat      store.ChatStore
+	sevs      store.SEVStore
+	publisher Publisher // nil when WebSocket support is not wired up
 }
 
 // NewChatServer returns a ChatServer backed by the given stores.
-func NewChatServer(chat store.ChatStore, sevs store.SEVStore) *ChatServer {
-	return &ChatServer{chat: chat, sevs: sevs}
+func NewChatServer(chat store.ChatStore, sevs store.SEVStore, publisher Publisher) *ChatServer {
+	return &ChatServer{chat: chat, sevs: sevs, publisher: publisher}
 }
 
 func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryRequest) (*pb.ChatEntryResponse, error) {
@@ -75,7 +76,10 @@ func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryReque
 		return nil, status.Error(codes.Internal, "failed to add chat entry")
 	}
 
-	return chatEntryToProto(entry), nil
+	resp := chatEntryToProto(entry)
+	publishProto(s.publisher, entry.SEVID, "chat.created", resp)
+
+	return resp, nil
 }
 
 func (s *ChatServer) ListChatEntries(ctx context.Context, req *pb.ListChatEntriesRequest) (*pb.ListChatEntriesResponse, error) {

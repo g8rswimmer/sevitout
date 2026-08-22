@@ -19,17 +19,20 @@ type testRoleServer struct {
 	roles  *memory.RoleStore
 	sevs   *memory.SEVStore
 	audit  *memory.AuditStore
+	pub    *fakePublisher
 }
 
 func newTestRoleServer() *testRoleServer {
 	roles := memory.NewRoleStore()
 	sevs := memory.NewSEVStore()
 	audit := memory.NewAuditStore()
+	pub := &fakePublisher{}
 	return &testRoleServer{
-		server: grpchandler.NewRoleServer(roles, sevs, audit),
+		server: grpchandler.NewRoleServer(roles, sevs, audit, pub),
 		roles:  roles,
 		sevs:   sevs,
 		audit:  audit,
+		pub:    pub,
 	}
 }
 
@@ -340,7 +343,7 @@ func TestCreateSEV_AutoPopulatesOnCallRole(t *testing.T) {
 	}
 
 	oc := &staticOnCaller{displayName: "Alice <alice@example.com>"}
-	server := grpchandler.NewSEVServer(sevs, audit, history, roles, services, memory.NewPostmortemStore(), oc, nil)
+	server := grpchandler.NewSEVServer(sevs, audit, history, roles, services, memory.NewPostmortemStore(), oc, nil, nil)
 
 	resp, err := server.CreateSEV(context.Background(), &pb.CreateSEVRequest{
 		Title:            "API outage",
@@ -375,7 +378,7 @@ func TestCreateSEV_NoOnCallWhenIntegrationDisabled(t *testing.T) {
 	services := memory.NewServiceStore()
 
 	// onCaller is nil — integration not configured
-	server := grpchandler.NewSEVServer(sevs, audit, history, roles, services, memory.NewPostmortemStore(), nil, nil)
+	server := grpchandler.NewSEVServer(sevs, audit, history, roles, services, memory.NewPostmortemStore(), nil, nil, nil)
 
 	resp, err := server.CreateSEV(context.Background(), &pb.CreateSEVRequest{
 		Title:            "API outage",
@@ -390,5 +393,58 @@ func TestCreateSEV_NoOnCallWhenIntegrationDisabled(t *testing.T) {
 	assigned, _ := roles.ListBySEVID(context.Background(), resp.GetId())
 	if len(assigned) != 0 {
 		t.Errorf("want 0 role assignments when on-call disabled, got %d", len(assigned))
+	}
+}
+
+// ── WebSocket event publishing ────────────────────────────────────────────────
+
+func TestAssignRole_PublishesEvent(t *testing.T) {
+	ts := newTestRoleServer()
+	ctx := context.Background()
+	sevID := seedSEVForRole(t, ts)
+
+	_, err := ts.server.AssignRole(ctx, &pb.AssignRoleRequest{
+		SevId:       sevID,
+		RoleType:    string(store.SEVRoleResponder),
+		DisplayName: "Carol",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "role.changed" {
+		t.Errorf("event = %+v, want sev_id=%q type=role.changed", events[0], sevID)
+	}
+}
+
+func TestRemoveRole_PublishesEvent(t *testing.T) {
+	ts := newTestRoleServer()
+	ctx := context.Background()
+	sevID := seedSEVForRole(t, ts)
+
+	assigned, err := ts.server.AssignRole(ctx, &pb.AssignRoleRequest{
+		SevId:       sevID,
+		RoleType:    string(store.SEVRoleResponder),
+		DisplayName: "Carol",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	if _, err := ts.server.RemoveRole(ctx, &pb.RemoveRoleRequest{SevId: sevID, Id: assigned.GetId()}); err != nil {
+		t.Fatalf("RemoveRole: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 2 {
+		t.Fatalf("published events = %d, want 2 (assign + remove): %+v", len(events), events)
+	}
+	last := events[1]
+	if last.sevID != sevID || last.eventType != "role.changed" {
+		t.Errorf("event = %+v, want sev_id=%q type=role.changed", last, sevID)
 	}
 }

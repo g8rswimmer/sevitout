@@ -19,11 +19,12 @@ type AnnouncementServer struct {
 	pb.UnimplementedAnnouncementServiceServer
 	announcements store.AnnouncementStore
 	sevs          store.SEVStore
+	publisher     Publisher // nil when WebSocket support is not wired up
 }
 
 // NewAnnouncementServer returns an AnnouncementServer backed by the given stores.
-func NewAnnouncementServer(announcements store.AnnouncementStore, sevs store.SEVStore) *AnnouncementServer {
-	return &AnnouncementServer{announcements: announcements, sevs: sevs}
+func NewAnnouncementServer(announcements store.AnnouncementStore, sevs store.SEVStore, publisher Publisher) *AnnouncementServer {
+	return &AnnouncementServer{announcements: announcements, sevs: sevs, publisher: publisher}
 }
 
 func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.CreateAnnouncementRequest) (*pb.AnnouncementResponse, error) {
@@ -72,7 +73,10 @@ func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.Cre
 		return nil, status.Error(codes.Internal, "failed to create announcement")
 	}
 
-	return announcementToProto(a), nil
+	resp := announcementToProto(a)
+	publishProto(s.publisher, a.SEVID, "announcement.created", resp)
+
+	return resp, nil
 }
 
 func (s *AnnouncementServer) ListAnnouncements(ctx context.Context, req *pb.ListAnnouncementsRequest) (*pb.ListAnnouncementsResponse, error) {

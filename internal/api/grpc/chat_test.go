@@ -18,15 +18,18 @@ type testChatServer struct {
 	server *grpchandler.ChatServer
 	chat   *memory.ChatStore
 	sevs   *memory.SEVStore
+	pub    *fakePublisher
 }
 
 func newTestChatServer() *testChatServer {
 	chat := memory.NewChatStore()
 	sevs := memory.NewSEVStore()
+	pub := &fakePublisher{}
 	return &testChatServer{
-		server: grpchandler.NewChatServer(chat, sevs),
+		server: grpchandler.NewChatServer(chat, sevs, pub),
 		chat:   chat,
 		sevs:   sevs,
+		pub:    pub,
 	}
 }
 
@@ -241,5 +244,32 @@ func TestListChatEntries_SEVNotFound(t *testing.T) {
 	})
 	if grpcCode(err) != codes.NotFound {
 		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+// ── WebSocket event publishing ────────────────────────────────────────────────
+
+func TestAddChatEntry_PublishesEvent(t *testing.T) {
+	ts := newTestChatServer()
+	ctx := context.Background()
+	sevID := seedSEVForChat(t, ts)
+
+	_, err := ts.server.AddChatEntry(ctx, &pb.AddChatEntryRequest{
+		SevId:   sevID,
+		Source:  "slack",
+		Author:  "alice",
+		Content: "checking the metrics now",
+		AddedBy: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("AddChatEntry: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "chat.created" {
+		t.Errorf("event = %+v, want sev_id=%q type=chat.created", events[0], sevID)
 	}
 }

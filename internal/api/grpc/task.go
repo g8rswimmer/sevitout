@@ -45,16 +45,17 @@ type httpStatusError interface {
 // TaskServer implements pb.TaskServiceServer.
 type TaskServer struct {
 	pb.UnimplementedTaskServiceServer
-	tasks  store.TaskStore
-	sevs   store.SEVStore
-	audit  store.AuditStore
-	github IssueClient // nil when GITHUB_TOKEN is not set
+	tasks     store.TaskStore
+	sevs      store.SEVStore
+	audit     store.AuditStore
+	github    IssueClient // nil when GITHUB_TOKEN is not set
+	publisher Publisher   // nil when WebSocket support is not wired up
 }
 
 // NewTaskServer returns a TaskServer. github may be nil; in that case
 // CreateGitHubIssue returns Unavailable.
-func NewTaskServer(tasks store.TaskStore, sevs store.SEVStore, audit store.AuditStore, github IssueClient) *TaskServer {
-	return &TaskServer{tasks: tasks, sevs: sevs, audit: audit, github: github}
+func NewTaskServer(tasks store.TaskStore, sevs store.SEVStore, audit store.AuditStore, github IssueClient, publisher Publisher) *TaskServer {
+	return &TaskServer{tasks: tasks, sevs: sevs, audit: audit, github: github, publisher: publisher}
 }
 
 func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb.TaskResponse, error) {
@@ -137,7 +138,10 @@ func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb
 		CreatedAt: now,
 	})
 
-	return taskToProto(task, now), nil
+	resp := taskToProto(task, now)
+	publishProto(s.publisher, req.GetSevId(), "task.linked", resp)
+
+	return resp, nil
 }
 
 func (s *TaskServer) UnlinkTask(ctx context.Context, req *pb.UnlinkTaskRequest) (*emptypb.Empty, error) {
@@ -177,6 +181,12 @@ func (s *TaskServer) UnlinkTask(ctx context.Context, req *pb.UnlinkTaskRequest) 
 		Action:    "task.unlinked",
 		OldValue:  strPtr(task.URL),
 		CreatedAt: time.Now(),
+	})
+
+	publishJSON(s.publisher, req.GetSevId(), "task.updated", map[string]any{
+		"sev_id":  req.GetSevId(),
+		"id":      req.GetId(),
+		"removed": true,
 	})
 
 	return &emptypb.Empty{}, nil
@@ -281,7 +291,10 @@ func (s *TaskServer) UpdateTaskDueDate(ctx context.Context, req *pb.UpdateTaskDu
 		CreatedAt: now,
 	})
 
-	return taskToProto(task, now), nil
+	resp := taskToProto(task, now)
+	publishProto(s.publisher, req.GetSevId(), "task.updated", resp)
+
+	return resp, nil
 }
 
 func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHubIssueRequest) (*pb.TaskResponse, error) {
@@ -372,7 +385,10 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		CreatedAt: now,
 	})
 
-	return taskToProto(task, now), nil
+	resp := taskToProto(task, now)
+	publishProto(s.publisher, req.GetSevId(), "task.linked", resp)
+
+	return resp, nil
 }
 
 // isUnprocessable reports whether err represents an HTTP 422 response.
