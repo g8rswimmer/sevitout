@@ -347,6 +347,19 @@ type IntegrationConfig struct {
 	UpdatedAt            time.Time
 }
 
+// RetentionConfig is the retention policy for one severity level.
+// RetentionDays == 0 means retain forever (the default for every level).
+type RetentionConfig struct {
+	ID            int64
+	SeverityLevel int16
+	RetentionDays int
+	// HardDelete controls what happens to a SEV on expiry: false (default)
+	// archives it (soft-delete); true purges it permanently.
+	HardDelete bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 // ShareableLink is a public, revocable read-only token for a SEV.
 type ShareableLink struct {
 	ID        int64

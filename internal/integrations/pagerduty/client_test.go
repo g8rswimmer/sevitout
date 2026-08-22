@@ -123,6 +123,33 @@ func TestOnCallLookup_SendsAuthHeader(t *testing.T) {
 	}
 }
 
+func TestPing_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/abilities" {
+			t.Errorf("path = %q, want /abilities", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := pagerduty.NewClientWithBaseURL("my-key", srv.URL)
+	if err := c.Ping(context.Background()); err != nil {
+		t.Errorf("Ping: %v", err)
+	}
+}
+
+func TestPing_ErrorOnNonOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := pagerduty.NewClientWithBaseURL("bad-key", srv.URL)
+	if err := c.Ping(context.Background()); err == nil {
+		t.Error("Ping should error on a non-200 response")
+	}
+}
+
 func TestOnCallLookup_SendsServiceIDQueryParam(t *testing.T) {
 	var gotServiceIDs []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

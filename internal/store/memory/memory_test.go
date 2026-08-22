@@ -25,6 +25,7 @@ var (
 	_ store.OnCallStore            = (*memory.OnCallStore)(nil)
 	_ store.AIPluginStore          = (*memory.AIPluginStore)(nil)
 	_ store.IntegrationConfigStore = (*memory.IntegrationConfigStore)(nil)
+	_ store.RetentionConfigStore   = (*memory.RetentionConfigStore)(nil)
 	_ store.ShareStore             = (*memory.ShareStore)(nil)
 	_ store.RoleStore              = (*memory.RoleStore)(nil)
 )
@@ -1141,6 +1142,94 @@ func TestIntegrationConfigStore(t *testing.T) {
 		}
 		if len(items) != 1 {
 			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+}
+
+// ── RetentionConfigStore ──────────────────────────────────────────────────────
+
+func TestRetentionConfigStore(t *testing.T) {
+	t.Run("PreSeededDefaults", func(t *testing.T) {
+		s := memory.NewRetentionConfigStore()
+		items, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 4 {
+			t.Fatalf("want 4 pre-seeded levels, got %d", len(items))
+		}
+		for i, cfg := range items {
+			wantLevel := int16(i + 1)
+			if cfg.SeverityLevel != wantLevel {
+				t.Errorf("List[%d].SeverityLevel = %d, want %d (ordered ascending)", i, cfg.SeverityLevel, wantLevel)
+			}
+			if cfg.RetentionDays != 0 || cfg.HardDelete {
+				t.Errorf("severity %d: want retain-forever defaults, got %+v", cfg.SeverityLevel, cfg)
+			}
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		s := memory.NewRetentionConfigStore()
+		got, err := s.Get(ctx, 1)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.SeverityLevel != 1 {
+			t.Errorf("SeverityLevel = %d, want 1", got.SeverityLevel)
+		}
+	})
+
+	t.Run("GetNotFound", func(t *testing.T) {
+		s := memory.NewRetentionConfigStore()
+		if _, err := s.Get(ctx, 9); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("Upsert (update existing)", func(t *testing.T) {
+		s := memory.NewRetentionConfigStore()
+		existing, _ := s.Get(ctx, 3)
+
+		cfg := &store.RetentionConfig{SeverityLevel: 3, RetentionDays: 90, HardDelete: true}
+		if err := s.Upsert(ctx, cfg); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if cfg.ID != existing.ID {
+			t.Errorf("Upsert should preserve the pre-seeded ID, got %d want %d", cfg.ID, existing.ID)
+		}
+
+		got, err := s.Get(ctx, 3)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.RetentionDays != 90 || !got.HardDelete {
+			t.Errorf("severity 3 = %+v, want retention_days=90 hard_delete=true", got)
+		}
+		// Other levels are untouched.
+		other, _ := s.Get(ctx, 4)
+		if other.RetentionDays != 0 || other.HardDelete {
+			t.Errorf("severity 4 should be unaffected by updating severity 3, got %+v", other)
+		}
+	})
+
+	t.Run("Upsert (severity level not pre-seeded)", func(t *testing.T) {
+		// RetentionConfigStore does not restrict severity levels itself — the
+		// gRPC handler enforces the 1-4 range (see internal/api/grpc.validateSeverityLevel).
+		s := memory.NewRetentionConfigStore()
+		cfg := &store.RetentionConfig{SeverityLevel: 5, RetentionDays: 30}
+		if err := s.Upsert(ctx, cfg); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if cfg.ID == 0 {
+			t.Fatal("ID should be set on insert")
+		}
+		got, err := s.Get(ctx, 5)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.RetentionDays != 30 {
+			t.Errorf("RetentionDays = %d, want 30", got.RetentionDays)
 		}
 	})
 }

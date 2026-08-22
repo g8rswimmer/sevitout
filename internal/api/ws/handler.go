@@ -3,7 +3,6 @@ package ws
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -77,7 +76,7 @@ type controlMessage struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	token := extractToken(r)
+	token := auth.ExtractBearerToken(r)
 	if token == "" {
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return
@@ -182,21 +181,4 @@ func readPump(conn *websocket.Conn, hub *Hub, client *Client) {
 			hub.Unsubscribe(client, msg.SEVID)
 		}
 	}
-}
-
-// extractToken mirrors the REST gateway's precedence (see cmd/server/main.go's
-// runtime.WithMetadata): an Authorization header takes priority over the
-// "token" httpOnly cookie set on login.
-func extractToken(r *http.Request) string {
-	if v := r.Header.Get("Authorization"); v != "" {
-		after, ok := strings.CutPrefix(v, "Bearer ")
-		if !ok {
-			return ""
-		}
-		return after
-	}
-	if c, err := r.Cookie("token"); err == nil {
-		return c.Value
-	}
-	return ""
 }

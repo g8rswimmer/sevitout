@@ -79,6 +79,44 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleViewer, "/sevitout.v1.SearchService/SearchSEVs", true},
 		{store.OrgRoleResponder, "/sevitout.v1.SearchService/SearchSEVs", true},
 
+		// Config service — Viewer can read the service registry and on-call
+		// rotations, but not user/integration/retention config or write anything
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListServices", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/GetService", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListOnCallRotations", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/GetOnCallRotation", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/CreateService", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/UpdateService", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/DeleteService", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListUsers", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/UpdateUserRole", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListIntegrationConfigs", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/UpsertIntegrationConfig", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListRetentionConfig", false},
+		// Incident Commander gets no more config access than Responder/Viewer —
+		// configuration is Admin territory even for write-capable roles.
+		{store.OrgRoleIncidentCommander, "/sevitout.v1.ConfigService/CreateService", false},
+		{store.OrgRoleIncidentCommander, "/sevitout.v1.ConfigService/ListUsers", false},
+		// Admin has full config access
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/CreateService", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpdateService", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/DeleteService", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/ListUsers", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpdateUserRole", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/DeactivateUser", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/ReactivateUser", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/CreateOnCallRotation", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpdateOnCallRotation", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/DeleteOnCallRotation", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpsertIntegrationConfig", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/GetIntegrationConfig", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/ListIntegrationConfigs", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/GetRetentionConfig", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpdateRetentionConfig", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/ListRetentionConfig", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/IntegrationsHealth", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/IntegrationsHealth", false},
+
 		// WebSocket subscription (pseudo-method checked manually by internal/api/ws)
 		{store.OrgRoleViewer, "/sevitout.v1.WebSocket/Subscribe", true},
 		{store.OrgRoleResponder, "/sevitout.v1.WebSocket/Subscribe", true},

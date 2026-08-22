@@ -103,6 +103,29 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 	return decodeIssue(resp.Body)
 }
 
+// Ping verifies that token is accepted by GitHub, by calling a lightweight
+// authenticated endpoint that requires no special scopes. Used by the
+// Configuration API's integration health check (docs/project-plan.md M10) to
+// report "connected" vs. "error" for a configured GitHub integration.
+func (c *Client) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/rate_limit", nil)
+	if err != nil {
+		return fmt.Errorf("github: build request: %w", err)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("github: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return newAPIError(resp)
+	}
+	return nil
+}
+
 // CreateIssue creates a new GitHub Issue in the given repository and returns
 // the resulting issue. Labels (if any) are set atomically as part of the
 // same creation request.

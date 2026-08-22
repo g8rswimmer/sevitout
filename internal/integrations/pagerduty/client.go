@@ -40,6 +40,30 @@ func NewClientWithBaseURL(apiKey, baseURL string) *Client {
 	}
 }
 
+// Ping verifies that apiKey is accepted by PagerDuty, by calling a
+// lightweight authenticated endpoint that requires no special scopes. Used
+// by the Configuration API's integration health check (docs/project-plan.md
+// M10) to report "connected" vs. "error" for a configured PagerDuty integration.
+func (c *Client) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/abilities", nil)
+	if err != nil {
+		return fmt.Errorf("pagerduty: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Token token="+c.apiKey)
+	req.Header.Set("Accept", "application/vnd.pagerduty+json;version=2")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("pagerduty: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("pagerduty: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // OnCallLookup returns the display name of the current primary on-call user for
 // the given PagerDuty service ID. Returns ("", nil) when no one is currently
 // on-call for that service.
