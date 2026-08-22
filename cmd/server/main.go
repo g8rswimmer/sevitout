@@ -23,6 +23,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/api/ws"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
+	"github.com/g8rswimmer/sevitout/internal/integrations/slack"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
 	"github.com/g8rswimmer/sevitout/internal/store"
@@ -203,6 +204,7 @@ func main() {
 	healthCheckers := map[string]grpchandler.HealthChecker{
 		"pagerduty": pagerdutyHealthChecker{},
 		"github":    githubHealthChecker{},
+		"slack":     slackHealthChecker{},
 	}
 	integrationsHealthHandler := grpchandler.NewIntegrationsHealthHandler(
 		integrationConfigStore, encryptor, healthCheckers, jwtSigner, userStore)
@@ -354,4 +356,19 @@ func (githubHealthChecker) Check(ctx context.Context, credentials map[string]str
 		return fmt.Errorf("github: no token configured")
 	}
 	return github.NewClient(token).Ping(ctx)
+}
+
+// slackHealthChecker adapts slack.Client to grpchandler.HealthChecker. Its
+// credentials are independent of the slackbot process's own SLACK_BOT_TOKEN
+// (docs/project-plan.md M11) — this is a bot token an admin optionally
+// stores via the Config API purely so the admin page can report Slack
+// connectivity, same as pagerdutyHealthChecker/githubHealthChecker above.
+type slackHealthChecker struct{}
+
+func (slackHealthChecker) Check(ctx context.Context, credentials map[string]string, _ map[string]any) error {
+	token := credentials["bot_token"]
+	if token == "" {
+		return fmt.Errorf("slack: no bot_token configured")
+	}
+	return slack.NewClient(token).Ping(ctx)
 }

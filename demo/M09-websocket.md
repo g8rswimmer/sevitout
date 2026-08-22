@@ -16,10 +16,15 @@ JSON envelope for every subsequent mutation on those SEVs:
 the same field naming as the gRPC gateway), so a client can reuse its existing response
 parsing.
 
+Subscribing to the special SEV ID `*` (`ws.BroadcastRoom`) receives every event published
+to every room, not just one — added in M11 for the Slack bot, which needs to react to a
+brand new SEV opening before it has any SEV ID to subscribe to.
+
 **Event types** (matching `docs/architecture.md` §3.2):
 
 | Event | Published by |
 |---|---|
+| `sev.created` | `CreateSEV` (added in M11 for the Slack bot's event-driven triggers) |
 | `sev.updated` | `UpdateSEV` |
 | `sev.status_changed` | `TransitionStatus` |
 | `announcement.created` | `CreateAnnouncement` |

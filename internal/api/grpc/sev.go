@@ -150,7 +150,16 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		}
 	}
 
-	return sevToProto(record), nil
+	resp := sevToProto(record)
+	if !record.Sensitive {
+		// Published after on-call auto-population above so a subscriber
+		// reacting to sev.created (the Slack bot's auto incident-channel
+		// creation, M11) can immediately look up the on-call role via
+		// RoleService without racing this handler's own writes.
+		publishProto(s.publisher, record.ID, "sev.created", resp)
+	}
+
+	return resp, nil
 }
 
 func (s *SEVServer) GetSEV(ctx context.Context, req *pb.GetSEVRequest) (*pb.SEVResponse, error) {

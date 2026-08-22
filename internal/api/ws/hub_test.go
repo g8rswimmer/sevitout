@@ -181,3 +181,48 @@ func TestHub_UnsubscribeUnknownRoom_NoOp(t *testing.T) {
 	// Never subscribed anywhere; must not panic.
 	hub.Unsubscribe(c, "SEV-1")
 }
+
+func TestHub_BroadcastRoom_ReceivesEventsFromEverySEV(t *testing.T) {
+	hub := ws.NewHub()
+	firehose := hub.NewClient()
+	hub.Subscribe(firehose, ws.BroadcastRoom)
+
+	hub.Publish("SEV-1", "sev.created", []byte(`{"id":"SEV-1"}`))
+	hub.Publish("SEV-2", "sev.status_changed", []byte(`{"id":"SEV-2"}`))
+
+	first := recv(t, firehose)
+	second := recv(t, firehose)
+	got := map[string]string{first.SEVID: first.Type, second.SEVID: second.Type}
+	if got["SEV-1"] != "sev.created" || got["SEV-2"] != "sev.status_changed" {
+		t.Errorf("broadcast subscriber should see events from both SEVs, got %+v", got)
+	}
+}
+
+func TestHub_BroadcastRoom_DoesNotSuppressRoomSubscribers(t *testing.T) {
+	hub := ws.NewHub()
+	roomOnly := hub.NewClient()
+	firehose := hub.NewClient()
+	hub.Subscribe(roomOnly, "SEV-1")
+	hub.Subscribe(firehose, ws.BroadcastRoom)
+
+	hub.Publish("SEV-1", "sev.updated", []byte(`{}`))
+
+	if evt := recv(t, roomOnly); evt.SEVID != "SEV-1" {
+		t.Errorf("room subscriber got %+v, want SEV-1 event", evt)
+	}
+	if evt := recv(t, firehose); evt.SEVID != "SEV-1" {
+		t.Errorf("broadcast subscriber got %+v, want SEV-1 event", evt)
+	}
+}
+
+func TestHub_ClientSubscribedToBothRoomAndBroadcast_ReceivesEventOnce(t *testing.T) {
+	hub := ws.NewHub()
+	c := hub.NewClient()
+	hub.Subscribe(c, "SEV-1")
+	hub.Subscribe(c, ws.BroadcastRoom)
+
+	hub.Publish("SEV-1", "sev.updated", []byte(`{}`))
+
+	recv(t, c)          // the one delivery we expect
+	assertNoEvent(t, c) // a second delivery would indicate a duplicate
+}

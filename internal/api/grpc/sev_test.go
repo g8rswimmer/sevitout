@@ -94,6 +94,44 @@ func TestCreateSEV_ValidRequest(t *testing.T) {
 	}
 }
 
+func TestCreateSEV_PublishesSEVCreated(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:         "Database failure",
+		SeverityLevel: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].eventType != "sev.created" || events[0].sevID != resp.GetId() {
+		t.Errorf("got %+v, want type=sev.created sev_id=%s", events[0], resp.GetId())
+	}
+}
+
+func TestCreateSEV_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	if _, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:         "Sensitive incident",
+		SeverityLevel: 1,
+		Sensitive:     true,
+	}); err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
 func TestCreateSEV_MissingTitle(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
