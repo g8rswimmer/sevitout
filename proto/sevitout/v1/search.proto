@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "sevitout/v1/sev.proto";
+
+// SearchService provides full-text search, structured filtering, sorting,
+// and quick-view presets across SEV records.
+service SearchService {
+  // SearchSEVs returns SEVs matching the given filters, sorted and paginated.
+  // query performs full-text search across a SEV's title, description, root
+  // cause description, and business impact, plus any linked announcement.
+  rpc SearchSEVs(SearchSEVsRequest) returns (SearchSEVsResponse) {
+    option (google.api.http) = {
+      get: "/v1/search/sevs"
+    };
+  }
+}
+
+message SearchSEVsRequest {
+  string query = 1;
+  repeated int32 severity_levels = 2;
+  repeated string statuses = 3;
+  repeated string service_ids = 4;
+  string on_call_user = 5;
+  string detected_by = 6;
+  string root_cause_category = 7;
+  map<string, string> tags = 8;
+  google.protobuf.Timestamp started_after = 9;
+  google.protobuf.Timestamp started_before = 10;
+  // quick_view: "open" | "my_sevs" | "awaiting_postmortem"
+  string quick_view = 11;
+  // sort: "started_at" | "severity" | "mttr" | "updated_at"
+  // (default: most recently created first)
+  string sort = 12;
+  bool sort_desc = 13;
+  int32 limit = 14;
+  int32 offset = 15;
+}
+
+message SearchSEVsResponse {
+  repeated SEVResponse sevs = 1;
+  int32 total = 2;
+}

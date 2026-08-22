@@ -72,3 +72,33 @@ func (r *RoleStore) ListBySEVID(ctx context.Context, sevID string) ([]*store.SEV
 	}
 	return out, nil
 }
+
+// ListSEVIDsByUser is a dynamic filter query (optional role type) rather than
+// a static sqlc query, matching the pattern used by SEVStore's List/Count.
+func (r *RoleStore) ListSEVIDsByUser(ctx context.Context, user string, roleType *store.SEVRoleType) ([]string, error) {
+	if user == "" {
+		return nil, nil
+	}
+	q := `SELECT DISTINCT sev_id FROM sev_roles WHERE (user_id = $1 OR display_name = $1)`
+	args := []any{user}
+	if roleType != nil {
+		q += " AND role_type = $2"
+		args = append(args, string(*roleType))
+	}
+
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("postgres role: list sev ids by user: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("postgres role: scan sev id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}

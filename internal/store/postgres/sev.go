@@ -168,7 +168,7 @@ func (s *SEVStore) List(ctx context.Context, filter store.SEVFilter) ([]*store.S
 
 	where, args := buildSEVFilterWhere(filter)
 	n := len(args) + 1
-	q := fmt.Sprintf("%s %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", sevSelectCols, where, n, n+1)
+	q := fmt.Sprintf("%s %s %s LIMIT $%d OFFSET $%d", sevSelectCols, where, sevOrderByClause(filter), n, n+1)
 	args = append(args, limit, offset)
 
 	rows, err := s.pool.Query(ctx, q, args...)
@@ -329,7 +329,7 @@ FROM sevs`
 
 // buildSEVFilterWhere builds a parameterized WHERE clause from the filter,
 // returning the clause string (empty if no conditions) and the bound args.
-// Limit, Offset, and OnCallUser are handled by the caller.
+// Limit and Offset are handled by the caller.
 func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
 	var conds []string
 	var args []any
@@ -349,9 +349,43 @@ func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
 		args = append(args, strs)
 		n++
 	}
+	if filter.IDs != nil {
+		conds = append(conds, fmt.Sprintf("id = ANY($%d::text[])", n))
+		args = append(args, filter.IDs)
+		n++
+	}
+	if len(filter.ServiceIDs) > 0 {
+		conds = append(conds, fmt.Sprintf("affected_services && $%d::text[]", n))
+		args = append(args, filter.ServiceIDs)
+		n++
+	}
+	if len(filter.Tags) > 0 {
+		tagsJSON, _ := json.Marshal(filter.Tags)
+		conds = append(conds, fmt.Sprintf("tags @> $%d::jsonb", n))
+		args = append(args, tagsJSON)
+		n++
+	}
+	if filter.RootCauseCategory != "" {
+		conds = append(conds, fmt.Sprintf("root_cause_category = $%d", n))
+		args = append(args, filter.RootCauseCategory)
+		n++
+	}
+	if filter.StartedAfter != nil {
+		conds = append(conds, fmt.Sprintf("started_at >= $%d", n))
+		args = append(args, filter.StartedAfter.UTC())
+		n++
+	}
+	if filter.StartedBefore != nil {
+		conds = append(conds, fmt.Sprintf("started_at <= $%d", n))
+		args = append(args, filter.StartedBefore.UTC())
+		n++
+	}
 	if filter.Search != "" {
-		conds = append(conds, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", n, n))
-		args = append(args, "%"+filter.Search+"%")
+		// plainto_tsquery tokenizes free-form user input (implicit AND
+		// between words) instead of requiring to_tsquery's operator syntax,
+		// so arbitrary search text can't produce a malformed query.
+		conds = append(conds, fmt.Sprintf("search_vector @@ plainto_tsquery('english', $%d)", n))
+		args = append(args, filter.Search)
 		n++ //nolint:ineffassign
 	}
 
@@ -359,6 +393,32 @@ func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
 		return "", args
 	}
 	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+// sevOrderByClause builds the ORDER BY clause for filter.Sort/SortDesc. The
+// zero value of Sort preserves the pre-M08 default ordering exactly. For an
+// explicit sort field, "<col> IS NULL" is ordered first so that missing
+// values (e.g. StartedAt/MTTRSeconds on an open SEV) always sort last
+// regardless of direction, and id is a final deterministic tie-breaker.
+func sevOrderByClause(filter store.SEVFilter) string {
+	var col string
+	switch filter.Sort {
+	case store.SEVSortStartedAt:
+		col = "started_at"
+	case store.SEVSortSeverity:
+		col = "severity_level"
+	case store.SEVSortMTTR:
+		col = "mttr_seconds"
+	case store.SEVSortUpdatedAt:
+		col = "updated_at"
+	default:
+		return "ORDER BY created_at DESC"
+	}
+	dir := "ASC"
+	if filter.SortDesc {
+		dir = "DESC"
+	}
+	return fmt.Sprintf("ORDER BY %s IS NULL, %s %s, id", col, col, dir)
 }
 
 // scanSEVRow scans a single SEV from an open pgx.Rows cursor.

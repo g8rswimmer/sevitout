@@ -81,6 +81,7 @@ func main() {
 	chatServer := grpchandler.NewChatServer(chatStore, sevStore)
 	sevLinkServer := grpchandler.NewSEVLinkServer(sevLinkStore, sevStore, auditStore)
 	taskServer := grpchandler.NewTaskServer(taskStore, sevStore, auditStore, issueClient)
+	searchServer := grpchandler.NewSearchServer(sevStore, roleStore, announcementStore)
 
 	grpcSrv := grpc.NewServer(
 		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
@@ -95,6 +96,7 @@ func main() {
 	pb.RegisterChatServiceServer(grpcSrv, chatServer)
 	pb.RegisterSEVLinkServiceServer(grpcSrv, sevLinkServer)
 	pb.RegisterTaskServiceServer(grpcSrv, taskServer)
+	pb.RegisterSearchServiceServer(grpcSrv, searchServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -158,6 +160,10 @@ func main() {
 	}
 	if err := pb.RegisterTaskServiceHandlerClient(ctx, gwMux, pb.NewTaskServiceClient(conn)); err != nil {
 		log.Error("register task gateway", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterSearchServiceHandlerClient(ctx, gwMux, pb.NewSearchServiceClient(conn)); err != nil {
+		log.Error("register search gateway", "err", err)
 		os.Exit(1)
 	}
 

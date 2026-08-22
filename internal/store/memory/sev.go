@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,12 +69,7 @@ func (s *SEVStore) List(_ context.Context, filter store.SEVFilter) ([]*store.SEV
 		out = append(out, &cp)
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].ID < out[j].ID
-		}
-		return out[i].CreatedAt.Before(out[j].CreatedAt)
-	})
+	store.SortSEVs(out, filter.Sort, filter.SortDesc)
 
 	if filter.Offset >= len(out) {
 		return []*store.SEV{}, nil
@@ -135,9 +129,67 @@ func matchesSEVFilter(sev *store.SEV, f store.SEVFilter) bool {
 			return false
 		}
 	}
+	if f.IDs != nil {
+		found := false
+		for _, id := range f.IDs {
+			if sev.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if len(f.ServiceIDs) > 0 {
+		found := false
+		for _, want := range f.ServiceIDs {
+			for _, have := range sev.AffectedServices {
+				if want == have {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if len(f.Tags) > 0 {
+		for k, v := range f.Tags {
+			if sev.Tags[k] != v {
+				return false
+			}
+		}
+	}
+	if f.RootCauseCategory != "" {
+		if sev.RootCauseCategory == nil || *sev.RootCauseCategory != f.RootCauseCategory {
+			return false
+		}
+	}
+	if f.StartedAfter != nil {
+		if sev.StartedAt == nil || sev.StartedAt.Before(*f.StartedAfter) {
+			return false
+		}
+	}
+	if f.StartedBefore != nil {
+		if sev.StartedAt == nil || sev.StartedAt.After(*f.StartedBefore) {
+			return false
+		}
+	}
 	if f.Search != "" {
 		q := strings.ToLower(f.Search)
-		haystack := strings.ToLower(sev.Title + " " + sev.Description)
+		var rootCauseDesc, bizImpact string
+		if sev.RootCauseDescription != nil {
+			rootCauseDesc = *sev.RootCauseDescription
+		}
+		if sev.BusinessImpact != nil {
+			bizImpact = *sev.BusinessImpact
+		}
+		haystack := strings.ToLower(sev.Title + " " + sev.Description + " " + rootCauseDesc + " " + bizImpact)
 		if !strings.Contains(haystack, q) {
 			return false
 		}
