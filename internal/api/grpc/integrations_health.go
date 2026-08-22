@@ -4,10 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
+
+// healthCheckTimeout bounds each integration's connectivity check
+// independently of whatever timeout (if any) its own HTTP client applies —
+// so one slow or misbehaving checker can't stall the response past this,
+// regardless of how it's implemented.
+const healthCheckTimeout = 10 * time.Second
 
 // integrationsHealthMethod is a pseudo gRPC-method path used only to look up
 // the minimum org role required to call the health-check endpoint, via the
@@ -107,10 +115,22 @@ func (h *IntegrationsHealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	statuses := make([]integrationStatus, 0, len(cfgs))
-	for _, cfg := range cfgs {
-		statuses = append(statuses, h.checkOne(r.Context(), cfg))
+	// Run all checks concurrently — sequentially, one slow or unresponsive
+	// integration would delay every check behind it in the list, so overall
+	// latency would scale with the number of configured integrations rather
+	// than with the single slowest one.
+	statuses := make([]integrationStatus, len(cfgs))
+	var wg sync.WaitGroup
+	wg.Add(len(cfgs))
+	for i, cfg := range cfgs {
+		go func(i int, cfg *store.IntegrationConfig) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), healthCheckTimeout)
+			defer cancel()
+			statuses[i] = h.checkOne(ctx, cfg)
+		}(i, cfg)
 	}
+	wg.Wait()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"integrations": statuses})

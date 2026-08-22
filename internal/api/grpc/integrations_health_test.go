@@ -23,6 +23,21 @@ func (f fakeChecker) Check(_ context.Context, _ map[string]string, _ map[string]
 	return f.err
 }
 
+// slowChecker blocks for delay before reporting healthy, so tests can assert
+// that other checks aren't queued up behind it.
+type slowChecker struct {
+	delay time.Duration
+}
+
+func (s slowChecker) Check(ctx context.Context, _ map[string]string, _ map[string]any) error {
+	select {
+	case <-time.After(s.delay):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 type testHealthHandler struct {
 	handler *grpchandler.IntegrationsHealthHandler
 	signer  *auth.JWTSigner
@@ -146,6 +161,46 @@ func TestIntegrationsHealth_CheckerFailure(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, `"status":"error"`) || !strings.Contains(body, "401 unauthorized") {
 		t.Errorf("body = %s, want status error with the checker's message", body)
+	}
+}
+
+// Checks for different integrations must run concurrently: a slow checker
+// must not delay the others queued behind it in the configured-integrations
+// list.
+func TestIntegrationsHealth_ChecksRunConcurrently(t *testing.T) {
+	const delay = 300 * time.Millisecond
+	h := newTestHealthHandler(nil, map[string]grpchandler.HealthChecker{
+		"pagerduty": slowChecker{delay: delay},
+		"github":    fakeChecker{},
+	})
+	if err := h.configs.Upsert(context.Background(), &store.IntegrationConfig{IntegrationType: "pagerduty"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := h.configs.Upsert(context.Background(), &store.IntegrationConfig{IntegrationType: "github"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	token := h.seedUser(t, "admin-1", store.OrgRoleAdmin)
+
+	req := httptest.NewRequest("GET", "/admin/integrations/health", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	h.handler.ServeHTTP(w, req)
+	elapsed := time.Since(start)
+
+	// Sequential execution would take at least 2×delay; concurrent execution
+	// takes ~1×delay. Use 1.5×delay as a generous cutoff to avoid flaking.
+	if elapsed > delay+delay/2 {
+		t.Errorf("ServeHTTP took %v, want well under %v (checks should run concurrently, not sequentially)", elapsed, 2*delay)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, `"integration_type":"pagerduty"`) || !strings.Contains(body, `"integration_type":"github"`) {
+		t.Errorf("body = %s, want both integrations reported", body)
+	}
+	if !strings.Contains(body, `"status":"connected"`) {
+		t.Errorf("body = %s, want at least one connected status", body)
 	}
 }
 
