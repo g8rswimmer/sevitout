@@ -14,9 +14,15 @@ import (
 // searchFanoutLimit bounds the two unpaginated SEVStore.List calls used to
 // compute a merged, in-process-sorted result set when a full-text query
 // matches announcements as well as SEV fields (see searchWithAnnouncements).
-// Results are paginated in Go afterward, so this is a safety cap on query
-// cost rather than a real page size.
+// If either fetch hits this cap, searchWithAnnouncements fails the request
+// rather than silently sorting and paginating an incomplete set.
 const searchFanoutLimit = 10000
+
+// defaultSearchLimit is the page size applied when the caller doesn't set
+// Limit, matching the default already used by postgres.SEVStore.List so the
+// merge path (which paginates in Go, see searchWithAnnouncements) behaves
+// the same as the single-query path for a Postgres-backed deployment.
+const defaultSearchLimit = 100
 
 // SearchServer implements SearchService.
 type SearchServer struct {
@@ -39,6 +45,11 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 		Limit:             int(req.GetLimit()),
 		Offset:            int(req.GetOffset()),
 		SortDesc:          req.GetSortDesc(),
+		// There's no sensitive-SEV visibility/ACL mechanism yet (see
+		// docs/requirements.md §14); this endpoint's keyword/content-based
+		// discovery (including announcement text) shouldn't be the way
+		// Sensitive SEVs get surfaced to a Viewer in the meantime.
+		ExcludeSensitive: true,
 	}
 	for _, l := range req.GetSeverityLevels() {
 		filter.SeverityLevels = append(filter.SeverityLevels, int16(l))
@@ -144,14 +155,21 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 		if err != nil {
 			return nil, err
 		}
+		// searchWithAnnouncements only returns a result when neither
+		// underlying fetch hit searchFanoutLimit, so this is a complete,
+		// exact count — not an approximation capped by the fanout.
 		total = len(merged)
+		limit := filter.Limit
+		if limit <= 0 {
+			limit = defaultSearchLimit
+		}
 		offset := filter.Offset
 		if offset > len(merged) {
 			offset = len(merged)
 		}
 		merged = merged[offset:]
-		if filter.Limit > 0 && filter.Limit < len(merged) {
-			merged = merged[:filter.Limit]
+		if limit < len(merged) {
+			merged = merged[:limit]
 		}
 		records = merged
 	}
@@ -184,6 +202,14 @@ func (s *SearchServer) searchWithAnnouncements(ctx context.Context, filter store
 	byAnnouncement, err := s.sevs.List(ctx, viaAnnouncements)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to search SEVs via announcements")
+	}
+
+	// Either fetch hitting the cap means the merged set below would be
+	// incomplete, which would silently corrupt both the sort order and the
+	// total count for this request (even on page 1, since sorting happens
+	// after fetching) — fail loudly instead of returning wrong results.
+	if len(byField) >= searchFanoutLimit || len(byAnnouncement) >= searchFanoutLimit {
+		return nil, status.Error(codes.ResourceExhausted, "search matched too many SEVs to combine field and announcement results reliably; narrow the query with additional filters")
 	}
 
 	merged := mergeSEVsByID(byField, byAnnouncement)

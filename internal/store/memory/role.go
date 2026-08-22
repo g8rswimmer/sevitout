@@ -64,7 +64,10 @@ func (s *RoleStore) ListSEVIDsByUser(_ context.Context, user string, roleType *s
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	seen := make(map[string]bool)
-	var out []string
+	// A non-nil (possibly empty) slice distinguishes "queried, zero matches"
+	// from the user=="" case above ("no query"), which callers such as
+	// intersectIDs in internal/api/grpc/search.go treat as unconstrained.
+	out := make([]string, 0)
 	for _, r := range s.data {
 		if roleType != nil && r.RoleType != *roleType {
 			continue

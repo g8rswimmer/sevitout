@@ -329,7 +329,10 @@ FROM sevs`
 
 // buildSEVFilterWhere builds a parameterized WHERE clause from the filter,
 // returning the clause string (empty if no conditions) and the bound args.
-// Limit and Offset are handled by the caller.
+// Limit and Offset are handled by the caller. OnCallUser is also not handled
+// here — it predates this function and is dead on the legacy SEVService.ListSEVs
+// endpoint; the new SearchService resolves on_call_user separately via
+// RoleStore into filter.IDs instead (see internal/api/grpc/search.go).
 func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
 	var conds []string
 	var args []any
@@ -349,6 +352,9 @@ func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
 		args = append(args, strs)
 		n++
 	}
+	if filter.ExcludeSensitive {
+		conds = append(conds, "NOT sensitive")
+	}
 	if filter.IDs != nil {
 		conds = append(conds, fmt.Sprintf("id = ANY($%d::text[])", n))
 		args = append(args, filter.IDs)
@@ -360,7 +366,10 @@ func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
 		n++
 	}
 	if len(filter.Tags) > 0 {
-		tagsJSON, _ := json.Marshal(filter.Tags)
+		// tagsToDB can't actually fail for a map[string]string (no cycles,
+		// all-string keys/values), so discarding the error matches Create/
+		// Update's own encoding while reusing their exact behavior.
+		tagsJSON, _ := tagsToDB(filter.Tags)
 		conds = append(conds, fmt.Sprintf("tags @> $%d::jsonb", n))
 		args = append(args, tagsJSON)
 		n++

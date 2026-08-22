@@ -161,12 +161,24 @@ golangci-lint run
 - Combining `query` with more results than fit in a single fetch: when the query also
   matches announcement text, results are merged and paginated in-process rather than as
   a single paginated SQL query (the two data sources can't otherwise be combined
-  correctly), bounded by an internal 10,000-row fanout cap per source. Fine for a
-  single-org tool at this scale; a query without announcement matches is unaffected and
-  stays fully DB-paginated.
+  correctly), bounded by an internal 10,000-row fanout cap per source. If either fetch
+  hits that cap, the request fails with `RESOURCE_EXHAUSTED` rather than silently
+  returning an incomplete/mis-sorted page — narrow the query with additional filters.
+  Fine for a single-org tool at this scale; a query without announcement matches is
+  unaffected and stays fully DB-paginated.
+- SEVs marked `sensitive` are always excluded from `SearchSEVs` results (including
+  quick views and quoted-field matches), since there's no per-user visibility/ACL
+  mechanism yet for sensitive SEVs (requirements §14) — the endpoint's keyword-based
+  discovery shouldn't be the way they get surfaced in the meantime. `GetSEV`/`ListSEVs`
+  are unaffected by this and still don't restrict sensitive-SEV visibility; that's a
+  pre-existing, repo-wide gap tracked separately from M08.
 - `tags` filtering requires an exact value match per key (no partial/wildcard match).
 - Quick views are fixed presets (not user-configurable) and can be combined with
   explicit filters, but an explicit `statuses` filter takes precedence over the quick
   view's own status set rather than intersecting with it.
+- Postgres full-text search (`query`) matches whole words/stems via `tsvector`, not
+  arbitrary substrings; the in-memory store used in unit tests does substring matching
+  instead, so partial-word queries can behave differently in a Postgres-backed
+  deployment than in tests.
 - AI-assisted semantic search (mentioned as a stretch goal in requirements §12) is not
   implemented; `query` is lexical full-text search only.

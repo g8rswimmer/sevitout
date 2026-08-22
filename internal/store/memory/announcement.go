@@ -50,7 +50,9 @@ func (s *AnnouncementStore) SearchSEVIDs(_ context.Context, query string) ([]str
 	defer s.mu.RUnlock()
 	q := strings.ToLower(query)
 	seen := make(map[string]bool)
-	var out []string
+	// A non-nil (possibly empty) slice distinguishes "queried, zero matches"
+	// from the query=="" case above ("no query").
+	out := make([]string, 0)
 	for _, a := range s.data {
 		if !strings.Contains(strings.ToLower(a.Message), q) {
 			continue

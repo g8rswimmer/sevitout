@@ -309,6 +309,86 @@ func TestSEVStore_FilterAndSort(t *testing.T) {
 			t.Fatalf("want notif (nil StartedAt) last even when sorting descending, got last=%s", got[len(got)-1].ID)
 		}
 	})
+
+	// checkout and auth2 are both severity 1 (tied); checkout was created
+	// first so it must sort before auth2 in both directions.
+	t.Run("Sort_TiesBrokenByIDRegardlessOfDirection", func(t *testing.T) {
+		indexOfID := func(records []*store.SEV, id string) int {
+			for i, r := range records {
+				if r.ID == id {
+					return i
+				}
+			}
+			return -1
+		}
+		for _, desc := range []bool{false, true} {
+			got, err := s.List(ctx, store.SEVFilter{Sort: store.SEVSortSeverity, SortDesc: desc})
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			i1, i2 := indexOfID(got, checkout.ID), indexOfID(got, auth2.ID)
+			if i1 < 0 || i2 < 0 {
+				t.Fatalf("expected both tied severity=1 records present")
+			}
+			if i1 > i2 {
+				t.Errorf("desc=%v: want checkout (%s) before auth2 (%s) among tied records, got reversed", desc, checkout.ID, auth2.ID)
+			}
+		}
+	})
+
+	t.Run("Sort_DefaultIsDescendingByCreatedAt", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if got[0].ID != notif.ID {
+			t.Fatalf("want most-recently-created (notif) first by default, got %s", got[0].ID)
+		}
+		if got[len(got)-1].ID != checkout.ID {
+			t.Fatalf("want earliest-created (checkout) last by default, got %s", got[len(got)-1].ID)
+		}
+	})
+}
+
+func TestSEVStore_ExcludeSensitive(t *testing.T) {
+	s := memory.NewSEVStore()
+	ctx := context.Background()
+
+	normal := &store.SEV{Title: "normal incident", SeverityLevel: 2, Status: store.SEVStatusOpen, CreatedAt: time.Now(), UpdatedAt: time.Now(), CreatedBy: "user-1"}
+	sensitive := &store.SEV{Title: "security incident", SeverityLevel: 2, Status: store.SEVStatusOpen, Sensitive: true, CreatedAt: time.Now(), UpdatedAt: time.Now(), CreatedBy: "user-1"}
+	if err := s.Create(ctx, normal); err != nil {
+		t.Fatalf("Create normal: %v", err)
+	}
+	if err := s.Create(ctx, sensitive); err != nil {
+		t.Fatalf("Create sensitive: %v", err)
+	}
+
+	t.Run("ExcludeSensitive_DropsSensitiveSEV", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{ExcludeSensitive: true})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != normal.ID {
+			t.Fatalf("want only %s, got %v", normal.ID, got)
+		}
+		n, err := s.Count(ctx, store.SEVFilter{ExcludeSensitive: true})
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("want count=1, got %d", n)
+		}
+	})
+
+	t.Run("ExcludeSensitive_FalseIncludesBoth", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("want 2 (both normal and sensitive), got %d", len(got))
+		}
+	})
 }
 
 func severities(records []*store.SEV) []int16 {
@@ -472,6 +552,12 @@ func TestAnnouncementStore(t *testing.T) {
 		}
 		if len(ids) != 0 {
 			t.Fatalf("want 0 matches, got %v", ids)
+		}
+		// Must be non-nil (a real, empty query result), not nil (which the
+		// caller in internal/api/grpc/search.go's intersectIDs treats as
+		// "unconstrained" rather than "matched nothing").
+		if ids == nil {
+			t.Fatal("want non-nil empty slice for a real query with zero matches, got nil")
 		}
 	})
 
@@ -1185,6 +1271,12 @@ func TestRoleStore(t *testing.T) {
 		}
 		if len(ids) != 0 {
 			t.Fatalf("want no results, got %v", ids)
+		}
+		// Must be non-nil: a real user was queried and matched nothing, which
+		// intersectIDs (internal/api/grpc/search.go) must distinguish from
+		// "no user given" (nil) or it would treat this as unconstrained.
+		if ids == nil {
+			t.Fatal("want non-nil empty slice for a real user with zero matches, got nil")
 		}
 	})
 

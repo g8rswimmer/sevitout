@@ -92,7 +92,10 @@ func (r *RoleStore) ListSEVIDsByUser(ctx context.Context, user string, roleType 
 	}
 	defer rows.Close()
 
-	var out []string
+	// A non-nil (possibly empty) slice distinguishes "queried, zero matches"
+	// from the user=="" case above ("no query"), which callers such as
+	// intersectIDs in internal/api/grpc/search.go treat as unconstrained.
+	out := make([]string, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {

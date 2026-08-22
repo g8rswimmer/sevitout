@@ -2,6 +2,7 @@ package grpc_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -277,6 +278,125 @@ func TestSearchSEVs_TextSearch_MergedPagination(t *testing.T) {
 		t.Fatalf("want lowest severity (%s) first, got %s", byAnnouncement, resp.GetSevs()[0].GetId())
 	}
 	_ = byField
+}
+
+// TestSearchSEVs_QuickView_MySEVs_NoRolesReturnsEmpty locks in the fix for a
+// nil-vs-empty ambiguity: ListSEVIDsByUser used to return nil both for "no
+// user given" and "user given, zero matches", so intersectIDs treated a real
+// user with zero role assignments as "unconstrained" and returned every SEV.
+func TestSearchSEVs_QuickView_MySEVs_NoRolesReturnsEmpty(t *testing.T) {
+	ts := newTestSearchServer()
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-with-no-roles"})
+
+	_ = seedSearchSEV(t, ts, &store.SEV{Title: "a", SeverityLevel: 2, Status: store.SEVStatusOpen})
+	_ = seedSearchSEV(t, ts, &store.SEV{Title: "b", SeverityLevel: 2, Status: store.SEVStatusOpen})
+
+	resp, err := ts.server.SearchSEVs(ctx, &pb.SearchSEVsRequest{QuickView: "my_sevs"})
+	if err != nil {
+		t.Fatalf("SearchSEVs: %v", err)
+	}
+	if len(resp.GetSevs()) != 0 || resp.GetTotal() != 0 {
+		t.Fatalf("want 0 results for a user with no role assignments, got %d (total=%d)", len(resp.GetSevs()), resp.GetTotal())
+	}
+}
+
+// TestSearchSEVs_OnCallUser_NoMatchReturnsEmpty is the same regression as
+// above, exercised via on_call_user instead of the my_sevs quick view.
+func TestSearchSEVs_OnCallUser_NoMatchReturnsEmpty(t *testing.T) {
+	ts := newTestSearchServer()
+	ctx := context.Background()
+
+	_ = seedSearchSEV(t, ts, &store.SEV{Title: "a", SeverityLevel: 2, Status: store.SEVStatusOpen})
+	_ = seedSearchSEV(t, ts, &store.SEV{Title: "b", SeverityLevel: 2, Status: store.SEVStatusOpen})
+
+	resp, err := ts.server.SearchSEVs(ctx, &pb.SearchSEVsRequest{OnCallUser: "nobody@example.com"})
+	if err != nil {
+		t.Fatalf("SearchSEVs: %v", err)
+	}
+	if len(resp.GetSevs()) != 0 || resp.GetTotal() != 0 {
+		t.Fatalf("want 0 results when on_call_user matches no role assignment, got %d (total=%d)", len(resp.GetSevs()), resp.GetTotal())
+	}
+}
+
+// TestSearchSEVs_TextSearch_DefaultLimitAppliesOnMergePath locks in the fix
+// for the merge (announcement) path ignoring Limit==0: it used to return the
+// entire merged set instead of the same default page size (100) the plain
+// path gets from postgres.SEVStore.List.
+func TestSearchSEVs_TextSearch_DefaultLimitAppliesOnMergePath(t *testing.T) {
+	ts := newTestSearchServer()
+	ctx := context.Background()
+
+	const byFieldCount = 150
+	for i := 0; i < byFieldCount; i++ {
+		seedSearchSEV(t, ts, &store.SEV{Title: fmt.Sprintf("outage report %d", i), SeverityLevel: 2, Status: store.SEVStatusOpen})
+	}
+	viaAnnouncement := seedSearchSEV(t, ts, &store.SEV{Title: "zzz", SeverityLevel: 2, Status: store.SEVStatusOpen})
+	if err := ts.announcements.Create(ctx, &store.Announcement{
+		SEVID: viaAnnouncement, AuthorID: "user-1", Message: "outage mitigated", Audience: store.AudienceInternal,
+	}); err != nil {
+		t.Fatalf("Create announcement: %v", err)
+	}
+
+	resp, err := ts.server.SearchSEVs(ctx, &pb.SearchSEVsRequest{Query: "outage"})
+	if err != nil {
+		t.Fatalf("SearchSEVs: %v", err)
+	}
+	if resp.GetTotal() != byFieldCount+1 {
+		t.Fatalf("want exact total=%d, got %d", byFieldCount+1, resp.GetTotal())
+	}
+	if len(resp.GetSevs()) != 100 {
+		t.Fatalf("want default page size 100, got %d", len(resp.GetSevs()))
+	}
+}
+
+// TestSearchSEVs_TextSearch_FanoutCapReturnsError locks in the fix for the
+// merge path silently truncating (and mis-sorting/mis-counting) results when
+// either underlying fetch hits searchFanoutLimit: it now fails loudly with
+// ResourceExhausted instead of returning an incomplete, wrongly-ordered page.
+func TestSearchSEVs_TextSearch_FanoutCapReturnsError(t *testing.T) {
+	ts := newTestSearchServer()
+	ctx := context.Background()
+
+	// Must exceed internal/api/grpc/search.go's unexported searchFanoutLimit (10000).
+	const overCap = 10001
+	for i := 0; i < overCap; i++ {
+		seedSearchSEV(t, ts, &store.SEV{Title: fmt.Sprintf("outage %d", i), SeverityLevel: 2, Status: store.SEVStatusOpen})
+	}
+	viaAnnouncement := seedSearchSEV(t, ts, &store.SEV{Title: "zzz", SeverityLevel: 2, Status: store.SEVStatusOpen})
+	if err := ts.announcements.Create(ctx, &store.Announcement{
+		SEVID: viaAnnouncement, AuthorID: "user-1", Message: "outage mitigated", Audience: store.AudienceInternal,
+	}); err != nil {
+		t.Fatalf("Create announcement: %v", err)
+	}
+
+	_, err := ts.server.SearchSEVs(ctx, &pb.SearchSEVsRequest{Query: "outage"})
+	if grpcCode(err) != codes.ResourceExhausted {
+		t.Fatalf("want ResourceExhausted when the fan-out cap is exceeded, got %v", err)
+	}
+}
+
+// TestSearchSEVs_ExcludesSensitiveSEVs locks in the mitigation for the lack
+// of a sensitive-SEV visibility/ACL mechanism: SearchSEVs must not surface
+// Sensitive SEVs via its keyword/filter-based discovery, even though a
+// Viewer's request would otherwise match them.
+func TestSearchSEVs_ExcludesSensitiveSEVs(t *testing.T) {
+	ts := newTestSearchServer()
+	ctx := context.Background()
+
+	normal := seedSearchSEV(t, ts, &store.SEV{Title: "outage report", SeverityLevel: 2, Status: store.SEVStatusOpen})
+	_ = seedSearchSEV(t, ts, &store.SEV{Title: "outage in the security system", SeverityLevel: 2, Status: store.SEVStatusOpen, Sensitive: true})
+
+	resp, err := ts.server.SearchSEVs(ctx, &pb.SearchSEVsRequest{Query: "outage"})
+	if err != nil {
+		t.Fatalf("SearchSEVs: %v", err)
+	}
+	ids := resultIDs(resp)
+	if len(ids) != 1 || !ids[normal] {
+		t.Fatalf("want only the non-sensitive SEV (%s), got %v", normal, ids)
+	}
+	if resp.GetTotal() != 1 {
+		t.Fatalf("want total=1, got %d", resp.GetTotal())
+	}
 }
 
 func strPtr(v string) *string { return &v }

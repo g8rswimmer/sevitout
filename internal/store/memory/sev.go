@@ -129,6 +129,9 @@ func matchesSEVFilter(sev *store.SEV, f store.SEVFilter) bool {
 			return false
 		}
 	}
+	if f.ExcludeSensitive && sev.Sensitive {
+		return false
+	}
 	if f.IDs != nil {
 		found := false
 		for _, id := range f.IDs {
@@ -181,6 +184,11 @@ func matchesSEVFilter(sev *store.SEV, f store.SEVFilter) bool {
 		}
 	}
 	if f.Search != "" {
+		// NOTE: this is substring matching, not the tokenized/stemmed
+		// lexeme matching postgres.buildSEVFilterWhere does via tsvector/
+		// plainto_tsquery — a query for a partial word fragment can match
+		// here but not against postgres. Tests run against this store don't
+		// exercise postgres's real full-text semantics.
 		q := strings.ToLower(f.Search)
 		var rootCauseDesc, bizImpact string
 		if sev.RootCauseDescription != nil {

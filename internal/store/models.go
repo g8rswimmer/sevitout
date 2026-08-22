@@ -151,6 +151,13 @@ type SEVFilter struct {
 	// matches) without SEVStore needing to know about them.
 	IDs    []string
 	Search string
+	// ExcludeSensitive drops SEVs with Sensitive==true from the result set.
+	// There is no per-user visibility/ACL mechanism for sensitive SEVs yet
+	// (see docs/requirements.md §14), so callers that surface SEVs by
+	// keyword/content match (e.g. SearchService) set this to avoid making
+	// sensitive SEVs newly discoverable; callers that already scope access
+	// some other way (e.g. GetSEV by known ID) leave it false.
+	ExcludeSensitive bool
 	// Sort selects the ordering column; the zero value preserves the legacy
 	// default (most recently created first).
 	Sort     SEVSortField
