@@ -40,6 +40,9 @@ type AuditStore interface {
 type AnnouncementStore interface {
 	Create(ctx context.Context, a *Announcement) error
 	ListBySEVID(ctx context.Context, sevID string) ([]*Announcement, error)
+	// SearchSEVIDs returns the distinct SEV IDs with at least one announcement
+	// whose message matches query.
+	SearchSEVIDs(ctx context.Context, query string) ([]string, error)
 }
 
 // ChatStore manages chat log entries captured during an incident.
@@ -146,4 +149,8 @@ type RoleStore interface {
 	// Returns ErrNotFound when no matching assignment exists.
 	Remove(ctx context.Context, sevID string, id int64) error
 	ListBySEVID(ctx context.Context, sevID string) ([]*SEVRole, error)
+	// ListSEVIDsByUser returns the distinct SEV IDs where user (matched
+	// against either UserID or DisplayName) holds a role assignment. When
+	// roleType is non-nil, only that role type is considered.
+	ListSEVIDsByUser(ctx context.Context, user string, roleType *SEVRoleType) ([]string, error)
 }

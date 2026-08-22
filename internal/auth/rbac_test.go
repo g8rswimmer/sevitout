@@ -75,6 +75,10 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleResponder, "/sevitout.v1.TaskService/UpdateTaskDueDate", true},
 		{store.OrgRoleResponder, "/sevitout.v1.TaskService/CreateGitHubIssue", true},
 
+		// Search service
+		{store.OrgRoleViewer, "/sevitout.v1.SearchService/SearchSEVs", true},
+		{store.OrgRoleResponder, "/sevitout.v1.SearchService/SearchSEVs", true},
+
 		// Unknown RPC is denied to everyone
 		{store.OrgRoleAdmin, "/sevitout.v1.UnknownService/DoSomething", false},
 		{store.OrgRoleViewer, "/sevitout.v1.UnknownService/DoSomething", false},

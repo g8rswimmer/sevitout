@@ -56,3 +56,29 @@ func (s *RoleStore) ListBySEVID(_ context.Context, sevID string) ([]*store.SEVRo
 	}
 	return out, nil
 }
+
+func (s *RoleStore) ListSEVIDsByUser(_ context.Context, user string, roleType *store.SEVRoleType) ([]string, error) {
+	if user == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[string]bool)
+	// A non-nil (possibly empty) slice distinguishes "queried, zero matches"
+	// from the user=="" case above ("no query"), which callers such as
+	// intersectIDs in internal/api/grpc/search.go treat as unconstrained.
+	out := make([]string, 0)
+	for _, r := range s.data {
+		if roleType != nil && r.RoleType != *roleType {
+			continue
+		}
+		if (r.UserID == nil || *r.UserID != user) && r.DisplayName != user {
+			continue
+		}
+		if !seen[r.SEVID] {
+			seen[r.SEVID] = true
+			out = append(out, r.SEVID)
+		}
+	}
+	return out, nil
+}

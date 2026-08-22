@@ -137,6 +137,268 @@ func TestSEVStore(t *testing.T) {
 	})
 }
 
+// ── SEVStore filter/sort combinations (M08 search) ─────────────────────────────
+
+func TestSEVStore_FilterAndSort(t *testing.T) {
+	s := memory.NewSEVStore()
+
+	strPtr := func(v string) *string { return &v }
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	t0, t1, t2, t3 := base, base.AddDate(0, 0, 1), base.AddDate(0, 0, 2), base.AddDate(0, 0, 3)
+	sec := func(n int64) *int64 { return &n }
+
+	sevs := []*store.SEV{
+		{
+			Title: "Checkout revenue drop", Description: "checkout failing",
+			SeverityLevel: 1, Status: store.SEVStatusOpen,
+			AffectedServices: []string{"checkout"},
+			Tags:             map[string]string{"team": "payments"},
+			BusinessImpact:   strPtr("revenue drop across checkout"),
+			StartedAt:        &t0,
+			CreatedAt:        t0, UpdatedAt: t0, CreatedBy: "user-1",
+		},
+		{
+			Title: "Billing errors", Description: "billing 500s",
+			SeverityLevel: 2, Status: store.SEVStatusInvestigating,
+			AffectedServices:  []string{"checkout", "billing"},
+			Tags:              map[string]string{"team": "payments", "region": "us"},
+			RootCauseCategory: strPtr("deployment"),
+			StartedAt:         &t1,
+			CreatedAt:         t1, UpdatedAt: t1, CreatedBy: "user-1",
+		},
+		{
+			Title: "Auth outage", Description: "login failing",
+			SeverityLevel: 3, Status: store.SEVStatusResolved,
+			AffectedServices:     []string{"auth"},
+			Tags:                 map[string]string{"team": "identity"},
+			RootCauseDescription: strPtr("bad config pushed to prod"),
+			StartedAt:            &t2,
+			MTTRSeconds:          sec(3600),
+			CreatedAt:            t2, UpdatedAt: t2, CreatedBy: "user-1",
+		},
+		{
+			Title: "Auth flakiness", Description: "intermittent 401s",
+			SeverityLevel: 1, Status: store.SEVStatusPostmortemInProgress,
+			AffectedServices: []string{"auth"},
+			StartedAt:        &t3,
+			MTTRSeconds:      sec(7200),
+			CreatedAt:        t3, UpdatedAt: t3, CreatedBy: "user-1",
+		},
+		{
+			Title: "Notification delay", Description: "delayed pushes",
+			SeverityLevel: 4, Status: store.SEVStatusPostmortemComplete,
+			AffectedServices: []string{"notifications"},
+			CreatedAt:        base.AddDate(0, 0, 4), UpdatedAt: base.AddDate(0, 0, 4), CreatedBy: "user-1",
+		},
+	}
+	for _, sv := range sevs {
+		if err := s.Create(ctx, sv); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+	checkout, billing, auth1, auth2, notif := sevs[0], sevs[1], sevs[2], sevs[3], sevs[4]
+
+	wantIDs := func(t *testing.T, got []*store.SEV, want ...*store.SEV) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("want %d results, got %d", len(want), len(got))
+		}
+		wantSet := make(map[string]bool, len(want))
+		for _, w := range want {
+			wantSet[w.ID] = true
+		}
+		for _, g := range got {
+			if !wantSet[g.ID] {
+				t.Errorf("unexpected result %s (%s)", g.ID, g.Title)
+			}
+		}
+	}
+
+	t.Run("ServiceIDs", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{ServiceIDs: []string{"checkout"}})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		wantIDs(t, got, checkout, billing)
+	})
+
+	t.Run("Tags_SingleKey", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{Tags: map[string]string{"team": "payments"}})
+		wantIDs(t, got, checkout, billing)
+	})
+
+	t.Run("Tags_MultipleKeysAllMustMatch", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{Tags: map[string]string{"team": "payments", "region": "us"}})
+		wantIDs(t, got, billing)
+	})
+
+	t.Run("RootCauseCategory", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{RootCauseCategory: "deployment"})
+		wantIDs(t, got, billing)
+	})
+
+	t.Run("StartedDateRange", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{StartedAfter: &t1, StartedBefore: &t2})
+		wantIDs(t, got, billing, auth1)
+	})
+
+	t.Run("IDs_Allowlist", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{IDs: []string{checkout.ID, auth1.ID}})
+		wantIDs(t, got, checkout, auth1)
+	})
+
+	t.Run("IDs_EmptyAllowlistMatchesNothing", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{IDs: []string{}})
+		if len(got) != 0 {
+			t.Fatalf("want 0 results for empty (non-nil) allowlist, got %d", len(got))
+		}
+	})
+
+	t.Run("Search_MatchesBusinessImpact", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{Search: "revenue"})
+		wantIDs(t, got, checkout)
+	})
+
+	t.Run("Search_MatchesRootCauseDescription", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{Search: "bad config"})
+		wantIDs(t, got, auth1)
+	})
+
+	t.Run("Combination_StatusAndService", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{
+			Statuses:   []store.SEVStatus{store.SEVStatusInvestigating},
+			ServiceIDs: []string{"billing"},
+		})
+		wantIDs(t, got, billing)
+	})
+
+	t.Run("Sort_SeverityAscending", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{Sort: store.SEVSortSeverity})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 5 {
+			t.Fatalf("want 5, got %d", len(got))
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i].SeverityLevel < got[i-1].SeverityLevel {
+				t.Fatalf("results not ascending by severity: %v", severities(got))
+			}
+		}
+		if got[len(got)-1].ID != notif.ID {
+			t.Fatalf("want highest severity (notif) last, got %v", severities(got))
+		}
+	})
+
+	t.Run("Sort_MTTRDescending_NullsLast", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{Sort: store.SEVSortMTTR, SortDesc: true})
+		if got[0].ID != auth2.ID || got[1].ID != auth1.ID {
+			t.Fatalf("want auth2 (7200s) then auth1 (3600s) first, got %s, %s", got[0].ID, got[1].ID)
+		}
+		lastThree := map[string]bool{got[2].ID: true, got[3].ID: true, got[4].ID: true}
+		for _, want := range []*store.SEV{checkout, billing, notif} {
+			if !lastThree[want.ID] {
+				t.Errorf("expected %s (no MTTR) to sort after all set MTTR values", want.ID)
+			}
+		}
+	})
+
+	t.Run("Sort_StartedAtNullsLastRegardlessOfDirection", func(t *testing.T) {
+		got, _ := s.List(ctx, store.SEVFilter{Sort: store.SEVSortStartedAt, SortDesc: true})
+		if got[len(got)-1].ID != notif.ID {
+			t.Fatalf("want notif (nil StartedAt) last even when sorting descending, got last=%s", got[len(got)-1].ID)
+		}
+	})
+
+	// checkout and auth2 are both severity 1 (tied); checkout was created
+	// first so it must sort before auth2 in both directions.
+	t.Run("Sort_TiesBrokenByIDRegardlessOfDirection", func(t *testing.T) {
+		indexOfID := func(records []*store.SEV, id string) int {
+			for i, r := range records {
+				if r.ID == id {
+					return i
+				}
+			}
+			return -1
+		}
+		for _, desc := range []bool{false, true} {
+			got, err := s.List(ctx, store.SEVFilter{Sort: store.SEVSortSeverity, SortDesc: desc})
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			i1, i2 := indexOfID(got, checkout.ID), indexOfID(got, auth2.ID)
+			if i1 < 0 || i2 < 0 {
+				t.Fatalf("expected both tied severity=1 records present")
+			}
+			if i1 > i2 {
+				t.Errorf("desc=%v: want checkout (%s) before auth2 (%s) among tied records, got reversed", desc, checkout.ID, auth2.ID)
+			}
+		}
+	})
+
+	t.Run("Sort_DefaultIsDescendingByCreatedAt", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if got[0].ID != notif.ID {
+			t.Fatalf("want most-recently-created (notif) first by default, got %s", got[0].ID)
+		}
+		if got[len(got)-1].ID != checkout.ID {
+			t.Fatalf("want earliest-created (checkout) last by default, got %s", got[len(got)-1].ID)
+		}
+	})
+}
+
+func TestSEVStore_ExcludeSensitive(t *testing.T) {
+	s := memory.NewSEVStore()
+	ctx := context.Background()
+
+	normal := &store.SEV{Title: "normal incident", SeverityLevel: 2, Status: store.SEVStatusOpen, CreatedAt: time.Now(), UpdatedAt: time.Now(), CreatedBy: "user-1"}
+	sensitive := &store.SEV{Title: "security incident", SeverityLevel: 2, Status: store.SEVStatusOpen, Sensitive: true, CreatedAt: time.Now(), UpdatedAt: time.Now(), CreatedBy: "user-1"}
+	if err := s.Create(ctx, normal); err != nil {
+		t.Fatalf("Create normal: %v", err)
+	}
+	if err := s.Create(ctx, sensitive); err != nil {
+		t.Fatalf("Create sensitive: %v", err)
+	}
+
+	t.Run("ExcludeSensitive_DropsSensitiveSEV", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{ExcludeSensitive: true})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != normal.ID {
+			t.Fatalf("want only %s, got %v", normal.ID, got)
+		}
+		n, err := s.Count(ctx, store.SEVFilter{ExcludeSensitive: true})
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("want count=1, got %d", n)
+		}
+	})
+
+	t.Run("ExcludeSensitive_FalseIncludesBoth", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("want 2 (both normal and sensitive), got %d", len(got))
+		}
+	})
+}
+
+func severities(records []*store.SEV) []int16 {
+	out := make([]int16, len(records))
+	for i, r := range records {
+		out[i] = r.SeverityLevel
+	}
+	return out
+}
+
 // ── PostmortemStore ───────────────────────────────────────────────────────────
 
 func TestPostmortemStore(t *testing.T) {
@@ -270,6 +532,42 @@ func TestAnnouncementStore(t *testing.T) {
 		}
 		if len(items) != 1 {
 			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("SearchSEVIDs_Match", func(t *testing.T) {
+		ids, err := s.SearchSEVIDs(ctx, "opened")
+		if err != nil {
+			t.Fatalf("SearchSEVIDs: %v", err)
+		}
+		if len(ids) != 1 || ids[0] != "SEV-2026-0001" {
+			t.Fatalf("want [SEV-2026-0001], got %v", ids)
+		}
+	})
+
+	t.Run("SearchSEVIDs_NoMatch", func(t *testing.T) {
+		ids, err := s.SearchSEVIDs(ctx, "nonexistent-term")
+		if err != nil {
+			t.Fatalf("SearchSEVIDs: %v", err)
+		}
+		if len(ids) != 0 {
+			t.Fatalf("want 0 matches, got %v", ids)
+		}
+		// Must be non-nil (a real, empty query result), not nil (which the
+		// caller in internal/api/grpc/search.go's intersectIDs treats as
+		// "unconstrained" rather than "matched nothing").
+		if ids == nil {
+			t.Fatal("want non-nil empty slice for a real query with zero matches, got nil")
+		}
+	})
+
+	t.Run("SearchSEVIDs_EmptyQuery", func(t *testing.T) {
+		ids, err := s.SearchSEVIDs(ctx, "")
+		if err != nil {
+			t.Fatalf("SearchSEVIDs: %v", err)
+		}
+		if ids != nil {
+			t.Fatalf("want nil for empty query, got %v", ids)
 		}
 	})
 }
@@ -931,6 +1229,64 @@ func TestRoleStore(t *testing.T) {
 		}
 		if err := s.Remove(ctx, "SEV-WRONG", items[0].ID); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound when sev_id doesn't match, got %v", err)
+		}
+	})
+
+	// At this point only Bob's responder role remains (Alice's IC role was
+	// removed above).
+	t.Run("ListSEVIDsByUser_MatchesDisplayName", func(t *testing.T) {
+		ids, err := s.ListSEVIDsByUser(ctx, "Bob", nil)
+		if err != nil {
+			t.Fatalf("ListSEVIDsByUser: %v", err)
+		}
+		if len(ids) != 1 || ids[0] != "SEV-2026-0001" {
+			t.Fatalf("want [SEV-2026-0001], got %v", ids)
+		}
+	})
+
+	t.Run("ListSEVIDsByUser_FilteredByRoleType", func(t *testing.T) {
+		responder := store.SEVRoleResponder
+		ids, err := s.ListSEVIDsByUser(ctx, "Bob", &responder)
+		if err != nil {
+			t.Fatalf("ListSEVIDsByUser: %v", err)
+		}
+		if len(ids) != 1 || ids[0] != "SEV-2026-0001" {
+			t.Fatalf("want [SEV-2026-0001], got %v", ids)
+		}
+
+		ic := store.SEVRoleIncidentCommander
+		ids, err = s.ListSEVIDsByUser(ctx, "Bob", &ic)
+		if err != nil {
+			t.Fatalf("ListSEVIDsByUser: %v", err)
+		}
+		if len(ids) != 0 {
+			t.Fatalf("want no results for mismatched role type, got %v", ids)
+		}
+	})
+
+	t.Run("ListSEVIDsByUser_UnknownUser", func(t *testing.T) {
+		ids, err := s.ListSEVIDsByUser(ctx, "nobody", nil)
+		if err != nil {
+			t.Fatalf("ListSEVIDsByUser: %v", err)
+		}
+		if len(ids) != 0 {
+			t.Fatalf("want no results, got %v", ids)
+		}
+		// Must be non-nil: a real user was queried and matched nothing, which
+		// intersectIDs (internal/api/grpc/search.go) must distinguish from
+		// "no user given" (nil) or it would treat this as unconstrained.
+		if ids == nil {
+			t.Fatal("want non-nil empty slice for a real user with zero matches, got nil")
+		}
+	})
+
+	t.Run("ListSEVIDsByUser_EmptyUser", func(t *testing.T) {
+		ids, err := s.ListSEVIDsByUser(ctx, "", nil)
+		if err != nil {
+			t.Fatalf("ListSEVIDsByUser: %v", err)
+		}
+		if ids != nil {
+			t.Fatalf("want nil for empty user, got %v", ids)
 		}
 	})
 }

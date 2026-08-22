@@ -49,6 +49,8 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.TaskService/ListTasks":         store.OrgRoleViewer,
 	"/sevitout.v1.TaskService/UpdateTaskDueDate": store.OrgRoleResponder,
 	"/sevitout.v1.TaskService/CreateGitHubIssue": store.OrgRoleResponder,
+	// Search service
+	"/sevitout.v1.SearchService/SearchSEVs": store.OrgRoleViewer,
 	// gRPC reflection (both v1alpha and v1 registered by grpc-go)
 	"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": store.OrgRoleViewer,
 	"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      store.OrgRoleViewer,

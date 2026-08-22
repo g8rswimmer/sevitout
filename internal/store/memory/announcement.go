@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -36,6 +37,29 @@ func (s *AnnouncementStore) ListBySEVID(_ context.Context, sevID string) ([]*sto
 		if a.SEVID == sevID {
 			cp := *a
 			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *AnnouncementStore) SearchSEVIDs(_ context.Context, query string) ([]string, error) {
+	if query == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	q := strings.ToLower(query)
+	seen := make(map[string]bool)
+	// A non-nil (possibly empty) slice distinguishes "queried, zero matches"
+	// from the query=="" case above ("no query").
+	out := make([]string, 0)
+	for _, a := range s.data {
+		if !strings.Contains(strings.ToLower(a.Message), q) {
+			continue
+		}
+		if !seen[a.SEVID] {
+			seen[a.SEVID] = true
+			out = append(out, a.SEVID)
 		}
 	}
 	return out, nil

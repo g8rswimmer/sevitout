@@ -125,14 +125,45 @@ type SEV struct {
 	CreatedBy             string
 }
 
+// SEVSortField selects the column SEVStore.List orders results by.
+type SEVSortField string
+
+const (
+	SEVSortStartedAt SEVSortField = "started_at"
+	SEVSortSeverity  SEVSortField = "severity"
+	SEVSortMTTR      SEVSortField = "mttr"
+	SEVSortUpdatedAt SEVSortField = "updated_at"
+)
+
 // SEVFilter narrows the result set returned by SEVStore.List.
 type SEVFilter struct {
-	SeverityLevels []int16
-	Statuses       []SEVStatus
-	OnCallUser     string
-	Search         string
-	Limit          int
-	Offset         int
+	SeverityLevels    []int16
+	Statuses          []SEVStatus
+	OnCallUser        string
+	ServiceIDs        []string
+	Tags              map[string]string
+	RootCauseCategory string
+	StartedAfter      *time.Time
+	StartedBefore     *time.Time
+	// IDs, when non-nil, restricts results to this set of SEV IDs (an empty
+	// but non-nil slice matches nothing). Lets callers compose filters
+	// computed from other stores (e.g. role assignments, announcement text
+	// matches) without SEVStore needing to know about them.
+	IDs    []string
+	Search string
+	// ExcludeSensitive drops SEVs with Sensitive==true from the result set.
+	// There is no per-user visibility/ACL mechanism for sensitive SEVs yet
+	// (see docs/requirements.md §14), so callers that surface SEVs by
+	// keyword/content match (e.g. SearchService) set this to avoid making
+	// sensitive SEVs newly discoverable; callers that already scope access
+	// some other way (e.g. GetSEV by known ID) leave it false.
+	ExcludeSensitive bool
+	// Sort selects the ordering column; the zero value preserves the legacy
+	// default (most recently created first).
+	Sort     SEVSortField
+	SortDesc bool
+	Limit    int
+	Offset   int
 }
 
 // SEVStatusHistory is one entry in the immutable status-transition log.
