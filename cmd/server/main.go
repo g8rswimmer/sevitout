@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
 	"github.com/g8rswimmer/sevitout/internal/store"
+	"github.com/g8rswimmer/sevitout/internal/store/crypto"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 	"github.com/g8rswimmer/sevitout/internal/store/postgres"
 )
@@ -37,7 +39,8 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore,
-		announcementStore, chatStore, sevLinkStore, taskStore := buildStores(ctx, log)
+		announcementStore, chatStore, sevLinkStore, taskStore, onCallStore, integrationConfigStore,
+		retentionConfigStore := buildStores(ctx, log)
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
@@ -72,6 +75,22 @@ func main() {
 	// --- Unlock token signer (reuses JWT_SECRET; 15-min TTL) ---
 	unlockSigner := postmortem.NewUnlockSigner(jwtSecret)
 
+	// --- Credential encryptor (optional): integration credentials are only
+	// encryptable/decryptable when ENCRYPTION_KEY is set. Config API writes
+	// that include credentials are rejected while it's absent. ---
+	var encryptor grpchandler.Encryptor
+	if raw := os.Getenv("ENCRYPTION_KEY"); raw != "" {
+		key, err := crypto.DecodeKey(raw)
+		if err != nil {
+			log.Error("ENCRYPTION_KEY invalid (must be base64-encoded 32 bytes)", "err", err)
+			os.Exit(1)
+		}
+		encryptor = crypto.NewKeyEncryptor(key)
+		log.Info("integration credential encryption enabled")
+	} else {
+		log.Warn("ENCRYPTION_KEY not set — integration credentials cannot be stored")
+	}
+
 	// --- WebSocket hub: room-per-SEV pub/sub fed by the mutation handlers below ---
 	wsHub := ws.NewHub()
 
@@ -86,6 +105,7 @@ func main() {
 	sevLinkServer := grpchandler.NewSEVLinkServer(sevLinkStore, sevStore, auditStore)
 	taskServer := grpchandler.NewTaskServer(taskStore, sevStore, auditStore, issueClient, wsHub)
 	searchServer := grpchandler.NewSearchServer(sevStore, roleStore, announcementStore)
+	configServer := grpchandler.NewConfigServer(serviceStore, userStore, onCallStore, integrationConfigStore, retentionConfigStore, encryptor)
 
 	grpcSrv := grpc.NewServer(
 		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
@@ -101,6 +121,7 @@ func main() {
 	pb.RegisterSEVLinkServiceServer(grpcSrv, sevLinkServer)
 	pb.RegisterTaskServiceServer(grpcSrv, taskServer)
 	pb.RegisterSearchServiceServer(grpcSrv, searchServer)
+	pb.RegisterConfigServiceServer(grpcSrv, configServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -170,15 +191,28 @@ func main() {
 		log.Error("register search gateway", "err", err)
 		os.Exit(1)
 	}
+	if err := pb.RegisterConfigServiceHandlerClient(ctx, gwMux, pb.NewConfigServiceClient(conn)); err != nil {
+		log.Error("register config gateway", "err", err)
+		os.Exit(1)
+	}
 
 	// --- Password auth handler ---
 	passwordHandler := auth.NewPasswordHandler(jwtSigner, userStore)
+
+	// --- Integration health-check handler (GET /admin/integrations/health) ---
+	healthCheckers := map[string]grpchandler.HealthChecker{
+		"pagerduty": pagerdutyHealthChecker{},
+		"github":    githubHealthChecker{},
+	}
+	integrationsHealthHandler := grpchandler.NewIntegrationsHealthHandler(
+		integrationConfigStore, encryptor, healthCheckers, jwtSigner, userStore)
 
 	// --- HTTP mux ---
 	httpMux := http.NewServeMux()
 	passwordHandler.RegisterRoutes(httpMux)                           // POST /auth/register, POST /auth/login
 	httpMux.Handle("/ws", ws.NewHandler(wsHub, jwtSigner, userStore)) // WebSocket subscriptions
-	httpMux.Handle("/", gwMux)                                        // gRPC-gateway routes
+	httpMux.Handle("/admin/integrations/health", integrationsHealthHandler)
+	httpMux.Handle("/", gwMux) // gRPC-gateway routes
 	httpMux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(openAPISpec)
@@ -224,6 +258,9 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 	store.ChatStore,
 	store.SEVLinkStore,
 	store.TaskStore,
+	store.OnCallStore,
+	store.IntegrationConfigStore,
+	store.RetentionConfigStore,
 ) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -238,7 +275,10 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 			memory.NewAnnouncementStore(),
 			memory.NewChatStore(),
 			memory.NewSEVLinkStore(),
-			memory.NewTaskStore()
+			memory.NewTaskStore(),
+			memory.NewOnCallStore(),
+			memory.NewIntegrationConfigStore(),
+			memory.NewRetentionConfigStore()
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
@@ -246,7 +286,7 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
-	log.Warn("service, postmortem, announcement, chat, sev-link, and task stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
+	log.Warn("service, postmortem, announcement, chat, sev-link, task, oncall, integration-config, and retention-config stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
 	return postgres.NewSEVStore(pool),
 		postgres.NewAuditStore(pool),
 		postgres.NewStatusHistoryStore(pool),
@@ -257,7 +297,10 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		memory.NewAnnouncementStore(),
 		memory.NewChatStore(),
 		memory.NewSEVLinkStore(),
-		memory.NewTaskStore()
+		memory.NewTaskStore(),
+		memory.NewOnCallStore(),
+		memory.NewIntegrationConfigStore(),
+		memory.NewRetentionConfigStore()
 }
 
 // githubIssueClient adapts *github.Client to grpchandler.IssueClient,
@@ -284,4 +327,31 @@ func (a *githubIssueClient) CreateIssue(ctx context.Context, owner, repo, title,
 		Body:   issue.Body,
 		URL:    issue.HTMLURL,
 	}, nil
+}
+
+// pagerdutyHealthChecker adapts pagerduty.Client to grpchandler.HealthChecker,
+// building a fresh client per check from the configured integration's own
+// decrypted credentials (rather than the singleton client built from
+// PAGERDUTY_API_KEY above, which config-API-managed credentials are separate
+// from).
+type pagerdutyHealthChecker struct{}
+
+func (pagerdutyHealthChecker) Check(ctx context.Context, credentials map[string]string, _ map[string]any) error {
+	apiKey := credentials["api_key"]
+	if apiKey == "" {
+		return fmt.Errorf("pagerduty: no api_key configured")
+	}
+	return pagerduty.NewClient(apiKey).Ping(ctx)
+}
+
+// githubHealthChecker adapts github.Client to grpchandler.HealthChecker; see
+// pagerdutyHealthChecker for why a fresh client is built per check.
+type githubHealthChecker struct{}
+
+func (githubHealthChecker) Check(ctx context.Context, credentials map[string]string, _ map[string]any) error {
+	token := credentials["token"]
+	if token == "" {
+		return fmt.Errorf("github: no token configured")
+	}
+	return github.NewClient(token).Ping(ctx)
 }

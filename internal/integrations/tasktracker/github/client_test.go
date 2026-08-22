@@ -25,6 +25,33 @@ func issueHandler(t *testing.T, number int, title, state string) http.HandlerFun
 	}
 }
 
+func TestPing_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rate_limit" {
+			t.Errorf("path = %q, want /rate_limit", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := github.NewClientWithBaseURL("test-token", srv.URL)
+	if err := c.Ping(context.Background()); err != nil {
+		t.Errorf("Ping: %v", err)
+	}
+}
+
+func TestPing_ErrorOnNonOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := github.NewClientWithBaseURL("bad-token", srv.URL)
+	if err := c.Ping(context.Background()); err == nil {
+		t.Error("Ping should error on a non-200 response")
+	}
+}
+
 func TestGetIssue(t *testing.T) {
 	srv := httptest.NewServer(issueHandler(t, 42, "Test Issue", "open"))
 	defer srv.Close()

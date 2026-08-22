@@ -1,0 +1,354 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// ConfigService is the admin configuration surface: service registry, user
+// role management, on-call rotations, integration credentials, and data
+// retention policy. Every RPC requires the Admin role except where noted.
+service ConfigService {
+  // --- Service registry (§18.1) ---
+
+  rpc CreateService(CreateServiceRequest) returns (ServiceResponse) {
+    option (google.api.http) = {
+      post: "/v1/config/services"
+      body: "*"
+    };
+  }
+  rpc GetService(GetServiceRequest) returns (ServiceResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/services/{id}"
+    };
+  }
+  rpc UpdateService(UpdateServiceRequest) returns (ServiceResponse) {
+    option (google.api.http) = {
+      patch: "/v1/config/services/{id}"
+      body: "*"
+    };
+  }
+  // DeleteService permanently removes a service record. To retire a service
+  // while preserving historical SEV references, prefer UpdateService with
+  // active=false instead.
+  rpc DeleteService(DeleteServiceRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/config/services/{id}"
+    };
+  }
+  // ListServices is readable by any authenticated user (Viewer+) since
+  // services are referenced throughout the system (e.g. picking affected
+  // services on a SEV).
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/services"
+    };
+  }
+
+  // --- User management (§18.2, §14) ---
+
+  // ListUsers is Admin-only; the directory includes email addresses.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/users"
+    };
+  }
+  rpc UpdateUserRole(UpdateUserRoleRequest) returns (UserResponse) {
+    option (google.api.http) = {
+      patch: "/v1/config/users/{id}/role"
+      body: "*"
+    };
+  }
+  rpc DeactivateUser(DeactivateUserRequest) returns (UserResponse) {
+    option (google.api.http) = {
+      post: "/v1/config/users/{id}/deactivate"
+      body: "*"
+    };
+  }
+  rpc ReactivateUser(ReactivateUserRequest) returns (UserResponse) {
+    option (google.api.http) = {
+      post: "/v1/config/users/{id}/reactivate"
+      body: "*"
+    };
+  }
+
+  // --- On-call configuration (§18.3) ---
+
+  rpc CreateOnCallRotation(CreateOnCallRotationRequest) returns (OnCallRotationResponse) {
+    option (google.api.http) = {
+      post: "/v1/config/oncall"
+      body: "*"
+    };
+  }
+  rpc GetOnCallRotation(GetOnCallRotationRequest) returns (OnCallRotationResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/oncall/{id}"
+    };
+  }
+  rpc UpdateOnCallRotation(UpdateOnCallRotationRequest) returns (OnCallRotationResponse) {
+    option (google.api.http) = {
+      patch: "/v1/config/oncall/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteOnCallRotation(DeleteOnCallRotationRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/config/oncall/{id}"
+    };
+  }
+  // ListOnCallRotations is readable by any authenticated user (Viewer+) so
+  // the UI can show who is currently on-call.
+  rpc ListOnCallRotations(ListOnCallRotationsRequest) returns (ListOnCallRotationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/oncall"
+    };
+  }
+
+  // --- Integration configuration (§18.4) ---
+
+  // UpsertIntegrationConfig creates or replaces the settings and credentials
+  // for one integration type. Credentials are encrypted (AES-256-GCM) before
+  // being written to storage and are never returned by any RPC in this
+  // service — only whether credentials are currently configured.
+  rpc UpsertIntegrationConfig(UpsertIntegrationConfigRequest) returns (IntegrationConfigResponse) {
+    option (google.api.http) = {
+      put: "/v1/config/integrations/{integration_type}"
+      body: "*"
+    };
+  }
+  rpc GetIntegrationConfig(GetIntegrationConfigRequest) returns (IntegrationConfigResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/integrations/{integration_type}"
+    };
+  }
+  rpc ListIntegrationConfigs(ListIntegrationConfigsRequest) returns (ListIntegrationConfigsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/integrations"
+    };
+  }
+
+  // --- Data retention (§18.7) ---
+
+  rpc GetRetentionConfig(GetRetentionConfigRequest) returns (RetentionConfigResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/retention/{severity_level}"
+    };
+  }
+  rpc UpdateRetentionConfig(UpdateRetentionConfigRequest) returns (RetentionConfigResponse) {
+    option (google.api.http) = {
+      put: "/v1/config/retention/{severity_level}"
+      body: "*"
+    };
+  }
+  rpc ListRetentionConfig(ListRetentionConfigRequest) returns (ListRetentionConfigResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/retention"
+    };
+  }
+}
+
+// ── Service registry ─────────────────────────────────────────────────────────
+
+message ServiceResponse {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string owning_team = 4;
+  string pagerduty_service_id = 5;
+  map<string, string> tags = 6;
+  bool active = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message CreateServiceRequest {
+  // id is a caller-supplied slug (e.g. "checkout"); it is the stable
+  // identifier referenced elsewhere (affected services, SLIs, on-call).
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string owning_team = 4;
+  string pagerduty_service_id = 5;
+  map<string, string> tags = 6;
+}
+
+message GetServiceRequest {
+  string id = 1;
+}
+
+message UpdateServiceRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string owning_team = 4;
+  string pagerduty_service_id = 5;
+  map<string, string> tags = 6;
+  google.protobuf.BoolValue active = 7;
+}
+
+message DeleteServiceRequest {
+  string id = 1;
+}
+
+message ListServicesRequest {
+  bool active_only = 1;
+}
+
+message ListServicesResponse {
+  repeated ServiceResponse services = 1;
+}
+
+// ── User management ──────────────────────────────────────────────────────────
+
+message UserResponse {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string avatar_url = 4;
+  string org_role = 5;
+  bool active = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message ListUsersRequest {
+  // query filters the directory by a case-insensitive substring match
+  // against name or email; empty returns everyone.
+  string query = 1;
+}
+
+message ListUsersResponse {
+  repeated UserResponse users = 1;
+}
+
+message UpdateUserRoleRequest {
+  string id = 1;
+  // org_role: viewer | responder | incident-commander | admin
+  string org_role = 2;
+}
+
+message DeactivateUserRequest {
+  string id = 1;
+}
+
+message ReactivateUserRequest {
+  string id = 1;
+}
+
+// ── On-call configuration ────────────────────────────────────────────────────
+
+message OnCallRotationResponse {
+  int64 id = 1;
+  string name = 2;
+  string service_id = 3;
+  string pagerduty_schedule_id = 4;
+  string manual_user_id = 5;
+  string manual_display_name = 6;
+  google.protobuf.Timestamp override_start = 7;
+  google.protobuf.Timestamp override_end = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message CreateOnCallRotationRequest {
+  string name = 1;
+  string service_id = 2;
+  string pagerduty_schedule_id = 3;
+  // manual_user_id / manual_display_name plus a override_start/override_end
+  // window define a manual override for a planned change; omit all four for
+  // a normal PagerDuty-backed rotation.
+  string manual_user_id = 4;
+  string manual_display_name = 5;
+  google.protobuf.Timestamp override_start = 6;
+  google.protobuf.Timestamp override_end = 7;
+}
+
+message GetOnCallRotationRequest {
+  int64 id = 1;
+}
+
+message UpdateOnCallRotationRequest {
+  int64 id = 1;
+  string name = 2;
+  string service_id = 3;
+  string pagerduty_schedule_id = 4;
+  string manual_user_id = 5;
+  string manual_display_name = 6;
+  google.protobuf.Timestamp override_start = 7;
+  google.protobuf.Timestamp override_end = 8;
+}
+
+message DeleteOnCallRotationRequest {
+  int64 id = 1;
+}
+
+message ListOnCallRotationsRequest {}
+
+message ListOnCallRotationsResponse {
+  repeated OnCallRotationResponse rotations = 1;
+}
+
+// ── Integration configuration ────────────────────────────────────────────────
+
+message IntegrationConfigResponse {
+  string integration_type = 1;
+  // credentials_configured is true when a non-empty credentials blob has
+  // been stored; the decrypted value itself is never returned.
+  bool credentials_configured = 2;
+  map<string, string> settings = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message UpsertIntegrationConfigRequest {
+  // integration_type: e.g. "slack", "pagerduty", "github", "datadog".
+  string integration_type = 1;
+  // credentials is write-only: encrypted with AES-256-GCM before storage.
+  // Omit (leave empty) to keep the existing stored credentials unchanged
+  // while updating settings.
+  map<string, string> credentials = 2;
+  map<string, string> settings = 3;
+}
+
+message GetIntegrationConfigRequest {
+  string integration_type = 1;
+}
+
+message ListIntegrationConfigsRequest {}
+
+message ListIntegrationConfigsResponse {
+  repeated IntegrationConfigResponse configs = 1;
+}
+
+// ── Data retention ────────────────────────────────────────────────────────────
+
+message RetentionConfigResponse {
+  int32 severity_level = 1;
+  // retention_days == 0 means retain forever.
+  int32 retention_days = 2;
+  // hard_delete controls what happens on expiry: false archives
+  // (soft-delete), true purges permanently.
+  bool hard_delete = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message GetRetentionConfigRequest {
+  int32 severity_level = 1;
+}
+
+message UpdateRetentionConfigRequest {
+  int32 severity_level = 1;
+  int32 retention_days = 2;
+  bool hard_delete = 3;
+}
+
+message ListRetentionConfigRequest {}
+
+message ListRetentionConfigResponse {
+  repeated RetentionConfigResponse configs = 1;
+}

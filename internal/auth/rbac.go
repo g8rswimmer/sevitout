@@ -51,6 +51,33 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.TaskService/CreateGitHubIssue": store.OrgRoleResponder,
 	// Search service
 	"/sevitout.v1.SearchService/SearchSEVs": store.OrgRoleViewer,
+	// Config service — service registry and on-call rotations are readable
+	// by any authenticated user (referenced elsewhere in the UI); everything
+	// else is Admin-only per docs/requirements.md §18.
+	"/sevitout.v1.ConfigService/CreateService":           store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetService":              store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpdateService":           store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteService":           store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListServices":            store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/ListUsers":               store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateUserRole":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeactivateUser":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ReactivateUser":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateOnCallRotation":    store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetOnCallRotation":       store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpdateOnCallRotation":    store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteOnCallRotation":    store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListOnCallRotations":     store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpsertIntegrationConfig": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetIntegrationConfig":    store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListIntegrationConfigs":  store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetRetentionConfig":      store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateRetentionConfig":   store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListRetentionConfig":     store.OrgRoleAdmin,
+	// GET /admin/integrations/health: not a real gRPC method — see
+	// internal/api/grpc.IntegrationsHealthHandler, which checks this entry
+	// directly since it bypasses the gRPC interceptor entirely.
+	"/sevitout.v1.ConfigService/IntegrationsHealth": store.OrgRoleAdmin,
 	// WebSocket: not a real gRPC method — internal/api/ws.Handler checks this
 	// entry directly (via HasPermission) since WS connections bypass the
 	// gRPC interceptor entirely and need their own RBAC floor.

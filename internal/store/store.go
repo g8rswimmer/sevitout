@@ -134,6 +134,13 @@ type StatusHistoryStore interface {
 	ListBySEVID(ctx context.Context, sevID string) ([]*SEVStatusHistory, error)
 }
 
+// RetentionConfigStore manages the per-severity-level retention policy.
+type RetentionConfigStore interface {
+	Get(ctx context.Context, severityLevel int16) (*RetentionConfig, error)
+	Upsert(ctx context.Context, cfg *RetentionConfig) error
+	List(ctx context.Context) ([]*RetentionConfig, error)
+}
+
 // ShareStore manages public shareable link tokens for SEVs.
 type ShareStore interface {
 	Create(ctx context.Context, link *ShareableLink) error
