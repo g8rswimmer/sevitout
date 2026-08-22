@@ -167,6 +167,34 @@ func TestHandler_InactiveUser_Rejected(t *testing.T) {
 	}
 }
 
+func TestHandler_InsufficientRole_Rejected(t *testing.T) {
+	ts := newTestServer(t)
+	now := time.Now()
+	// An OrgRole with no entry in rbac.go's roleLevel map is treated as
+	// below Viewer by HasPermission — this is the only way to exercise the
+	// RBAC-denial branch today, since every *known* OrgRole is at least
+	// Viewer and would otherwise be allowed to subscribe.
+	u := &store.User{
+		ID: "no-role-1", Email: "no-role@example.com", Name: "No Role",
+		OrgRole: store.OrgRole("unknown"), Active: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := ts.users.Create(context.Background(), u); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	token, err := ts.signer.Sign(u.ID, u.Email, string(u.OrgRole))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	header := map[string][]string{"Authorization": {"Bearer " + token}}
+	_, resp, err := gorillaws.DefaultDialer.Dial(ts.wsURL, header)
+	if err == nil {
+		t.Fatal("expected dial to fail for a role below Viewer")
+	}
+	if resp == nil || resp.StatusCode != 403 {
+		t.Errorf("status = %v, want 403", resp)
+	}
+}
+
 func TestHandler_TwoClientsSameSEV_BothReceiveEvent(t *testing.T) {
 	ts := newTestServer(t)
 	token := ts.seedActiveUser(t, "user-1")
@@ -235,4 +263,25 @@ func TestHandler_Unsubscribe_StopsReceiving(t *testing.T) {
 
 	ts.hub.Publish("SEV-2026-0004", "sev.updated", []byte(`{}`))
 	assertNoMessage(t, conn)
+}
+
+func TestHandler_MalformedControlFrame_ConnectionSurvives(t *testing.T) {
+	ts := newTestServer(t)
+	token := ts.seedActiveUser(t, "user-1")
+
+	conn := ts.dial(t, token, "SEV-2026-0005")
+
+	// sev_id should be a string; this fails to decode into controlMessage,
+	// but the underlying connection is still healthy and must not be torn
+	// down over it.
+	if err := conn.WriteJSON(map[string]any{"action": "subscribe", "sev_id": 123}); err != nil {
+		t.Fatalf("write malformed frame: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	ts.hub.Publish("SEV-2026-0005", "sev.updated", []byte(`{}`))
+	evt := readEvent(t, conn)
+	if evt.SEVID != "SEV-2026-0005" {
+		t.Errorf("connection should have survived the malformed frame and kept its original subscription, got %+v", evt)
+	}
 }

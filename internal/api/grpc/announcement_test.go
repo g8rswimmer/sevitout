@@ -354,3 +354,30 @@ func TestCreateAnnouncement_PublishesEvent(t *testing.T) {
 		t.Errorf("event = %+v, want sev_id=%q type=announcement.created", events[0], sevID)
 	}
 }
+
+func TestCreateAnnouncement_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestAnnouncementServer()
+	ctx := context.Background()
+	now := time.Now()
+	sv := &store.SEV{
+		Title: "Sensitive SEV", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		Sensitive: true, CreatedBy: "user-1", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := ts.sevs.Create(ctx, sv); err != nil {
+		t.Fatalf("seed sensitive SEV: %v", err)
+	}
+
+	_, err := ts.server.CreateAnnouncement(ctx, &pb.CreateAnnouncementRequest{
+		SevId:    sv.ID,
+		Message:  "We are investigating.",
+		Audience: string(store.AudienceInternal),
+		AuthorId: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateAnnouncement: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}

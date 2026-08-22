@@ -448,3 +448,52 @@ func TestRemoveRole_PublishesEvent(t *testing.T) {
 		t.Errorf("event = %+v, want sev_id=%q type=role.changed", last, sevID)
 	}
 }
+
+func seedSensitiveSEVForRole(t *testing.T, ts *testRoleServer) string {
+	t.Helper()
+	now := time.Now()
+	sv := &store.SEV{
+		Title: "Sensitive SEV", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		Sensitive: true, CreatedBy: "user-1", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := ts.sevs.Create(context.Background(), sv); err != nil {
+		t.Fatalf("seedSensitiveSEVForRole: %v", err)
+	}
+	return sv.ID
+}
+
+func TestAssignRole_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestRoleServer()
+	ctx := context.Background()
+	sevID := seedSensitiveSEVForRole(t, ts)
+
+	if _, err := ts.server.AssignRole(ctx, &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestRemoveRole_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestRoleServer()
+	ctx := context.Background()
+	sevID := seedSensitiveSEVForRole(t, ts)
+
+	assigned, err := ts.server.AssignRole(ctx, &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+	if _, err := ts.server.RemoveRole(ctx, &pb.RemoveRoleRequest{SevId: sevID, Id: assigned.GetId()}); err != nil {
+		t.Fatalf("RemoveRole: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}

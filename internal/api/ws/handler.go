@@ -1,8 +1,10 @@
 package ws
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -17,6 +19,31 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
+
+// Keepalive timers. Declared as vars (not consts) so package-internal tests
+// can shrink them to exercise the timeout path without waiting a minute.
+var (
+	// pongWait is how long a connection may go without any read-side
+	// activity (a client pong, or any other frame) before readPump gives up
+	// on it and tears the connection down. Without this, a peer that
+	// vanishes without a clean WebSocket close (lost network, laptop sleep,
+	// a NAT/LB silently dropping the mapping) would block readPump forever,
+	// leaking the client's hub registration and goroutines indefinitely.
+	pongWait = 60 * time.Second
+	// pingPeriod must be well under pongWait so at least one ping/pong
+	// round-trip completes inside each read-deadline window.
+	pingPeriod = (pongWait * 9) / 10
+	// writeWait bounds how long a single outbound write may block, so a
+	// stalled write can't hang writePump indefinitely either.
+	writeWait = 10 * time.Second
+)
+
+// wsSubscribeMethod is a pseudo gRPC-method path used only to look up the
+// minimum org role required to open a WebSocket connection, via the same
+// rbac.go table every real RPC is checked against — WebSocket connections
+// bypass the gRPC interceptor entirely, so this is how they still get an
+// RBAC floor instead of skipping the check altogether.
+const wsSubscribeMethod = "/sevitout.v1.WebSocket/Subscribe"
 
 // tokenValidator validates a signed JWT and returns its claims. Implemented
 // by *auth.JWTSigner; declared here (the consumer) so this package depends
@@ -65,6 +92,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 		return
 	}
+	if !auth.HasPermission(user.OrgRole, wsSubscribeMethod) {
+		http.Error(w, "insufficient permissions", http.StatusForbidden)
+		return
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -91,23 +122,55 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	<-writeDone
 }
 
-// writePump delivers queued events to conn until the client's channel is
-// closed (by Hub.Close) or a write fails.
+// writePump delivers queued events to conn, interleaved with periodic pings
+// to drive readPump's read-deadline extension on the other end of this same
+// connection. It returns when the client's channel is closed (by Hub.Close)
+// or a write fails — and on a write failure it closes conn itself, which is
+// what unblocks a readPump that's parked on a read with no data arriving
+// (a write-side-only failure would otherwise never surface on the read side).
 func writePump(conn *websocket.Conn, client *Client) {
-	for evt := range client.Events() {
-		if err := conn.WriteJSON(evt); err != nil {
-			return
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case evt, ok := <-client.Events():
+			if !ok {
+				return
+			}
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteJSON(evt); err != nil {
+				_ = conn.Close()
+				return
+			}
+		case <-ticker.C:
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				_ = conn.Close()
+				return
+			}
 		}
 	}
 }
 
 // readPump processes subscribe/unsubscribe control frames until the
-// connection errors or closes.
+// connection errors, times out (see pongWait), or closes. A malformed
+// frame only fails to decode — the connection itself is still healthy — so
+// it's logged as ignored rather than tearing down every other subscription
+// this client holds.
 func readPump(conn *websocket.Conn, hub *Hub, client *Client) {
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+
 	for {
-		var msg controlMessage
-		if err := conn.ReadJSON(&msg); err != nil {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
 			return
+		}
+		var msg controlMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
 		}
 		if msg.SEVID == "" {
 			continue

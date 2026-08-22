@@ -273,3 +273,27 @@ func TestAddChatEntry_PublishesEvent(t *testing.T) {
 		t.Errorf("event = %+v, want sev_id=%q type=chat.created", events[0], sevID)
 	}
 }
+
+func TestAddChatEntry_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestChatServer()
+	ctx := context.Background()
+	now := time.Now()
+	sv := &store.SEV{
+		Title: "Sensitive SEV", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		Sensitive: true, CreatedBy: "user-1", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := ts.sevs.Create(ctx, sv); err != nil {
+		t.Fatalf("seed sensitive SEV: %v", err)
+	}
+
+	_, err := ts.server.AddChatEntry(ctx, &pb.AddChatEntryRequest{
+		SevId: sv.ID, Source: "slack", Author: "alice", Content: "note", AddedBy: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("AddChatEntry: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}

@@ -139,7 +139,9 @@ func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb
 	})
 
 	resp := taskToProto(task, now)
-	publishProto(s.publisher, req.GetSevId(), "task.linked", resp)
+	if !sev.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "task.linked", resp)
+	}
 
 	return resp, nil
 }
@@ -168,6 +170,7 @@ func (s *TaskServer) UnlinkTask(ctx context.Context, req *pb.UnlinkTaskRequest) 
 		callerID = uc.UserID
 	}
 
+	now := time.Now()
 	if err := s.tasks.Delete(ctx, req.GetId()); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "task not found")
@@ -180,14 +183,16 @@ func (s *TaskServer) UnlinkTask(ctx context.Context, req *pb.UnlinkTaskRequest) 
 		UserID:    callerID,
 		Action:    "task.unlinked",
 		OldValue:  strPtr(task.URL),
-		CreatedAt: time.Now(),
+		CreatedAt: now,
 	})
 
-	publishJSON(s.publisher, req.GetSevId(), "task.updated", map[string]any{
-		"sev_id":  req.GetSevId(),
-		"id":      req.GetId(),
-		"removed": true,
-	})
+	// Reuse taskToProto (the same shape LinkTask/UpdateTaskDueDate/
+	// CreateGitHubIssue publish for task.linked/task.updated) rather than an
+	// ad hoc payload, so task.updated always carries one consistent shape
+	// regardless of which handler emitted it.
+	if sevRecord, err := s.sevs.Get(ctx, req.GetSevId()); err == nil && !sevRecord.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "task.updated", taskToProto(task, now))
+	}
 
 	return &emptypb.Empty{}, nil
 }
@@ -292,7 +297,9 @@ func (s *TaskServer) UpdateTaskDueDate(ctx context.Context, req *pb.UpdateTaskDu
 	})
 
 	resp := taskToProto(task, now)
-	publishProto(s.publisher, req.GetSevId(), "task.updated", resp)
+	if sevRecord, err := s.sevs.Get(ctx, req.GetSevId()); err == nil && !sevRecord.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "task.updated", resp)
+	}
 
 	return resp, nil
 }
@@ -386,7 +393,9 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 	})
 
 	resp := taskToProto(task, now)
-	publishProto(s.publisher, req.GetSevId(), "task.linked", resp)
+	if !sev.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "task.linked", resp)
+	}
 
 	return resp, nil
 }

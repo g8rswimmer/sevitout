@@ -375,3 +375,49 @@ func TestTransitionStatus_PublishesEvent(t *testing.T) {
 		t.Errorf("event = %+v, want sev_id=%q type=sev.status_changed", events[0], sevID)
 	}
 }
+
+func seedSensitiveSEV(t *testing.T, ts *testSEVServer) string {
+	t.Helper()
+	now := time.Now()
+	sv := &store.SEV{
+		Title:         "Sensitive SEV",
+		SeverityLevel: 1,
+		Status:        store.SEVStatusOpen,
+		Sensitive:     true,
+		CreatedBy:     "user-seed",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := ts.sevs.Create(context.Background(), sv); err != nil {
+		t.Fatalf("seedSensitiveSEV: %v", err)
+	}
+	return sv.ID
+}
+
+func TestUpdateSEV_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSensitiveSEV(t, ts)
+
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: sevID, Title: "New title"}); err != nil {
+		t.Fatalf("UpdateSEV: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestTransitionStatus_SensitiveSEVDoesNotPublish(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSensitiveSEV(t, ts)
+
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{Id: sevID, ToStatus: string(store.SEVStatusInvestigating)}); err != nil {
+		t.Fatalf("TransitionStatus: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}

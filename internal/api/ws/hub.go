@@ -23,9 +23,12 @@ type Event struct {
 const clientBufferSize = 16
 
 // Client is a single WebSocket connection's outbound event queue. It is not
-// bound to any particular room until passed to Hub.Subscribe.
+// bound to any particular room until passed to Hub.Subscribe. rooms is
+// mutated only by Hub's methods, all of which hold Hub.mu — it never needs
+// its own lock.
 type Client struct {
-	send chan Event
+	send  chan Event
+	rooms map[string]struct{}
 }
 
 // Events returns the channel of events queued for delivery to this client.
@@ -58,7 +61,7 @@ func NewHub() *Hub {
 // NewClient returns a Client with its own outbound event queue, not yet
 // subscribed to any room.
 func (h *Hub) NewClient() *Client {
-	return &Client{send: make(chan Event, clientBufferSize)}
+	return &Client{send: make(chan Event, clientBufferSize), rooms: make(map[string]struct{})}
 }
 
 // Subscribe adds c to sevID's room. Safe to call multiple times for
@@ -70,29 +73,35 @@ func (h *Hub) Subscribe(c *Client, sevID string) {
 		h.rooms[sevID] = make(map[*Client]struct{})
 	}
 	h.rooms[sevID][c] = struct{}{}
+	c.rooms[sevID] = struct{}{}
 }
 
 // Unsubscribe removes c from sevID's room. A no-op if c was not subscribed.
 func (h *Hub) Unsubscribe(c *Client, sevID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.removeLocked(c, sevID)
+	h.removeFromRoomLocked(c, sevID)
+	delete(c.rooms, sevID)
 }
 
 // Close removes c from every room it belongs to and closes its event
 // channel. Call exactly once, when the underlying connection is done.
+//
+// It only visits the rooms c.rooms records — not every room in the hub —
+// so a single disconnect costs O(that client's subscriptions), not
+// O(total active rooms).
 func (h *Hub) Close(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for sevID := range h.rooms {
-		h.removeLocked(c, sevID)
+	for sevID := range c.rooms {
+		h.removeFromRoomLocked(c, sevID)
 	}
 	close(c.send)
 }
 
-// removeLocked deletes c from sevID's room, pruning the room entirely once
-// empty. Callers must hold h.mu.
-func (h *Hub) removeLocked(c *Client, sevID string) {
+// removeFromRoomLocked deletes c from sevID's room (not from c.rooms),
+// pruning the room entirely once empty. Callers must hold h.mu.
+func (h *Hub) removeFromRoomLocked(c *Client, sevID string) {
 	room, ok := h.rooms[sevID]
 	if !ok {
 		return

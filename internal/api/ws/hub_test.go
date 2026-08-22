@@ -127,6 +127,32 @@ func TestHub_Close_ClosesChannelAndRemovesFromAllRooms(t *testing.T) {
 	hub.Publish("SEV-2", "sev.updated", nil)
 }
 
+func TestHub_Close_OnlyAffectsClosedClientsOwnRooms(t *testing.T) {
+	hub := ws.NewHub()
+	a := hub.NewClient()
+	b := hub.NewClient()
+	hub.Subscribe(a, "SEV-1")
+	hub.Subscribe(b, "SEV-1")
+	hub.Subscribe(b, "SEV-2")
+
+	hub.Close(b)
+
+	if _, ok := <-b.Events(); ok {
+		t.Error("b's channel should be closed")
+	}
+
+	// a is unrelated to b's Close and must still receive SEV-1 events.
+	hub.Publish("SEV-1", "sev.updated", []byte(`{}`))
+	evt := recv(t, a)
+	if evt.SEVID != "SEV-1" {
+		t.Errorf("a should be unaffected by b's Close, got %+v", evt)
+	}
+
+	// SEV-2 had only b subscribed; publishing there after b's Close must
+	// not panic even though no one is listening anymore.
+	hub.Publish("SEV-2", "sev.updated", nil)
+}
+
 func TestHub_SlowConsumer_PublishDoesNotBlock(t *testing.T) {
 	hub := ws.NewHub()
 	c := hub.NewClient()

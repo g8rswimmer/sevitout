@@ -47,7 +47,8 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		return nil, status.Error(codes.InvalidArgument, "unknown role_type")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+	sevRecord, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
@@ -83,7 +84,9 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 	})
 
 	resp := roleToProto(role)
-	publishProto(s.publisher, req.GetSevId(), "role.changed", resp)
+	if !sevRecord.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "role.changed", resp)
+	}
 
 	return resp, nil
 }
@@ -96,7 +99,8 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+	sevRecord, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
@@ -122,11 +126,12 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		CreatedAt: time.Now(),
 	})
 
-	publishJSON(s.publisher, req.GetSevId(), "role.changed", map[string]any{
-		"sev_id":  req.GetSevId(),
-		"id":      req.GetId(),
-		"removed": true,
-	})
+	if !sevRecord.Sensitive {
+		publishJSON(s.publisher, req.GetSevId(), "role.changed", map[string]any{
+			"id":      req.GetId(),
+			"removed": true,
+		})
+	}
 
 	return &emptypb.Empty{}, nil
 }

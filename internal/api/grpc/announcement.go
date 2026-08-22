@@ -45,7 +45,8 @@ func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.Cre
 		return nil, status.Error(codes.InvalidArgument, "audience must be one of: internal, external, status-page")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
+	sevRecord, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
@@ -74,7 +75,9 @@ func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.Cre
 	}
 
 	resp := announcementToProto(a)
-	publishProto(s.publisher, a.SEVID, "announcement.created", resp)
+	if !sevRecord.Sensitive {
+		publishProto(s.publisher, a.SEVID, "announcement.created", resp)
+	}
 
 	return resp, nil
 }

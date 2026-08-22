@@ -114,7 +114,9 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 	})
 
 	resp := postmortemToProto(pm)
-	publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+	if !sev.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+	}
 
 	return resp, nil
 }
@@ -169,7 +171,9 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 	})
 
 	resp := postmortemToProto(pm)
-	publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+	if sev, err := s.sevs.Get(ctx, req.GetSevId()); err == nil && !sev.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+	}
 
 	return resp, nil
 }

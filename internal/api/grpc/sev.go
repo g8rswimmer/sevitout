@@ -267,7 +267,9 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	})
 
 	resp := sevToProto(record)
-	publishProto(s.publisher, record.ID, "sev.updated", resp)
+	if !record.Sensitive {
+		publishProto(s.publisher, record.ID, "sev.updated", resp)
+	}
 
 	return resp, nil
 }
@@ -406,7 +408,9 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	})
 
 	resp := sevToProto(record)
-	publishProto(s.publisher, record.ID, "sev.status_changed", resp)
+	if !record.Sensitive {
+		publishProto(s.publisher, record.ID, "sev.status_changed", resp)
+	}
 
 	return resp, nil
 }

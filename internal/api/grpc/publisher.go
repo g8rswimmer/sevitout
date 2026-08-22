@@ -24,17 +24,14 @@ var protojsonMarshal = protojson.MarshalOptions{UseProtoNames: true}.Marshal
 
 // publishProto marshals msg via protojson and publishes it under eventType
 // on sevID's room. A nil Publisher (WebSocket support not wired up, e.g. in
-// unit tests) is a no-op; a marshal failure is likewise swallowed since
-// event delivery is best-effort and must never fail the underlying mutation.
+// unit tests) is a no-op — checked before marshaling so a nil Publisher
+// never pays for encoding work nobody will use.
 func publishProto(p Publisher, sevID, eventType string, msg proto.Message) {
 	if p == nil {
 		return
 	}
 	b, err := protojsonMarshal(msg)
-	if err != nil {
-		return
-	}
-	p.Publish(sevID, eventType, b)
+	publish(p, sevID, eventType, b, err)
 }
 
 // publishJSON publishes an ad hoc payload under eventType on sevID's room,
@@ -44,6 +41,13 @@ func publishJSON(p Publisher, sevID, eventType string, v any) {
 		return
 	}
 	b, err := json.Marshal(v)
+	publish(p, sevID, eventType, b, err)
+}
+
+// publish applies the policy shared by publishProto and publishJSON: a
+// marshal failure is swallowed rather than propagated, since event delivery
+// is best-effort and must never fail the underlying mutation it's attached to.
+func publish(p Publisher, sevID, eventType string, b []byte, err error) {
 	if err != nil {
 		return
 	}

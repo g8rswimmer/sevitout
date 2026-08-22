@@ -33,7 +33,13 @@ Each gRPC handler publishes to the hub only after its store write (and audit ent
 applicable) succeeds — a failed mutation never produces a phantom event. Publishing is
 fire-and-forget: a stalled or slow WebSocket client never blocks the mutation that
 triggered the event, and a handler with no `Publisher` wired up (e.g. in unit tests) is a
-silent no-op.
+silent no-op. Mutations on a `sensitive` SEV are never published — see Known limitations.
+
+**Connection lifecycle** — the server pings every connection periodically and expects
+read-side activity within 60s; a peer that goes silent (dropped network, sleep, a NAT/LB
+timing out the mapping) is detected and torn down rather than leaking forever. A malformed
+control frame is ignored rather than closing the connection. Opening a connection requires
+at least the Viewer org role (checked against the same RBAC table as every gRPC/REST call).
 
 ## Prerequisites
 
@@ -151,10 +157,12 @@ golangci-lint run
   silently dropped rather than the connection being disconnected or throttled — acceptable
   at single-org scale, but a client that falls far behind should re-fetch state via REST
   rather than trust the WebSocket stream alone.
-- Sensitive SEVs are not filtered from WebSocket events: subscribing to a sensitive SEV's ID
-  still delivers its events. This mirrors the same pre-existing, repo-wide gap noted in
-  `demo/M08-search.md` (`GetSEV`/`ListSEVs` don't restrict sensitive-SEV visibility either) —
-  there is no per-user visibility/ACL mechanism yet (requirements §14).
+- Sensitive SEVs never publish WebSocket events (every handler checks the SEV's `sensitive`
+  flag before publishing), matching M08's `SearchSEVs` mitigation for its own distribution
+  channel. This only stops sensitive *events* from being pushed — a client already
+  subscribed to a sensitive SEV's ID isn't rejected at subscribe time, and `GetSEV`/
+  `ListSEVs` still don't restrict sensitive-SEV visibility on the read side; a full per-user
+  visibility/ACL mechanism is still out of scope (requirements §14).
 - `SEVLinkService` (`LinkSEVs`/`UnlinkSEVs`) has no corresponding event type in
   `docs/architecture.md`'s event table and does not publish anything.
 - AI plugin output (`ai.output`) is deferred to M12, which introduces the AI dispatcher that
