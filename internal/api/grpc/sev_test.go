@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/g8rswimmer/sevitout/internal/ai"
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/store"
@@ -21,6 +22,7 @@ type testSEVServer struct {
 	audit   *memory.AuditStore
 	history *memory.StatusHistoryStore
 	pub     *fakePublisher
+	ai      *fakeAIDispatcher
 }
 
 // newTestSEVServer returns a fresh SEVServer backed by empty in-memory stores.
@@ -29,12 +31,14 @@ func newTestSEVServer() *testSEVServer {
 	audit := memory.NewAuditStore()
 	history := memory.NewStatusHistoryStore()
 	pub := &fakePublisher{}
+	aiDispatch := &fakeAIDispatcher{}
 	return &testSEVServer{
-		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), nil, nil, pub),
+		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), nil, nil, pub, aiDispatch),
 		sevs:    sevs,
 		audit:   audit,
 		history: history,
 		pub:     pub,
+		ai:      aiDispatch,
 	}
 }
 
@@ -457,5 +461,95 @@ func TestTransitionStatus_SensitiveSEVDoesNotPublish(t *testing.T) {
 
 	if events := ts.pub.All(); len(events) != 0 {
 		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+// ── AI dispatch (§11.1, M12) ────────────────────────────────────────────────
+
+func TestCreateSEV_DispatchesAIOnOpenForSEV1(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "db down", SeverityLevel: 1})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerSEVOpened || triggers[0].sevID != resp.GetId() {
+		t.Fatalf("got triggers %+v, want one sev.opened for %s", triggers, resp.GetId())
+	}
+}
+
+// TestCreateSEV_SensitiveSEVStillEnqueuesTrigger and
+// TestCreateSEV_AIDisabledSEVStillEnqueuesTrigger: SEVServer.dispatchAI
+// enqueues unconditionally — it deliberately does not re-implement the
+// Sensitive/AIDisabled gate itself (see its doc comment). That gate is
+// enforced once, centrally, by ai.Dispatcher against a freshly-fetched
+// record (internal/ai/dispatcher_test.go's
+// TestDispatch_SensitiveSEVSkipsProactiveTrigger /
+// TestDispatch_AIDisabledSEVSkipsProactiveTrigger /
+// TestDispatch_SensitiveAtExecutionTimeSkipsTrigger cover the actual
+// skip-dispatch behavior); fakeAIDispatcher here is a stand-in for the gRPC
+// layer's Dispatch call, not for that gate.
+func TestCreateSEV_SensitiveSEVStillEnqueuesTrigger(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "sensitive", SeverityLevel: 1, Sensitive: true})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerSEVOpened || triggers[0].sevID != resp.GetId() {
+		t.Errorf("got triggers %+v, want one sev.opened for %s", triggers, resp.GetId())
+	}
+}
+
+func TestCreateSEV_AIDisabledSEVStillEnqueuesTrigger(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "x", SeverityLevel: 1, AiDisabled: true})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerSEVOpened || triggers[0].sevID != resp.GetId() {
+		t.Errorf("got triggers %+v, want one sev.opened for %s", triggers, resp.GetId())
+	}
+}
+
+func TestTransitionStatus_DispatchesAIOnMitigatedAndResolved(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts) // starts Open, SEV-1
+
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{Id: sevID, ToStatus: string(store.SEVStatusMitigated)}); err != nil {
+		t.Fatalf("TransitionStatus to mitigated: %v", err)
+	}
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{Id: sevID, ToStatus: string(store.SEVStatusResolved)}); err != nil {
+		t.Fatalf("TransitionStatus to resolved: %v", err)
+	}
+
+	triggers := ts.ai.All()
+	if len(triggers) != 2 || triggers[0].event != ai.TriggerSEVMitigated || triggers[1].event != ai.TriggerSEVResolved {
+		t.Fatalf("got triggers %+v, want [sev.mitigated, sev.resolved]", triggers)
+	}
+}
+
+func TestTransitionStatus_InvestigatingDoesNotDispatchAI(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{Id: sevID, ToStatus: string(store.SEVStatusInvestigating)}); err != nil {
+		t.Fatalf("TransitionStatus: %v", err)
+	}
+
+	if triggers := ts.ai.All(); len(triggers) != 0 {
+		t.Errorf("triggers = %+v, want none for a transition to investigating", triggers)
 	}
 }

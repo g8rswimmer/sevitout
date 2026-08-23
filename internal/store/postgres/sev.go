@@ -78,6 +78,7 @@ func (s *SEVStore) Create(ctx context.Context, sv *store.SEV) error {
 		DttmSeconds:           sv.DTTMSeconds,
 		Locked:                sv.Locked,
 		Sensitive:             sv.Sensitive,
+		AiDisabled:            sv.AIDisabled,
 		CreatedAt:             pgtype.Timestamptz{Time: sv.CreatedAt.UTC(), Valid: true},
 		UpdatedAt:             pgtype.Timestamptz{Time: sv.UpdatedAt.UTC(), Valid: true},
 		CreatedBy:             sv.CreatedBy,
@@ -149,6 +150,7 @@ func (s *SEVStore) Update(ctx context.Context, sv *store.SEV) error {
 		DttmSeconds:           sv.DTTMSeconds,
 		Locked:                sv.Locked,
 		Sensitive:             sv.Sensitive,
+		AiDisabled:            sv.AIDisabled,
 		UpdatedAt:             pgtype.Timestamptz{Time: sv.UpdatedAt.UTC(), Valid: true},
 	}); err != nil {
 		return fmt.Errorf("postgres sev: update: %w", err)
@@ -324,7 +326,7 @@ const sevSelectCols = `SELECT id, title, description, severity_level, status,
        monitoring_tool, right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by
 FROM sevs`
 
 // buildSEVFilterWhere builds a parameterized WHERE clause from the filter,
@@ -440,7 +442,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		rightPeopleNotes                      *string
 		rightPeoplePresent                    *bool
 		severityLevel                         int16
-		locked, sensitive                     bool
+		locked, sensitive, aiDisabled         bool
 		affectedServices                      []string
 		tags                                  []byte
 		startedAt, detectedAt                 pgtype.Timestamptz
@@ -457,7 +459,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		&monTool, &rightPeoplePresent, &rightPeopleNotes, &tags,
 		&startedAt, &detectedAt, &mitigatedAt, &resolvedAt, &postmortemCompletedAt,
 		&mttdSeconds, &mttmSeconds, &mttrSeconds, &dttmSeconds,
-		&locked, &sensitive, &createdAt, &updatedAt, &createdBy,
+		&locked, &sensitive, &aiDisabled, &createdAt, &updatedAt, &createdBy,
 	); err != nil {
 		return nil, err
 	}
@@ -494,6 +496,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		DTTMSeconds:           dttmSeconds,
 		Locked:                locked,
 		Sensitive:             sensitive,
+		AIDisabled:            aiDisabled,
 		CreatedAt:             createdAt.Time,
 		UpdatedAt:             updatedAt.Time,
 		CreatedBy:             createdBy,
@@ -534,6 +537,7 @@ func mapGetSEVRow(r queries.GetSEVRow) (*store.SEV, error) {
 		DTTMSeconds:           r.DttmSeconds,
 		Locked:                r.Locked,
 		Sensitive:             r.Sensitive,
+		AIDisabled:            r.AiDisabled,
 		CreatedAt:             r.CreatedAt.Time,
 		UpdatedAt:             r.UpdatedAt.Time,
 		CreatedBy:             r.CreatedBy,

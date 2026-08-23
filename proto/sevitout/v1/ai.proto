@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// AIService is the functional, non-admin surface of the AI plugin system:
+// running an action against a SEV on demand (§11.2) and listing previously
+// generated output. Admin CRUD for plugin registration lives on
+// ConfigService (§18.6, proto/sevitout/v1/config.proto).
+//
+// Proactive triggers (§11.1) are not exposed here — they run automatically
+// from SEV/Postmortem lifecycle transitions (internal/ai.Dispatcher) and
+// their results show up in ListOutputs / the ai.output WebSocket event like
+// any other output.
+service AIService {
+  // TriggerAction runs one AI action against a SEV and returns once the
+  // provider responds; the result is also stored (ai_outputs) and broadcast
+  // over WebSocket as an ai.output event, same as a proactive trigger.
+  rpc TriggerAction(TriggerActionRequest) returns (AIOutputResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/ai/actions"
+      body: "*"
+    };
+  }
+  // StreamAction runs one AI action and streams its output incrementally —
+  // for actions whose provider call may take a while (e.g. DraftPostmortem).
+  // The final chunk (done=true) carries the same content that would have
+  // been stored had TriggerAction been used instead.
+  rpc StreamAction(TriggerActionRequest) returns (stream AIActionChunk);
+  // ListOutputs returns previously generated AI output for a SEV, proactive
+  // and user-triggered alike, oldest first.
+  rpc ListOutputs(ListAIOutputsRequest) returns (ListAIOutputsResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/ai/outputs"
+    };
+  }
+  // ListPlugins returns the currently enabled AI plugins that
+  // TriggerAction/StreamAction can route to. Unlike
+  // ConfigService.ListAIPlugins (Admin-only, full record), this is readable
+  // by any authenticated user and never includes credentials or handler
+  // internals — just enough to populate a "run AI action" menu.
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse) {
+    option (google.api.http) = {
+      get: "/v1/ai/plugins"
+    };
+  }
+}
+
+// AIAction enumerates the Provider methods a caller can invoke on demand
+// (§11.2) or that a lifecycle trigger invokes proactively (§11.1). Not every
+// action is meaningful for every trigger — see internal/ai.Dispatcher.
+enum AIAction {
+  AI_ACTION_UNSPECIFIED = 0;
+  AI_ACTION_SUMMARIZE = 1;
+  AI_ACTION_SUGGEST_ROOT_CAUSE = 2;
+  AI_ACTION_DRAFT_POSTMORTEM = 3;
+  AI_ACTION_SUGGEST_TASKS = 4;
+  AI_ACTION_FIND_SIMILAR = 5;
+  AI_ACTION_SUGGEST_RESPONDERS = 6;
+  AI_ACTION_DRAFT_ANNOUNCEMENT = 7;
+}
+
+message TriggerActionRequest {
+  string sev_id = 1;
+  AIAction action = 2;
+  // plugin_id selects which registered plugin to use. 0 (unset) uses the
+  // first enabled plugin found — sufficient for v1, where orgs are expected
+  // to configure at most one active plugin at a time.
+  int64 plugin_id = 3;
+}
+
+message AIActionChunk {
+  string content = 1;
+  bool done = 2;
+}
+
+message AIOutputResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  int64 plugin_id = 3;
+  // trigger_event is the lifecycle event that produced this output (e.g.
+  // "sev.opened", "sev.mitigated", "sev.resolved", "postmortem.in_review"),
+  // or "manual" for a TriggerAction/StreamAction call.
+  string trigger_event = 4;
+  AIAction action = 5;
+  // content is plain text for narrative actions (Summarize,
+  // DraftPostmortem, DraftAnnouncement) and JSON for structured, list-shaped
+  // actions (SuggestRootCause, SuggestTasks, FindSimilar, SuggestResponders).
+  // Always clearly labeled AI-generated wherever the UI renders it (§11).
+  string content = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message ListAIOutputsRequest {
+  string sev_id = 1;
+}
+
+message ListAIOutputsResponse {
+  repeated AIOutputResponse outputs = 1;
+}
+
+message ListPluginsRequest {}
+
+message AvailablePlugin {
+  int64 id = 1;
+  string name = 2;
+  string provider = 3;
+}
+
+message ListPluginsResponse {
+  repeated AvailablePlugin plugins = 1;
+}

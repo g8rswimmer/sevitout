@@ -119,6 +119,14 @@ type AIPluginStore interface {
 	List(ctx context.Context) ([]*AIPlugin, error)
 }
 
+// AIOutputStore manages stored AI-generated content, keyed by the SEV it was
+// generated for. Outputs are append-only — there is no Update or Delete,
+// matching the audit log's immutability posture (§11, §15).
+type AIOutputStore interface {
+	Create(ctx context.Context, output *AIOutput) error
+	ListBySEVID(ctx context.Context, sevID string) ([]*AIOutput, error)
+}
+
 // IntegrationConfigStore manages per-integration credentials and settings.
 // Callers are responsible for encrypting credentials before storing and
 // decrypting after retrieval.

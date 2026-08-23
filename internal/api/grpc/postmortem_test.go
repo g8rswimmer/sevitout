@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
+	"github.com/g8rswimmer/sevitout/internal/ai"
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
@@ -22,6 +23,7 @@ type testPostmortemServer struct {
 	audit       *memory.AuditStore
 	unlock      *postmortem.UnlockSigner
 	pub         *fakePublisher
+	ai          *fakeAIDispatcher
 }
 
 func newTestPostmortemServer() *testPostmortemServer {
@@ -30,13 +32,15 @@ func newTestPostmortemServer() *testPostmortemServer {
 	pms := memory.NewPostmortemStore()
 	signer := postmortem.NewUnlockSigner("test-secret-at-least-32-chars-long")
 	pub := &fakePublisher{}
+	aiDispatch := &fakeAIDispatcher{}
 	return &testPostmortemServer{
-		server:      grpchandler.NewPostmortemServer(pms, sevs, audit, signer, pub),
+		server:      grpchandler.NewPostmortemServer(pms, sevs, audit, signer, pub, aiDispatch),
 		postmortems: pms,
 		sevs:        sevs,
 		audit:       audit,
 		unlock:      signer,
 		pub:         pub,
+		ai:          aiDispatch,
 	}
 }
 
@@ -488,5 +492,49 @@ func TestTransitionPostmortemStatus_SensitiveSEVDoesNotPublish(t *testing.T) {
 
 	if events := ts.pub.All(); len(events) != 0 {
 		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+// ── AI dispatch (§11.1, M12) ────────────────────────────────────────────────
+
+func TestTransitionPostmortemStatus_DispatchesAIOnInReview(t *testing.T) {
+	ts := newTestPostmortemServer()
+	ctx := context.Background()
+	sevID := seedUnlockedSEVWithPostmortem(t, ts)
+
+	if _, err := ts.server.TransitionPostmortemStatus(ctx, &pb.TransitionPostmortemStatusRequest{
+		SevId: sevID, ToStatus: string(store.PostmortemStatusInReview), UserId: "user-ic",
+	}); err != nil {
+		t.Fatalf("TransitionPostmortemStatus: %v", err)
+	}
+
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerPostmortemInReview || triggers[0].sevID != sevID {
+		t.Fatalf("got triggers %+v, want one postmortem.in_review for %s", triggers, sevID)
+	}
+}
+
+// TestTransitionPostmortemStatus_SensitiveSEVStillEnqueuesTrigger: this
+// handler enqueues unconditionally — it deliberately does not re-implement
+// the Sensitive/AIDisabled gate itself (see SEVServer.dispatchAI's doc
+// comment). That gate is enforced once, centrally, by ai.Dispatcher against
+// a freshly-fetched record (internal/ai/dispatcher_test.go's
+// TestDispatch_SensitiveSEVSkipsProactiveTrigger covers the actual
+// skip-dispatch behavior); fakeAIDispatcher here is a stand-in for the gRPC
+// layer's Dispatch call, not for that gate.
+func TestTransitionPostmortemStatus_SensitiveSEVStillEnqueuesTrigger(t *testing.T) {
+	ts := newTestPostmortemServer()
+	ctx := context.Background()
+	sevID := seedSensitiveSEVWithPostmortem(t, ts)
+
+	if _, err := ts.server.TransitionPostmortemStatus(ctx, &pb.TransitionPostmortemStatusRequest{
+		SevId: sevID, ToStatus: string(store.PostmortemStatusInReview), UserId: "user-ic",
+	}); err != nil {
+		t.Fatalf("TransitionPostmortemStatus: %v", err)
+	}
+
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerPostmortemInReview || triggers[0].sevID != sevID {
+		t.Errorf("got triggers %+v, want one postmortem.in_review for %s", triggers, sevID)
 	}
 }

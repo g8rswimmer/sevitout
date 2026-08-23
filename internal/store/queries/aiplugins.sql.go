@@ -24,14 +24,34 @@ const getAIPlugin = `-- name: GetAIPlugin :one
 SELECT id, name, version, description, handler_type, http_endpoint,
        provider, model, encrypted_api_key, enabled,
        trigger_on_open, trigger_on_mitigated, trigger_on_resolved, trigger_on_postmortem_review,
-       created_at, updated_at
+       rate_limit_per_minute, created_at, updated_at
 FROM ai_plugins
 WHERE id = $1
 `
 
-func (q *Queries) GetAIPlugin(ctx context.Context, id int64) (AiPlugin, error) {
+type GetAIPluginRow struct {
+	ID                        int64              `json:"id"`
+	Name                      string             `json:"name"`
+	Version                   string             `json:"version"`
+	Description               *string            `json:"description"`
+	HandlerType               string             `json:"handler_type"`
+	HttpEndpoint              *string            `json:"http_endpoint"`
+	Provider                  *string            `json:"provider"`
+	Model                     *string            `json:"model"`
+	EncryptedApiKey           []byte             `json:"encrypted_api_key"`
+	Enabled                   bool               `json:"enabled"`
+	TriggerOnOpen             bool               `json:"trigger_on_open"`
+	TriggerOnMitigated        bool               `json:"trigger_on_mitigated"`
+	TriggerOnResolved         bool               `json:"trigger_on_resolved"`
+	TriggerOnPostmortemReview bool               `json:"trigger_on_postmortem_review"`
+	RateLimitPerMinute        int32              `json:"rate_limit_per_minute"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetAIPlugin(ctx context.Context, id int64) (GetAIPluginRow, error) {
 	row := q.db.QueryRow(ctx, getAIPlugin, id)
-	var i AiPlugin
+	var i GetAIPluginRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -47,6 +67,7 @@ func (q *Queries) GetAIPlugin(ctx context.Context, id int64) (AiPlugin, error) {
 		&i.TriggerOnMitigated,
 		&i.TriggerOnResolved,
 		&i.TriggerOnPostmortemReview,
+		&i.RateLimitPerMinute,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -58,8 +79,8 @@ INSERT INTO ai_plugins (
     name, version, description, handler_type, http_endpoint,
     provider, model, encrypted_api_key, enabled,
     trigger_on_open, trigger_on_mitigated, trigger_on_resolved, trigger_on_postmortem_review,
-    created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    rate_limit_per_minute, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING id
 `
 
@@ -77,6 +98,7 @@ type InsertAIPluginParams struct {
 	TriggerOnMitigated        bool               `json:"trigger_on_mitigated"`
 	TriggerOnResolved         bool               `json:"trigger_on_resolved"`
 	TriggerOnPostmortemReview bool               `json:"trigger_on_postmortem_review"`
+	RateLimitPerMinute        int32              `json:"rate_limit_per_minute"`
 	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
 }
@@ -96,6 +118,7 @@ func (q *Queries) InsertAIPlugin(ctx context.Context, arg InsertAIPluginParams) 
 		arg.TriggerOnMitigated,
 		arg.TriggerOnResolved,
 		arg.TriggerOnPostmortemReview,
+		arg.RateLimitPerMinute,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -108,20 +131,40 @@ const listAIPlugins = `-- name: ListAIPlugins :many
 SELECT id, name, version, description, handler_type, http_endpoint,
        provider, model, encrypted_api_key, enabled,
        trigger_on_open, trigger_on_mitigated, trigger_on_resolved, trigger_on_postmortem_review,
-       created_at, updated_at
+       rate_limit_per_minute, created_at, updated_at
 FROM ai_plugins
 ORDER BY name
 `
 
-func (q *Queries) ListAIPlugins(ctx context.Context) ([]AiPlugin, error) {
+type ListAIPluginsRow struct {
+	ID                        int64              `json:"id"`
+	Name                      string             `json:"name"`
+	Version                   string             `json:"version"`
+	Description               *string            `json:"description"`
+	HandlerType               string             `json:"handler_type"`
+	HttpEndpoint              *string            `json:"http_endpoint"`
+	Provider                  *string            `json:"provider"`
+	Model                     *string            `json:"model"`
+	EncryptedApiKey           []byte             `json:"encrypted_api_key"`
+	Enabled                   bool               `json:"enabled"`
+	TriggerOnOpen             bool               `json:"trigger_on_open"`
+	TriggerOnMitigated        bool               `json:"trigger_on_mitigated"`
+	TriggerOnResolved         bool               `json:"trigger_on_resolved"`
+	TriggerOnPostmortemReview bool               `json:"trigger_on_postmortem_review"`
+	RateLimitPerMinute        int32              `json:"rate_limit_per_minute"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAIPlugins(ctx context.Context) ([]ListAIPluginsRow, error) {
 	rows, err := q.db.Query(ctx, listAIPlugins)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AiPlugin
+	var items []ListAIPluginsRow
 	for rows.Next() {
-		var i AiPlugin
+		var i ListAIPluginsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -137,6 +180,7 @@ func (q *Queries) ListAIPlugins(ctx context.Context) ([]AiPlugin, error) {
 			&i.TriggerOnMitigated,
 			&i.TriggerOnResolved,
 			&i.TriggerOnPostmortemReview,
+			&i.RateLimitPerMinute,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -165,7 +209,8 @@ UPDATE ai_plugins SET
     trigger_on_mitigated         = $12,
     trigger_on_resolved          = $13,
     trigger_on_postmortem_review = $14,
-    updated_at                   = $15
+    rate_limit_per_minute        = $15,
+    updated_at                   = $16
 WHERE id = $1
 `
 
@@ -184,6 +229,7 @@ type UpdateAIPluginParams struct {
 	TriggerOnMitigated        bool               `json:"trigger_on_mitigated"`
 	TriggerOnResolved         bool               `json:"trigger_on_resolved"`
 	TriggerOnPostmortemReview bool               `json:"trigger_on_postmortem_review"`
+	RateLimitPerMinute        int32              `json:"rate_limit_per_minute"`
 	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -203,6 +249,7 @@ func (q *Queries) UpdateAIPlugin(ctx context.Context, arg UpdateAIPluginParams) 
 		arg.TriggerOnMitigated,
 		arg.TriggerOnResolved,
 		arg.TriggerOnPostmortemReview,
+		arg.RateLimitPerMinute,
 		arg.UpdatedAt,
 	)
 	return err

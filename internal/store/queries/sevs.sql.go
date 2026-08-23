@@ -18,7 +18,7 @@ SELECT id, title, description, severity_level, status,
        monitoring_tool, right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by
 FROM sevs
 WHERE id = $1
 `
@@ -52,6 +52,7 @@ type GetSEVRow struct {
 	DttmSeconds           *int64             `json:"dttm_seconds"`
 	Locked                bool               `json:"locked"`
 	Sensitive             bool               `json:"sensitive"`
+	AiDisabled            bool               `json:"ai_disabled"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
@@ -89,6 +90,7 @@ func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
 		&i.DttmSeconds,
 		&i.Locked,
 		&i.Sensitive,
+		&i.AiDisabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CreatedBy,
@@ -104,7 +106,7 @@ INSERT INTO sevs (
     monitoring_tool, right_people_present, right_people_notes, tags,
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-    locked, sensitive, created_at, updated_at, created_by
+    locked, sensitive, ai_disabled, created_at, updated_at, created_by
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
@@ -112,7 +114,7 @@ INSERT INTO sevs (
     $14, $15, $16, $17,
     $18, $19, $20, $21, $22,
     $23, $24, $25, $26,
-    $27, $28, $29, $30, $31
+    $27, $28, $29, $30, $31, $32
 )
 `
 
@@ -145,6 +147,7 @@ type InsertSEVParams struct {
 	DttmSeconds           *int64             `json:"dttm_seconds"`
 	Locked                bool               `json:"locked"`
 	Sensitive             bool               `json:"sensitive"`
+	AiDisabled            bool               `json:"ai_disabled"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
@@ -180,6 +183,7 @@ func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
 		arg.DttmSeconds,
 		arg.Locked,
 		arg.Sensitive,
+		arg.AiDisabled,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.CreatedBy,
@@ -194,7 +198,7 @@ SELECT id, title, description, severity_level, status,
        monitoring_tool, right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by
 FROM sevs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -234,6 +238,7 @@ type ListSEVsRow struct {
 	DttmSeconds           *int64             `json:"dttm_seconds"`
 	Locked                bool               `json:"locked"`
 	Sensitive             bool               `json:"sensitive"`
+	AiDisabled            bool               `json:"ai_disabled"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
@@ -277,6 +282,7 @@ func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsR
 			&i.DttmSeconds,
 			&i.Locked,
 			&i.Sensitive,
+			&i.AiDisabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CreatedBy,
@@ -331,7 +337,8 @@ UPDATE sevs SET
     dttm_seconds           = $26,
     locked                 = $27,
     sensitive              = $28,
-    updated_at             = $29
+    ai_disabled            = $29,
+    updated_at             = $30
 WHERE id = $1
 `
 
@@ -364,6 +371,7 @@ type UpdateSEVParams struct {
 	DttmSeconds           *int64             `json:"dttm_seconds"`
 	Locked                bool               `json:"locked"`
 	Sensitive             bool               `json:"sensitive"`
+	AiDisabled            bool               `json:"ai_disabled"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -397,6 +405,7 @@ func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
 		arg.DttmSeconds,
 		arg.Locked,
 		arg.Sensitive,
+		arg.AiDisabled,
 		arg.UpdatedAt,
 	)
 	return err

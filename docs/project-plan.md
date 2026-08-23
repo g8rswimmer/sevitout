@@ -327,10 +327,11 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 **Goal**: Pluggable AI provider interface. Proactive lifecycle triggers. User-triggered actions. Plugin config via the Config API.
 
 **Deliverables**:
-- `proto/sevitout/v1/ai.proto`: `AIService` — `TriggerAction`, `StreamAction`, `ListPlugins`
+- `proto/sevitout/v1/ai.proto`: `AIService` — `TriggerAction`, `StreamAction`, `ListOutputs`, `ListPlugins` (functional, non-admin surface)
+- `proto/sevitout/v1/config.proto`: `ConfigService` gains `CreateAIPlugin`/`GetAIPlugin`/`UpdateAIPlugin`/`DeleteAIPlugin`/`ListAIPlugins` (Admin-only registration/config, §18.6), symmetric with every other ConfigService resource
 - `internal/ai/` package:
-  - `Provider` interface: `Summarize`, `SuggestRootCause`, `DraftPostmortem`, `SuggestTasks`, `FindSimilar`, `StreamAction`
-  - `Dispatcher`: buffered channel + goroutine worker pool; receives lifecycle events, routes to configured provider, stores result in `ai_outputs`, broadcasts `ai.output` WS event
+  - `Provider` interface: `Summarize`, `SuggestRootCause`, `DraftPostmortem`, `SuggestTasks`, `FindSimilar`, `StreamAction`, plus `SuggestResponders` and `DraftAnnouncement` (added so every trigger/action in §11 has a concrete method)
+  - `Dispatcher`: buffered channel + goroutine worker pool for proactive triggers, plus a synchronous path (`Run`/`StreamOne`) for on-demand `AIService` calls; both route to the configured provider, store the result in `ai_outputs`, and broadcast an `ai.output` WS event
   - Built-in Anthropic provider (Claude) using HTTP API
   - HTTP provider: generic implementation calling a configured external endpoint
 - Proactive triggers wired into lifecycle hooks (§M02 state machine events):

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/g8rswimmer/sevitout/internal/ai"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
@@ -24,6 +25,14 @@ type OnCaller interface {
 	OnCallLookup(ctx context.Context, serviceID string) (string, error)
 }
 
+// AIDispatcher routes a proactive lifecycle event (§11.1) to the AI plugin
+// system for async processing; the call must never block. Declared here
+// (the consumer) per this repo's interface-ownership convention —
+// ai.Dispatcher satisfies it implicitly.
+type AIDispatcher interface {
+	Dispatch(event ai.TriggerEvent, sevID string)
+}
+
 type SEVServer struct {
 	pb.UnimplementedSEVServiceServer
 	sevs        store.SEVStore
@@ -34,7 +43,8 @@ type SEVServer struct {
 	postmortems store.PostmortemStore
 	onCaller    OnCaller // nil when PagerDuty is not configured
 	unlock      Unlocker
-	publisher   Publisher // nil when WebSocket support is not wired up
+	publisher   Publisher    // nil when WebSocket support is not wired up
+	aiDispatch  AIDispatcher // nil when no AI plugin is configured
 }
 
 func NewSEVServer(
@@ -47,6 +57,7 @@ func NewSEVServer(
 	onCaller OnCaller,
 	unlock Unlocker,
 	publisher Publisher,
+	aiDispatch AIDispatcher,
 ) *SEVServer {
 	return &SEVServer{
 		sevs:        sevs,
@@ -58,7 +69,24 @@ func NewSEVServer(
 		onCaller:    onCaller,
 		unlock:      unlock,
 		publisher:   publisher,
+		aiDispatch:  aiDispatch,
 	}
+}
+
+// dispatchAI fires a proactive AI trigger unless aiDispatch is unconfigured.
+// The Sensitive/AIDisabled (§11.3, §14) gate — sensitive SEVs never have
+// their content sent to a configured AI plugin, which may be a third-party
+// API, consistent with M11's exclusion of sensitive SEVs from Slack incident
+// channels — is deliberately not re-implemented here: it's enforced once,
+// centrally, by ai.Dispatcher itself (against a freshly-fetched record, so a
+// Sensitive flip after this call but before the worker runs is still
+// caught), so every entry point — proactive and on-demand alike — shares one
+// source of truth instead of drifting independently.
+func (s *SEVServer) dispatchAI(event ai.TriggerEvent, record *store.SEV) {
+	if s.aiDispatch == nil {
+		return
+	}
+	s.aiDispatch.Dispatch(event, record.ID)
 }
 
 func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*pb.SEVResponse, error) {
@@ -83,6 +111,7 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		AffectedServices: req.GetAffectedServices(),
 		Tags:             req.GetTags(),
 		Sensitive:        req.GetSensitive(),
+		AIDisabled:       req.GetAiDisabled(),
 		CreatedBy:        callerID,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -158,6 +187,10 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		// RoleService without racing this handler's own writes.
 		publishProto(s.publisher, record.ID, "sev.created", resp)
 	}
+	// SEV opened proactively triggers AI only for SEV-1/SEV-2 (§11.1);
+	// Dispatcher itself enforces the severity gate against the freshly
+	// stored record, since this async trigger may run after further writes.
+	s.dispatchAI(ai.TriggerSEVOpened, record)
 
 	return resp, nil
 }
@@ -254,6 +287,9 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	}
 	if req.GetSensitive() != nil {
 		record.Sensitive = req.GetSensitive().GetValue()
+	}
+	if req.GetAiDisabled() != nil {
+		record.AIDisabled = req.GetAiDisabled().GetValue()
 	}
 
 	record.UpdatedAt = time.Now()
@@ -420,6 +456,12 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	if !record.Sensitive {
 		publishProto(s.publisher, record.ID, "sev.status_changed", resp)
 	}
+	switch toStatus {
+	case store.SEVStatusMitigated:
+		s.dispatchAI(ai.TriggerSEVMitigated, record)
+	case store.SEVStatusResolved:
+		s.dispatchAI(ai.TriggerSEVResolved, record)
+	}
 
 	return resp, nil
 }
@@ -455,6 +497,7 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 		Tags:             s.Tags,
 		Locked:           s.Locked,
 		Sensitive:        s.Sensitive,
+		AiDisabled:       s.AIDisabled,
 		CreatedBy:        s.CreatedBy,
 		CreatedAt:        timestamppb.New(s.CreatedAt),
 		UpdatedAt:        timestamppb.New(s.UpdatedAt),

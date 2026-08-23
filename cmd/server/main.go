@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/g8rswimmer/sevitout/internal/ai"
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/api/ws"
@@ -41,7 +42,7 @@ func main() {
 
 	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore,
 		announcementStore, chatStore, sevLinkStore, taskStore, onCallStore, integrationConfigStore,
-		retentionConfigStore := buildStores(ctx, log)
+		retentionConfigStore, aiPluginStore, aiOutputStore := buildStores(ctx, log)
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
@@ -95,18 +96,29 @@ func main() {
 	// --- WebSocket hub: room-per-SEV pub/sub fed by the mutation handlers below ---
 	wsHub := ws.NewHub()
 
+	// --- AI plugin dispatcher (§11, M12): routes lifecycle triggers and
+	// on-demand actions to whatever AI plugin(s) are registered via
+	// ConfigService. encryptor (nil when ENCRYPTION_KEY is unset) doubles as
+	// its Decryptor — grpchandler.Encryptor's method set is a superset of
+	// ai.Decryptor's single Decrypt method. With no plugins registered yet,
+	// the dispatcher is simply always a no-op; there's no separate "AI
+	// disabled" toggle at this layer. ctx (the process-lifetime context, not
+	// any single request's) governs its background worker pool. ---
+	aiDispatcher := ai.NewDispatcher(ctx, sevStore, historyStore, announcementStore, aiPluginStore, aiOutputStore, encryptor, wsHub, log, 0)
+
 	// --- gRPC server with auth interceptors ---
-	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, postmortemStore, onCaller, unlockSigner, wsHub)
+	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, postmortemStore, onCaller, unlockSigner, wsHub, aiDispatcher)
 	auditServer := grpchandler.NewAuditServer(auditStore)
 	authServer := grpchandler.NewAuthServer(userStore)
 	roleServer := grpchandler.NewRoleServer(roleStore, sevStore, auditStore, wsHub)
-	postmortemServer := grpchandler.NewPostmortemServer(postmortemStore, sevStore, auditStore, unlockSigner, wsHub)
+	postmortemServer := grpchandler.NewPostmortemServer(postmortemStore, sevStore, auditStore, unlockSigner, wsHub, aiDispatcher)
 	announcementServer := grpchandler.NewAnnouncementServer(announcementStore, sevStore, wsHub)
 	chatServer := grpchandler.NewChatServer(chatStore, sevStore, wsHub)
 	sevLinkServer := grpchandler.NewSEVLinkServer(sevLinkStore, sevStore, auditStore)
 	taskServer := grpchandler.NewTaskServer(taskStore, sevStore, auditStore, issueClient, wsHub)
 	searchServer := grpchandler.NewSearchServer(sevStore, roleStore, announcementStore)
-	configServer := grpchandler.NewConfigServer(serviceStore, userStore, onCallStore, integrationConfigStore, retentionConfigStore, encryptor)
+	configServer := grpchandler.NewConfigServer(serviceStore, userStore, onCallStore, integrationConfigStore, retentionConfigStore, aiPluginStore, encryptor, aiDispatcher)
+	aiServer := grpchandler.NewAIServer(aiDispatcher, aiOutputStore, aiPluginStore)
 
 	grpcSrv := grpc.NewServer(
 		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
@@ -123,6 +135,7 @@ func main() {
 	pb.RegisterTaskServiceServer(grpcSrv, taskServer)
 	pb.RegisterSearchServiceServer(grpcSrv, searchServer)
 	pb.RegisterConfigServiceServer(grpcSrv, configServer)
+	pb.RegisterAIServiceServer(grpcSrv, aiServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -196,6 +209,10 @@ func main() {
 		log.Error("register config gateway", "err", err)
 		os.Exit(1)
 	}
+	if err := pb.RegisterAIServiceHandlerClient(ctx, gwMux, pb.NewAIServiceClient(conn)); err != nil {
+		log.Error("register ai gateway", "err", err)
+		os.Exit(1)
+	}
 
 	// --- Password auth handler ---
 	passwordHandler := auth.NewPasswordHandler(jwtSigner, userStore)
@@ -263,6 +280,8 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 	store.OnCallStore,
 	store.IntegrationConfigStore,
 	store.RetentionConfigStore,
+	store.AIPluginStore,
+	store.AIOutputStore,
 ) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -280,7 +299,9 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 			memory.NewTaskStore(),
 			memory.NewOnCallStore(),
 			memory.NewIntegrationConfigStore(),
-			memory.NewRetentionConfigStore()
+			memory.NewRetentionConfigStore(),
+			memory.NewAIPluginStore(),
+			memory.NewAIOutputStore()
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
@@ -288,7 +309,7 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
-	log.Warn("service, postmortem, announcement, chat, sev-link, task, oncall, integration-config, and retention-config stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
+	log.Warn("service, postmortem, announcement, chat, sev-link, task, oncall, integration-config, retention-config, ai-plugin, and ai-output stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
 	return postgres.NewSEVStore(pool),
 		postgres.NewAuditStore(pool),
 		postgres.NewStatusHistoryStore(pool),
@@ -302,7 +323,9 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		memory.NewTaskStore(),
 		memory.NewOnCallStore(),
 		memory.NewIntegrationConfigStore(),
-		memory.NewRetentionConfigStore()
+		memory.NewRetentionConfigStore(),
+		memory.NewAIPluginStore(),
+		memory.NewAIOutputStore()
 }
 
 // githubIssueClient adapts *github.Client to grpchandler.IssueClient,

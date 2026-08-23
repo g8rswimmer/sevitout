@@ -25,6 +25,7 @@ type testConfigServer struct {
 	oncall       *memory.OnCallStore
 	integrations *memory.IntegrationConfigStore
 	retention    *memory.RetentionConfigStore
+	aiPlugins    *memory.AIPluginStore
 }
 
 func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
@@ -33,13 +34,15 @@ func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	oncall := memory.NewOnCallStore()
 	integrations := memory.NewIntegrationConfigStore()
 	retention := memory.NewRetentionConfigStore()
+	aiPlugins := memory.NewAIPluginStore()
 	return &testConfigServer{
-		server:       grpchandler.NewConfigServer(services, users, oncall, integrations, retention, enc),
+		server:       grpchandler.NewConfigServer(services, users, oncall, integrations, retention, aiPlugins, enc, nil),
 		services:     services,
 		users:        users,
 		oncall:       oncall,
 		integrations: integrations,
 		retention:    retention,
+		aiPlugins:    aiPlugins,
 	}
 }
 

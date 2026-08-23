@@ -253,7 +253,10 @@ without operator intervention.
 
 ### Interface
 
-All AI providers implement a single Go interface:
+All AI providers implement a single Go interface. This extends the original
+sketch of this interface with `SuggestResponders` and `DraftAnnouncement` so
+every proactive trigger (§11.1) and user-triggered action (§11.2) has a
+concrete method to call:
 
 ```go
 type Provider interface {
@@ -262,19 +265,66 @@ type Provider interface {
     DraftPostmortem(ctx context.Context, sev *SEVContext) (*PostmortemDraft, error)
     SuggestTasks(ctx context.Context, sev *SEVContext) ([]TaskSuggestion, error)
     FindSimilar(ctx context.Context, sev *SEVContext) ([]SimilarSEV, error)
+    SuggestResponders(ctx context.Context, sev *SEVContext) ([]ResponderSuggestion, error)
+    DraftAnnouncement(ctx context.Context, sev *SEVContext) (string, error)
     StreamAction(ctx context.Context, action Action, sev *SEVContext) (<-chan Chunk, error)
 }
 ```
 
+Two built-in implementations satisfy `Provider`: `AnthropicProvider` (a real
+HTTP client for Anthropic's Messages API — the `handler_type = "builtin"`
+case) and `HTTPProvider` (POSTs one JSON request per action to an externally
+configured endpoint — `handler_type = "http"`). `StreamAction` in both runs
+the action to completion and re-emits the result as a handful of
+word-chunked pieces rather than true token-level streaming (a v1
+simplification; see `demo/M12-ai-plugin.md`).
+
 ### Lifecycle dispatch
 
-When a SEV status transition occurs, the lifecycle hook dispatches an async AI task via a buffered Go channel. A pool of worker goroutines picks up tasks, calls the configured provider, stores the result in `ai_outputs`, and broadcasts an `ai.output` WebSocket event to subscribed clients.
+`Dispatcher` (`internal/ai/dispatcher.go`) is both the proactive and the
+on-demand entry point:
 
-AI outputs are stored separately from the SEV record and are clearly marked as AI-generated in the UI. They do not mutate SEV fields directly — users must explicitly apply suggestions.
+- **Proactive** (§11.1): `internal/api/grpc`'s `SEVServer`/`PostmortemServer`
+  call `Dispatcher.Dispatch(event, sevID)` after a successful mutation — SEV
+  create (SEV-1/SEV-2 only), transition to Mitigated/Resolved, and postmortem
+  transition to In Review. `Dispatch` enqueues onto a buffered channel a pool
+  of worker goroutines drains; it never blocks the calling RPC, and a full
+  queue drops the task (logged) rather than delaying the mutation. Each
+  trigger event maps to one or more `Action`s and only runs for plugins with
+  the matching `trigger_on_*` flag enabled.
+- **On-demand** (§11.2, `AIService.TriggerAction`/`StreamAction`):
+  `Dispatcher.Run`/`StreamOne` execute synchronously on the caller's
+  goroutine instead of going through the queue.
+
+Both paths funnel through the same core: resolve the plugin, enforce its
+per-minute rate limit (`RateLimiter`, a fixed-window counter), decrypt its API
+key, build the `Provider`, assemble a `SEVContext` (the SEV's fields, its
+status-history-and-announcements timeline, and up to 5 same-service SEVs as
+similarity candidates), call the action, store the result in `ai_outputs`,
+and broadcast an `ai.output` WebSocket event.
+
+A SEV opts out of all dispatch (proactive and on-demand) via its
+`ai_disabled` flag (§11.3). Sensitive SEVs are *always* excluded from
+proactive dispatch, regardless of `ai_disabled` — their content is never
+sent to a configured AI plugin, consistent with their other field-level
+visibility restrictions.
+
+AI outputs are stored separately from the SEV record (`ai_outputs`, exposed
+via `AIService.ListOutputs`) and are clearly marked as AI-generated in the
+UI. They do not mutate SEV fields directly — users must explicitly apply
+suggestions.
 
 ### Plugin registration
 
-Plugins are registered in the `ai_plugins` table via the Config API. Each plugin record holds: name, version, handler type (`builtin` or `http`), provider, model, encrypted API key, enabled flag, and per-trigger-event enable/disable flags.
+Plugins are registered in the `ai_plugins` table. Admin CRUD
+(`CreateAIPlugin`/`GetAIPlugin`/`UpdateAIPlugin`/`DeleteAIPlugin`/`ListAIPlugins`)
+lives on `ConfigService` (§18.6), alongside every other admin resource. Each
+plugin record holds: name, version, handler type (`builtin` or `http`),
+provider, model, encrypted API key, enabled flag, per-trigger-event
+enable/disable flags, and a per-minute rate limit. `AIService.ListPlugins` is
+a separate, read-only, non-admin RPC any authenticated user can call to see
+which enabled plugins are available to trigger an action against — it never
+returns credentials or handler internals.
 
 ---
 

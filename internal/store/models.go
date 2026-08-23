@@ -120,9 +120,13 @@ type SEV struct {
 	DTTMSeconds           *int64
 	Locked                bool
 	Sensitive             bool
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	CreatedBy             string
+	// AIDisabled opts this specific SEV out of all AI plugin dispatch
+	// (proactive and user-triggered), independent of the global per-plugin
+	// enabled/trigger flags. See docs/requirements.md §11.3.
+	AIDisabled bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	CreatedBy  string
 }
 
 // SEVSortField selects the column SEVStore.List orders results by.
@@ -291,8 +295,30 @@ type AIPlugin struct {
 	TriggerOnMitigated        bool
 	TriggerOnResolved         bool
 	TriggerOnPostmortemReview bool
-	CreatedAt                 time.Time
-	UpdatedAt                 time.Time
+	// RateLimitPerMinute caps how many AI actions this plugin may run per
+	// minute across the whole org; 0 means unlimited. Enforced by
+	// internal/ai.Dispatcher, not at the store layer.
+	RateLimitPerMinute int32
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// AIOutput is one stored result of an AI plugin action against a SEV —
+// either a proactive lifecycle trigger or a user-triggered action. Outputs
+// are additive and never mutate the SEV record directly (§11).
+type AIOutput struct {
+	ID       int64
+	SEVID    string
+	PluginID int64
+	// TriggerEvent is the lifecycle event that caused this output (e.g.
+	// "sev.opened", "sev.mitigated", "sev.resolved",
+	// "postmortem.in_review"), or "manual" for a user-triggered action.
+	TriggerEvent string
+	// Action is the Provider method invoked (e.g. "summarize",
+	// "suggest_root_cause"); see internal/ai.Action.
+	Action    string
+	Content   string
+	CreatedAt time.Time
 }
 
 // Service is an entry in the lightweight internal service registry.

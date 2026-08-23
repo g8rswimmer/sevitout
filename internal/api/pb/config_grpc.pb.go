@@ -56,6 +56,11 @@ type ConfigServiceClient interface {
 	GetRetentionConfig(ctx context.Context, in *GetRetentionConfigRequest, opts ...grpc.CallOption) (*RetentionConfigResponse, error)
 	UpdateRetentionConfig(ctx context.Context, in *UpdateRetentionConfigRequest, opts ...grpc.CallOption) (*RetentionConfigResponse, error)
 	ListRetentionConfig(ctx context.Context, in *ListRetentionConfigRequest, opts ...grpc.CallOption) (*ListRetentionConfigResponse, error)
+	CreateAIPlugin(ctx context.Context, in *CreateAIPluginRequest, opts ...grpc.CallOption) (*AIPluginResponse, error)
+	GetAIPlugin(ctx context.Context, in *GetAIPluginRequest, opts ...grpc.CallOption) (*AIPluginResponse, error)
+	UpdateAIPlugin(ctx context.Context, in *UpdateAIPluginRequest, opts ...grpc.CallOption) (*AIPluginResponse, error)
+	DeleteAIPlugin(ctx context.Context, in *DeleteAIPluginRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	ListAIPlugins(ctx context.Context, in *ListAIPluginsRequest, opts ...grpc.CallOption) (*ListAIPluginsResponse, error)
 }
 
 type configServiceClient struct {
@@ -246,6 +251,51 @@ func (c *configServiceClient) ListRetentionConfig(ctx context.Context, in *ListR
 	return out, nil
 }
 
+func (c *configServiceClient) CreateAIPlugin(ctx context.Context, in *CreateAIPluginRequest, opts ...grpc.CallOption) (*AIPluginResponse, error) {
+	out := new(AIPluginResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/CreateAIPlugin", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) GetAIPlugin(ctx context.Context, in *GetAIPluginRequest, opts ...grpc.CallOption) (*AIPluginResponse, error) {
+	out := new(AIPluginResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/GetAIPlugin", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpdateAIPlugin(ctx context.Context, in *UpdateAIPluginRequest, opts ...grpc.CallOption) (*AIPluginResponse, error) {
+	out := new(AIPluginResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/UpdateAIPlugin", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) DeleteAIPlugin(ctx context.Context, in *DeleteAIPluginRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/DeleteAIPlugin", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ListAIPlugins(ctx context.Context, in *ListAIPluginsRequest, opts ...grpc.CallOption) (*ListAIPluginsResponse, error) {
+	out := new(ListAIPluginsResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListAIPlugins", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConfigServiceServer is the server API for ConfigService service.
 // All implementations must embed UnimplementedConfigServiceServer
 // for forward compatibility
@@ -283,6 +333,11 @@ type ConfigServiceServer interface {
 	GetRetentionConfig(context.Context, *GetRetentionConfigRequest) (*RetentionConfigResponse, error)
 	UpdateRetentionConfig(context.Context, *UpdateRetentionConfigRequest) (*RetentionConfigResponse, error)
 	ListRetentionConfig(context.Context, *ListRetentionConfigRequest) (*ListRetentionConfigResponse, error)
+	CreateAIPlugin(context.Context, *CreateAIPluginRequest) (*AIPluginResponse, error)
+	GetAIPlugin(context.Context, *GetAIPluginRequest) (*AIPluginResponse, error)
+	UpdateAIPlugin(context.Context, *UpdateAIPluginRequest) (*AIPluginResponse, error)
+	DeleteAIPlugin(context.Context, *DeleteAIPluginRequest) (*emptypb.Empty, error)
+	ListAIPlugins(context.Context, *ListAIPluginsRequest) (*ListAIPluginsResponse, error)
 	mustEmbedUnimplementedConfigServiceServer()
 }
 
@@ -349,6 +404,21 @@ func (UnimplementedConfigServiceServer) UpdateRetentionConfig(context.Context, *
 }
 func (UnimplementedConfigServiceServer) ListRetentionConfig(context.Context, *ListRetentionConfigRequest) (*ListRetentionConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRetentionConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) CreateAIPlugin(context.Context, *CreateAIPluginRequest) (*AIPluginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateAIPlugin not implemented")
+}
+func (UnimplementedConfigServiceServer) GetAIPlugin(context.Context, *GetAIPluginRequest) (*AIPluginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAIPlugin not implemented")
+}
+func (UnimplementedConfigServiceServer) UpdateAIPlugin(context.Context, *UpdateAIPluginRequest) (*AIPluginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateAIPlugin not implemented")
+}
+func (UnimplementedConfigServiceServer) DeleteAIPlugin(context.Context, *DeleteAIPluginRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteAIPlugin not implemented")
+}
+func (UnimplementedConfigServiceServer) ListAIPlugins(context.Context, *ListAIPluginsRequest) (*ListAIPluginsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAIPlugins not implemented")
 }
 func (UnimplementedConfigServiceServer) mustEmbedUnimplementedConfigServiceServer() {}
 
@@ -723,6 +793,96 @@ func _ConfigService_ListRetentionConfig_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConfigService_CreateAIPlugin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateAIPluginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).CreateAIPlugin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/CreateAIPlugin",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).CreateAIPlugin(ctx, req.(*CreateAIPluginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_GetAIPlugin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAIPluginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetAIPlugin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/GetAIPlugin",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetAIPlugin(ctx, req.(*GetAIPluginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpdateAIPlugin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateAIPluginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpdateAIPlugin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/UpdateAIPlugin",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpdateAIPlugin(ctx, req.(*UpdateAIPluginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_DeleteAIPlugin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteAIPluginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).DeleteAIPlugin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/DeleteAIPlugin",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).DeleteAIPlugin(ctx, req.(*DeleteAIPluginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ListAIPlugins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAIPluginsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListAIPlugins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/ListAIPlugins",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListAIPlugins(ctx, req.(*ListAIPluginsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ConfigService_ServiceDesc is the grpc.ServiceDesc for ConfigService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -809,6 +969,26 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRetentionConfig",
 			Handler:    _ConfigService_ListRetentionConfig_Handler,
+		},
+		{
+			MethodName: "CreateAIPlugin",
+			Handler:    _ConfigService_CreateAIPlugin_Handler,
+		},
+		{
+			MethodName: "GetAIPlugin",
+			Handler:    _ConfigService_GetAIPlugin_Handler,
+		},
+		{
+			MethodName: "UpdateAIPlugin",
+			Handler:    _ConfigService_UpdateAIPlugin_Handler,
+		},
+		{
+			MethodName: "DeleteAIPlugin",
+			Handler:    _ConfigService_DeleteAIPlugin_Handler,
+		},
+		{
+			MethodName: "ListAIPlugins",
+			Handler:    _ConfigService_ListAIPlugins_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

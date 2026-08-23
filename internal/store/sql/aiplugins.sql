@@ -3,15 +3,15 @@ INSERT INTO ai_plugins (
     name, version, description, handler_type, http_endpoint,
     provider, model, encrypted_api_key, enabled,
     trigger_on_open, trigger_on_mitigated, trigger_on_resolved, trigger_on_postmortem_review,
-    created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    rate_limit_per_minute, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING id;
 
 -- name: GetAIPlugin :one
 SELECT id, name, version, description, handler_type, http_endpoint,
        provider, model, encrypted_api_key, enabled,
        trigger_on_open, trigger_on_mitigated, trigger_on_resolved, trigger_on_postmortem_review,
-       created_at, updated_at
+       rate_limit_per_minute, created_at, updated_at
 FROM ai_plugins
 WHERE id = $1;
 
@@ -30,7 +30,8 @@ UPDATE ai_plugins SET
     trigger_on_mitigated         = $12,
     trigger_on_resolved          = $13,
     trigger_on_postmortem_review = $14,
-    updated_at                   = $15
+    rate_limit_per_minute        = $15,
+    updated_at                   = $16
 WHERE id = $1;
 
 -- name: DeleteAIPlugin :exec
@@ -40,6 +41,6 @@ DELETE FROM ai_plugins WHERE id = $1;
 SELECT id, name, version, description, handler_type, http_endpoint,
        provider, model, encrypted_api_key, enabled,
        trigger_on_open, trigger_on_mitigated, trigger_on_resolved, trigger_on_postmortem_review,
-       created_at, updated_at
+       rate_limit_per_minute, created_at, updated_at
 FROM ai_plugins
 ORDER BY name;

@@ -74,6 +74,18 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.ConfigService/GetRetentionConfig":      store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/UpdateRetentionConfig":   store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/ListRetentionConfig":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateAIPlugin":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetAIPlugin":             store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateAIPlugin":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteAIPlugin":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListAIPlugins":           store.OrgRoleAdmin,
+	// AI service — running/streaming an action needs at least Responder
+	// (same floor as most SEV-mutating actions); listing outputs and
+	// available plugins is read-only and open to any authenticated user.
+	"/sevitout.v1.AIService/TriggerAction": store.OrgRoleResponder,
+	"/sevitout.v1.AIService/StreamAction":  store.OrgRoleResponder,
+	"/sevitout.v1.AIService/ListOutputs":   store.OrgRoleViewer,
+	"/sevitout.v1.AIService/ListPlugins":   store.OrgRoleViewer,
 	// GET /admin/integrations/health: not a real gRPC method — see
 	// internal/api/grpc.IntegrationsHealthHandler, which checks this entry
 	// directly since it bypasses the gRPC interceptor entirely.
