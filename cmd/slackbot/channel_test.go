@@ -13,16 +13,18 @@ func TestIncidentChannelName(t *testing.T) {
 		convention string
 		level      int32
 		sevID      string
+		title      string
 		want       string
 	}{
-		{"default convention", "", 1, "SEV-2026-0042", "inc-sev1-sev-2026-0042"},
-		{"custom convention", "incidents-{level}-{id}", 2, "SEV-2026-0007", "incidents-2-sev-2026-0007"},
-		{"every severity level", "sev{level}", 4, "SEV-2026-0001", "sev4"},
-		{"disallowed characters collapsed", "inc {level}/{id}!", 1, "SEV-2026-0001", "inc-1-sev-2026-0001-"},
+		{"default convention", "", 1, "SEV-2026-0042", "database outage", "inc-sev-2026-0042-database-outage"},
+		{"custom convention", "incidents-{level}-{id}", 2, "SEV-2026-0007", "", "incidents-2-sev-2026-0007"},
+		{"every severity level", "sev{level}", 4, "SEV-2026-0001", "", "sev4"},
+		{"disallowed characters collapsed", "inc {level}/{id}!", 1, "SEV-2026-0001", "", "inc-1-sev-2026-0001"},
+		{"punctuated title doesn't produce repeated hyphens", "inc-{id}-{title}", 1, "SEV-1", "Database outage - prod", "inc-sev-1-database-outage-prod"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := incidentChannelName(c.convention, c.level, c.sevID)
+			got := incidentChannelName(c.convention, c.level, c.sevID, c.title)
 			if got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
@@ -31,7 +33,7 @@ func TestIncidentChannelName(t *testing.T) {
 }
 
 func TestIncidentChannelName_TruncatesToSlackLimit(t *testing.T) {
-	got := incidentChannelName("inc-{level}-{id}", 1, "SEV-2026-0000000000000000000000000000000000000000000000000000000000000000000000000000")
+	got := incidentChannelName("inc-{level}-{id}", 1, "SEV-2026-0000000000000000000000000000000000000000000000000000000000000000000000000000", "")
 	if len(got) != slackChannelNameMaxLen {
 		t.Errorf("len(got) = %d, want %d", len(got), slackChannelNameMaxLen)
 	}
@@ -83,6 +85,32 @@ func TestCreateIncidentChannel_CreatesInvitesAndPostsLink(t *testing.T) {
 	}
 	if len(fs.posted) != 1 {
 		t.Fatalf("posted %d messages, want 1", len(fs.posted))
+	}
+}
+
+func TestCreateIncidentChannel_InvitesPendingOpener(t *testing.T) {
+	fs := &fakeSlack{}
+	b := newTestBot(fs, nil, &fakeRoleAPI{resp: &pb.ListRolesResponse{}}, nil, nil, "", "")
+	b.channelOrRegisterOpener("SEV-1", "U-OPENER")
+
+	b.createIncidentChannel(context.Background(), "SEV-1", "checkout down", 1)
+
+	if len(fs.invitedUsers) != 1 || fs.invitedUsers[0] != "U-OPENER" {
+		t.Errorf("invited users = %v, want [U-OPENER]", fs.invitedUsers)
+	}
+	if opener := b.takePendingOpener("SEV-1"); opener != "" {
+		t.Errorf("pending opener = %q, want it consumed by createIncidentChannel", opener)
+	}
+}
+
+func TestCreateIncidentChannel_NoPendingOpenerInvitesNobodyExtra(t *testing.T) {
+	fs := &fakeSlack{}
+	b := newTestBot(fs, nil, &fakeRoleAPI{resp: &pb.ListRolesResponse{}}, nil, nil, "", "")
+
+	b.createIncidentChannel(context.Background(), "SEV-1", "checkout down", 1)
+
+	if len(fs.invitedUsers) != 0 {
+		t.Errorf("invited users = %v, want none", fs.invitedUsers)
 	}
 }
 

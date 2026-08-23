@@ -243,7 +243,7 @@ SEVs must be searchable and filterable across all records:
 - **Announcement push**: send announcements from Sevitout to a Slack channel
 - **Chat capture**: pull messages from an incident Slack channel into the SEV chat log
 - **In-channel commands**: respond to `@sevbot status`, `@sevbot timeline`, etc.
-- **Auto-create incident channel**: when a SEV-1 or SEV-2 is opened, the bot automatically creates a dedicated Slack channel (e.g., `#inc-sev1-2026-0042`), invites the IC and on-call, and posts the SEV link; channel name convention is configurable in §18.4
+- **Auto-create incident channel**: when any SEV is opened (any severity, any origin — Slack, web UI, API, or an integration like PagerDuty), the bot automatically creates a dedicated Slack channel (e.g., `#inc-2026-0042-database-outage`), invites the IC, on-call, and (if opened via `/sev open`) the person who opened it, and posts the SEV link; all subsequent notifications and pushed announcements for that SEV route to this channel rather than the default one, keeping unrelated SEVs' discussions from mixing in a shared channel. Channel name convention is configurable in §18.4. Sensitive SEVs are excluded — no incident channel is auto-created for them, consistent with their field-level visibility restrictions.
 
 ### 13.2 PagerDuty
 
@@ -424,7 +424,7 @@ Sevitout maintains its own lightweight service registry:
 2. ~~For task trackers (Jira/GitHub/Linear) — do we need all three at launch, or prioritize one?~~
    - **Answered**: GitHub Issues is the only task tracker integration for v1. Jira and Linear are fast-follow / v2. See §8 and §13.3.
 3. ~~Should the Slack incident channel be created automatically by the bot when a SEV-1/SEV-2 is opened?~~
-   - **Answered**: Yes — the Slack bot automatically creates a dedicated incident channel when a SEV-1 or SEV-2 is opened. See §13.1.
+   - **Answered**: Yes — and extended beyond the original SEV-1/2 scope: the Slack bot automatically creates a dedicated incident channel for *every* opened SEV, regardless of severity, so unrelated SEVs never share one channel's discussion. See §13.1.
 4. ~~Are there data retention requirements — how long should resolved SEVs be kept?~~
    - **Answered**: Default is retain forever; configurable per severity level with different retention periods per SEV level. See §18.7.
 5. ~~Should opening a SEV-1/SEV-2 automatically trigger a PagerDuty page, or always remain a manual action?~~

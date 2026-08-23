@@ -52,8 +52,12 @@ func (b *bot) handleEvent(ctx context.Context, evt ws.Event) {
 }
 
 // handleSEVCreated posts a bot notification for every newly opened SEV
-// (docs/requirements.md §13.1) and, for SEV-1/SEV-2, auto-creates a
-// dedicated incident channel.
+// (docs/requirements.md §13.1) and auto-creates a dedicated incident channel
+// for it, regardless of severity — every SEV gets its own channel so
+// unrelated incidents' discussions never share one, keeping whatever
+// channel `/sev open` was run in free to act as pure intake. (Sensitive
+// SEVs never reach here at all: CreateSEV skips publishing sev.created for
+// them, so they keep today's behavior of no auto-created channel.)
 func (b *bot) handleSEVCreated(ctx context.Context, payload json.RawMessage) {
 	var sev sevPayload
 	if err := json.Unmarshal(payload, &sev); err != nil {
@@ -61,7 +65,7 @@ func (b *bot) handleSEVCreated(ctx context.Context, payload json.RawMessage) {
 		return
 	}
 
-	if sev.SeverityLevel == 1 || sev.SeverityLevel == 2 {
+	if b.channelFor(sev.ID) == "" {
 		b.createIncidentChannel(ctx, sev.ID, sev.Title, sev.SeverityLevel)
 	}
 

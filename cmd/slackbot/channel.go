@@ -15,25 +15,35 @@ import (
 // name (only lowercase letters, numbers, hyphens, and underscores).
 var channelNameDisallowed = regexp.MustCompile(`[^a-z0-9_-]+`)
 
+// repeatedHyphens collapses runs of hyphens left behind when a punctuated
+// title (e.g. "Database outage - prod") gets slugified — the disallowed
+// spaces around a literal "-" each become their own hyphen, which would
+// otherwise render as "---" in the channel name.
+var repeatedHyphens = regexp.MustCompile(`-{2,}`)
+
 // slackChannelNameMaxLen is Slack's own channel-name length limit.
 const slackChannelNameMaxLen = 80
 
-// incidentChannelName renders convention (e.g. "inc-sev{level}-{id}",
+// incidentChannelName renders convention (e.g. "inc-{id}-{title}",
 // docs/requirements.md §13.1) into a valid Slack channel name for the given
-// SEV, substituting {level} and {id}. An empty convention falls back to
-// defaultChannelNamingConvention. The result is lowercased, has every
-// Slack-disallowed character collapsed to a hyphen, and is truncated to
-// Slack's 80-character channel-name limit.
-func incidentChannelName(convention string, severityLevel int32, sevID string) string {
+// SEV, substituting {level}, {id}, and {title}. An empty convention falls
+// back to defaultChannelNamingConvention. The result is lowercased, has
+// every Slack-disallowed character collapsed to a hyphen, has repeated
+// hyphens collapsed and leading/trailing hyphens trimmed, and is truncated
+// to Slack's 80-character channel-name limit.
+func incidentChannelName(convention string, severityLevel int32, sevID, title string) string {
 	if convention == "" {
 		convention = defaultChannelNamingConvention
 	}
 	name := strings.NewReplacer(
 		"{level}", strconv.Itoa(int(severityLevel)),
 		"{id}", sevID,
+		"{title}", title,
 	).Replace(convention)
 	name = strings.ToLower(name)
 	name = channelNameDisallowed.ReplaceAllString(name, "-")
+	name = repeatedHyphens.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
 	if len(name) > slackChannelNameMaxLen {
 		name = name[:slackChannelNameMaxLen]
 	}
@@ -46,9 +56,10 @@ func incidentChannelName(convention string, severityLevel int32, sevID string) s
 // stores verbatim as SEVRole.DisplayName.
 var emailInAngleBrackets = regexp.MustCompile(`<([^>@\s]+@[^>]+)>`)
 
-// createIncidentChannel creates a dedicated Slack channel for a newly opened
-// SEV-1/SEV-2 (docs/requirements.md §13.1), invites its on-call person (if
-// one is assigned and resolvable to a Slack account), posts a link back to
+// createIncidentChannel creates a dedicated Slack channel for every newly
+// opened SEV (docs/requirements.md §13.1), invites its on-call person (if
+// one is assigned and resolvable to a Slack account) and whoever opened it
+// via `/sev open` (if anyone — see takePendingOpener), posts a link back to
 // the SEV, and records the mapping so future lifecycle notifications for
 // this SEV land in the new channel instead of the default one.
 //
@@ -56,7 +67,7 @@ var emailInAngleBrackets = regexp.MustCompile(`<([^>@\s]+@[^>]+)>`)
 // since incident-channel creation must never be the reason a SEV-open
 // response fails or blocks.
 func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, severityLevel int32) {
-	name := incidentChannelName(b.namingConvention(), severityLevel, sevID)
+	name := incidentChannelName(b.namingConvention(), severityLevel, sevID, title)
 
 	channelID, err := b.slack.CreateChannel(ctx, name)
 	if err != nil {
@@ -67,6 +78,12 @@ func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, se
 	b.log.InfoContext(ctx, "auto-created incident channel", "sev_id", sevID, "channel_id", channelID, "channel_name", name)
 
 	b.inviteOnCall(ctx, sevID, channelID)
+
+	if opener := b.takePendingOpener(sevID); opener != "" {
+		if err := b.slack.InviteUsers(ctx, channelID, []string{opener}); err != nil {
+			b.log.ErrorContext(ctx, "invite sev opener to new incident channel failed", "sev_id", sevID, "channel_id", channelID, "err", err)
+		}
+	}
 
 	if err := b.slack.PostMessage(ctx, channelID, fmt.Sprintf(":rotating_light: %s\n%s", title, sevID)); err != nil {
 		b.log.ErrorContext(ctx, "post incident channel intro failed", "sev_id", sevID, "channel_id", channelID, "err", err)

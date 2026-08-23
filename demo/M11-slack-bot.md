@@ -28,12 +28,16 @@ Slack over **Socket Mode** (no public ingress required) and to the API server ov
     (`ChatService.AddChatEntry`), oldest first.
 - **In-channel commands** — `@sevbot status <sev-id>` and `@sevbot timeline <sev-id>`,
   answered by replying in the channel the mention occurred in.
-- **Auto-created incident channel** — on a SEV-1/SEV-2 `sev.created` event, the bot
-  creates a channel named from the `slack` integration config's
-  `channel_naming_convention` setting (default `inc-sev{level}-{id}`), invites the
-  on-call person if one is assigned and resolvable to a Slack account by email, and
-  posts the SEV link. The mapping from SEV ID → channel is in-memory only (see Known
-  limitations).
+- **Auto-created incident channel** — on *every* `sev.created` event (any severity, any
+  origin — Slack, web UI, API, or an integration like PagerDuty), the bot creates a
+  channel named from the `slack` integration config's `channel_naming_convention`
+  setting (default `inc-{id}-{title}`), invites the on-call person if one is assigned
+  and resolvable to a Slack account by email, and posts the SEV link. If the SEV was
+  opened via `/sev open`, the invoking Slack user is invited too — this makes the
+  channel `/sev open` was run in a pure "SEV intake" channel, with each SEV's own
+  discussion happening in its own dedicated channel instead. Sensitive SEVs are
+  excluded (no channel is auto-created for them). The mapping from SEV ID → channel is
+  in-memory only (see Known limitations).
 - **Bot notifications** — every `sev.created` and `sev.status_changed` event posts to
   the SEV's incident channel if one was auto-created, else to the `slack` integration
   config's `default_channel` setting.
@@ -177,13 +181,20 @@ skip this and the bot uses no default channel and the built-in naming convention
 ```bash
 curl -s -X PUT "$API/v1/config/integrations/slack" -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"integration_type":"slack","settings":{"default_channel":"C0123456","channel_naming_convention":"inc-sev{level}-{id}"}}' | jq .
+  -d '{"integration_type":"slack","settings":{"default_channel":"C0123456","channel_naming_convention":"inc-{id}-{title}"}}' | jq .
 ```
 
 `default_channel` must be a Slack **channel ID** (e.g. `C0123456`, visible in a
 channel's "About" panel), not its `#name` — the bot posts via `chat.postMessage`,
 which takes an ID. Make sure `@sevbot` has been invited to that channel first
 (`/invite @sevbot`), or `chat.postMessage` will fail with `not_in_channel`.
+
+`default_channel` is only ever used as a fallback now — since every SEV gets its own
+auto-created incident channel regardless of severity, `default_channel` really only
+matters for the brief window between a SEV being created and its channel finishing
+creation (or if channel creation fails outright). In practice, whatever channel you run
+`/sev open` in works fine as "SEV intake": once each SEV gets its own channel, that
+intake channel never accumulates any single incident's discussion.
 
 The bot polls this config every few minutes (`slackSettingsRefreshInterval` in
 `cmd/slackbot/settings.go`) and applies changes automatically — you don't need to
@@ -213,15 +224,18 @@ both must appear before the walkthrough below will work.
 
 ### 1. Open a SEV-1 from Slack and watch the incident channel appear
 
-In any channel the bot's slash command works in:
+In any channel the bot's slash command works in (this is your "SEV intake" channel —
+it stays uncluttered since the SEV's own discussion moves to its dedicated channel):
 
 ```
 /sev open 1 checkout is failing for all customers
 ```
 
 The bot replies with the new SEV ID. Within a few seconds, a new channel named
-`inc-sev1-<sev-id>` appears (check your workspace's channel list) with an intro
-message linking back to the SEV.
+`inc-<sev-id>-checkout-is-failing-for-all-customers` appears (check your workspace's
+channel list) with an intro message linking back to the SEV — and you (whoever ran the
+command) are automatically invited into it alongside the bot and, if one is assigned,
+the on-call person.
 
 ### 2. Post an update
 
@@ -254,8 +268,8 @@ states with `/sev transition` first:
 /sev resolve SEV-2026-0001
 ```
 
-The default (or incident) channel receives a `:white_check_mark:` notification on the
-final step, and `@sevbot status SEV-2026-0001` now reports `resolved`.
+The SEV's incident channel receives a `:white_check_mark:` notification on the final
+step, and `@sevbot status SEV-2026-0001` now reports `resolved`.
 
 ### 5. Capture chat into the SEV
 
@@ -299,11 +313,14 @@ pattern as `internal/integrations/pagerduty` and `.../tasktracker/github`.
   back to `default_channel` (if configured) instead of the now-unknown incident
   channel. A future milestone could persist this mapping (e.g. as an
   `integration_config` setting, or its own store).
-- Only the on-call role is invited when an incident channel is created — inviting the
-  Incident Commander too (per `docs/requirements.md` §13.1) is not implemented, since
-  the IC is usually assigned *after* the SEV (and its channel) already exist, and doing
-  so requires resolving a Sevitout user ID to an email to a Slack ID, which the bot
-  doesn't currently have a path for without an additional `ConfigService` lookup.
+- On-call and the `/sev open` caller are invited when an incident channel is created;
+  the Incident Commander is not (per `docs/requirements.md` §13.1) — the IC is usually
+  assigned *after* the SEV (and its channel) already exist, and inviting them would
+  require resolving a Sevitout user ID to an email to a Slack ID, which the bot doesn't
+  currently have a path for without an additional `ConfigService` lookup.
+- A SEV opened via the web UI, the REST API, or an integration (e.g. PagerDuty
+  auto-open) still gets its own incident channel, but has no known Slack opener to
+  invite — only on-call (and, later, the IC) get invited for those.
 - On-call invites depend on the on-call role's `display_name` containing an email in
   `Name <email>` form (the shape PagerDuty auto-assignment produces, M04). A manually
   entered on-call name with no email is skipped, not an error.

@@ -178,6 +178,52 @@ func TestHandleOpen_APIErrorReportedInReply(t *testing.T) {
 	}
 }
 
+func TestHandleOpen_NoIncidentChannelYetRegistersOpenerAsPending(t *testing.T) {
+	sevs := &fakeSevAPI{createResp: &pb.SEVResponse{Id: "SEV-2026-0001", Title: "checkout down"}}
+	fs := &fakeSlack{}
+	b := newTestBot(fs, sevs, nil, nil, nil, "", "")
+
+	b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "open 1 checkout down", UserID: "U-OPENER"})
+
+	if len(fs.invitedUsers) != 0 {
+		t.Errorf("invited users = %v, want none yet (no incident channel exists)", fs.invitedUsers)
+	}
+	if got := b.takePendingOpener("SEV-2026-0001"); got != "U-OPENER" {
+		t.Errorf("pending opener = %q, want U-OPENER registered for when the channel is created", got)
+	}
+}
+
+func TestHandleOpen_ExistingIncidentChannelInvitesOpenerDirectly(t *testing.T) {
+	sevs := &fakeSevAPI{createResp: &pb.SEVResponse{Id: "SEV-2026-0001", Title: "checkout down"}}
+	fs := &fakeSlack{}
+	b := newTestBot(fs, sevs, nil, nil, nil, "", "")
+	b.setChannelFor("SEV-2026-0001", "C-INCIDENT")
+
+	b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "open 1 checkout down", UserID: "U-OPENER"})
+
+	if len(fs.invitedUsers) != 1 || fs.invitedUsers[0] != "U-OPENER" || fs.invitedChannel != "C-INCIDENT" {
+		t.Errorf("invited = %v to %q, want [U-OPENER] to C-INCIDENT", fs.invitedUsers, fs.invitedChannel)
+	}
+	if got := b.takePendingOpener("SEV-2026-0001"); got != "" {
+		t.Errorf("pending opener = %q, want none (invited directly instead)", got)
+	}
+}
+
+func TestHandleOpen_SensitiveSEVSkipsOpenerRegistration(t *testing.T) {
+	sevs := &fakeSevAPI{createResp: &pb.SEVResponse{Id: "SEV-2026-0001", Title: "security incident", Sensitive: true}}
+	fs := &fakeSlack{}
+	b := newTestBot(fs, sevs, nil, nil, nil, "", "")
+
+	b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "open 1 security incident", UserID: "U-OPENER"})
+
+	if len(fs.invitedUsers) != 0 {
+		t.Errorf("invited users = %v, want none for a sensitive SEV", fs.invitedUsers)
+	}
+	if got := b.takePendingOpener("SEV-2026-0001"); got != "" {
+		t.Errorf("pending opener = %q, want none registered for a sensitive SEV (no channel will ever be created)", got)
+	}
+}
+
 func TestHandleUpdate_PostsInternalAnnouncement(t *testing.T) {
 	ann := &fakeAnnouncementAPI{createResp: &pb.AnnouncementResponse{}}
 	b := newTestBot(nil, nil, nil, ann, nil, "", "")

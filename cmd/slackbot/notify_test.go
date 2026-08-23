@@ -53,7 +53,7 @@ func TestHandleEvent_SEVCreated_SEV1AutoCreatesChannelAndNotifies(t *testing.T) 
 	}
 }
 
-func TestHandleEvent_SEVCreated_SEV3DoesNotCreateChannel(t *testing.T) {
+func TestHandleEvent_SEVCreated_SEV3AlsoAutoCreatesChannel(t *testing.T) {
 	fs := &fakeSlack{}
 	b := newTestBot(fs, nil, nil, nil, nil, "general", "")
 
@@ -63,15 +63,39 @@ func TestHandleEvent_SEVCreated_SEV3DoesNotCreateChannel(t *testing.T) {
 	}
 	b.handleEvent(context.Background(), evt)
 
-	if b.channelFor("SEV-1") != "" {
-		t.Error("expected no incident channel for a SEV-3")
+	if b.channelFor("SEV-1") == "" {
+		t.Error("expected an incident channel to be auto-created for a SEV-3 too, not just SEV-1/2")
 	}
-	if len(fs.posted) != 1 || fs.posted[0].channel != "general" {
-		t.Errorf("posted = %+v, want one notification to the default channel", fs.posted)
+	if len(fs.posted) != 2 {
+		t.Fatalf("posted %d messages, want 2 (intro + notification, both to the new channel): %+v", len(fs.posted), fs.posted)
+	}
+	for _, p := range fs.posted {
+		if p.channel == "general" {
+			t.Errorf("expected both messages to go to the new incident channel, not %q", p.channel)
+		}
 	}
 }
 
-func TestHandleEvent_SEVCreated_NoDefaultChannelIsANoop(t *testing.T) {
+func TestHandleEvent_SEVCreated_ExistingChannelIsNotRecreated(t *testing.T) {
+	fs := &fakeSlack{}
+	b := newTestBot(fs, nil, nil, nil, nil, "general", "")
+	b.setChannelFor("SEV-1", "C-ALREADY-THERE")
+
+	evt := ws.Event{
+		Type:    "sev.created",
+		Payload: []byte(`{"id":"SEV-1","title":"checkout down","severity_level":1,"status":"open"}`),
+	}
+	b.handleEvent(context.Background(), evt)
+
+	if fs.createChannelName != "" {
+		t.Errorf("expected no CreateChannel call, got one for %q", fs.createChannelName)
+	}
+	if len(fs.posted) != 1 || fs.posted[0].channel != "C-ALREADY-THERE" {
+		t.Errorf("posted = %+v, want one notification to the pre-existing channel", fs.posted)
+	}
+}
+
+func TestHandleEvent_SEVCreated_NoDefaultChannelStillCreatesIncidentChannel(t *testing.T) {
 	fs := &fakeSlack{}
 	b := newTestBot(fs, nil, nil, nil, nil, "", "")
 
@@ -81,8 +105,15 @@ func TestHandleEvent_SEVCreated_NoDefaultChannelIsANoop(t *testing.T) {
 	}
 	b.handleEvent(context.Background(), evt)
 
-	if len(fs.posted) != 0 {
-		t.Errorf("posted = %+v, want none (no default channel configured)", fs.posted)
+	if b.channelFor("SEV-1") == "" {
+		t.Error("expected an incident channel to be auto-created even with no default_channel configured")
+	}
+	// The intro message still posts to the new incident channel; only a
+	// notification with nowhere to go (neither incident channel nor default)
+	// would be a no-op, and that's no longer the case once every SEV gets
+	// its own channel.
+	if len(fs.posted) != 2 {
+		t.Errorf("posted = %+v, want 2 (intro + notification, both to the new channel)", fs.posted)
 	}
 }
 

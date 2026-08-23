@@ -168,6 +168,23 @@ func (b *bot) handleOpen(ctx context.Context, cmd slack.SlashCommand, args []str
 	if err != nil {
 		return fmt.Sprintf("failed to open SEV: %v", err)
 	}
+
+	// Invite whoever ran this command into the new SEV's incident channel.
+	// Sensitive SEVs never get an auto-created channel (see
+	// handleSEVCreated), so there's nothing to register for one. Otherwise,
+	// the channel usually doesn't exist yet — sev.created (which drives its
+	// creation) is delivered asynchronously over the WebSocket — so the
+	// common case registers cmd.UserID for createIncidentChannel to invite
+	// once that channel is created; if it's already there (the event beat us
+	// here), invite directly instead.
+	if !resp.GetSensitive() {
+		if chID := b.channelOrRegisterOpener(resp.GetId(), cmd.UserID); chID != "" {
+			if err := b.slack.InviteUsers(ctx, chID, []string{cmd.UserID}); err != nil {
+				b.log.ErrorContext(ctx, "invite sev opener to existing incident channel failed", "sev_id", resp.GetId(), "err", err)
+			}
+		}
+	}
+
 	return fmt.Sprintf(":rotating_light: Opened %s (SEV-%d): %s", resp.GetId(), severity, resp.GetTitle())
 }
 
