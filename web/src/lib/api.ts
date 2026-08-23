@@ -8,23 +8,32 @@ import type {
   CreateSEVRequest,
   DashboardMetricsResponse,
   AddChatEntryRequest,
+  AIOutputResponse,
   LinkSEVsRequest,
   LinkTaskRequest,
+  ListAIOutputsResponse,
   ListAnnouncementsResponse,
   ListChatEntriesResponse,
   ListLinkedSEVsResponse,
+  ListPluginsResponse,
   ListRolesResponse,
   ListSEVsParams,
   ListSEVsResponse,
   ListServicesResponse,
   ListTasksResponse,
+  PostmortemResponse,
   SEVLinkResponse,
   SEVResponse,
   SEVRoleResponse,
   SearchSEVsParams,
   SearchSEVsResponse,
   TaskResponse,
+  TransitionPostmortemStatusRequest,
   TransitionStatusRequest,
+  TriggerActionRequest,
+  UnlockSEVRequest,
+  UnlockSEVResponse,
+  UpdatePostmortemRequest,
   UpdateSEVRequest,
   WhoAmIResponse,
 } from '@/types/api'
@@ -241,5 +250,26 @@ export const api = {
   },
   services: {
     list: () => request<ListServicesResponse>('/v1/config/services'),
+  },
+  postmortems: {
+    get: (sevId: string) => request<PostmortemResponse>(`/v1/sevs/${sevId}/postmortem`),
+    update: (sevId: string, req: UpdatePostmortemRequest) =>
+      request<PostmortemResponse>(`/v1/sevs/${sevId}/postmortem`, { method: 'PATCH', body: JSON.stringify(req) }),
+    transition: (sevId: string, req: TransitionPostmortemStatusRequest) =>
+      request<PostmortemResponse>(`/v1/sevs/${sevId}/postmortem/transition`, {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }),
+    // Unlocks the whole SEV record (docs/requirements.md §10.1), not just
+    // the postmortem — it's PostmortemService.UnlockSEV in the proto, kept
+    // here to mirror the backend's own service grouping.
+    unlockSev: (sevId: string, req: UnlockSEVRequest) =>
+      request<UnlockSEVResponse>(`/v1/sevs/${sevId}/unlock`, { method: 'POST', body: JSON.stringify(req) }),
+  },
+  ai: {
+    triggerAction: (sevId: string, req: TriggerActionRequest) =>
+      request<AIOutputResponse>(`/v1/sevs/${sevId}/ai/actions`, { method: 'POST', body: JSON.stringify(req) }),
+    listOutputs: (sevId: string) => request<ListAIOutputsResponse>(`/v1/sevs/${sevId}/ai/outputs`),
+    listPlugins: () => request<ListPluginsResponse>('/v1/ai/plugins'),
   },
 }

@@ -544,3 +544,101 @@ export interface WSEvent {
   sev_id: string
   payload: unknown
 }
+
+// --- Postmortem ----------------------------------------------------------
+
+export type PostmortemStatus = 'draft' | 'in-review' | 'approved'
+
+export const POSTMORTEM_STATUS_LABELS: Record<PostmortemStatus, string> = {
+  draft: 'Draft',
+  'in-review': 'In Review',
+  approved: 'Approved',
+}
+
+export const POSTMORTEM_STATUS_BADGE_CLASS: Record<PostmortemStatus, string> = {
+  draft: 'border-transparent bg-slate-500 text-white dark:bg-slate-600',
+  'in-review': 'border-transparent bg-blue-500 text-white dark:bg-blue-600',
+  approved: 'border-transparent bg-emerald-600 text-white',
+}
+
+/** Mirrors internal/postmortem/statemachine.go's validTransitions — UX sugar
+ * only, same caveat as SEVResponse's VALID_STATUS_TRANSITIONS: the server is
+ * the actual authority. */
+export const VALID_POSTMORTEM_TRANSITIONS: Record<PostmortemStatus, PostmortemStatus[]> = {
+  draft: ['in-review'],
+  'in-review': ['approved', 'draft'],
+  approved: [],
+}
+
+export interface PostmortemResponse {
+  id: string
+  sev_id: string
+  status: PostmortemStatus
+  content?: string
+  created_at: string
+  updated_at: string
+  updated_by?: string
+}
+
+export interface UpdatePostmortemRequest {
+  content: string
+  /** Required when the SEV is locked — see SEVResponse.locked. */
+  unlock_token?: string
+}
+
+export interface TransitionPostmortemStatusRequest {
+  to_status: PostmortemStatus
+}
+
+export interface UnlockSEVRequest {
+  reason: string
+}
+
+export interface UnlockSEVResponse {
+  unlock_token: string
+}
+
+// --- AI plugin system (§11) -----------------------------------------------
+
+/** Matches proto/sevitout/v1/ai.proto's AIAction enum member names exactly —
+ * protojson encodes/decodes proto enums by name, not number, by default. */
+export type AIAction =
+  | 'AI_ACTION_SUMMARIZE'
+  | 'AI_ACTION_SUGGEST_ROOT_CAUSE'
+  | 'AI_ACTION_DRAFT_POSTMORTEM'
+  | 'AI_ACTION_SUGGEST_TASKS'
+  | 'AI_ACTION_FIND_SIMILAR'
+  | 'AI_ACTION_SUGGEST_RESPONDERS'
+  | 'AI_ACTION_DRAFT_ANNOUNCEMENT'
+
+export interface AIOutputResponse {
+  id: string
+  sev_id: string
+  plugin_id?: string
+  trigger_event?: string
+  action: AIAction
+  /** Plain text for narrative actions (Summarize, DraftPostmortem,
+   * DraftAnnouncement); JSON text for structured/list-shaped actions. Always
+   * label this as AI-generated wherever it's rendered (§11.3). */
+  content?: string
+  created_at: string
+}
+
+export interface TriggerActionRequest {
+  action: AIAction
+  plugin_id?: string
+}
+
+export interface ListAIOutputsResponse {
+  outputs?: AIOutputResponse[]
+}
+
+export interface AvailablePlugin {
+  id: string
+  name: string
+  provider: string
+}
+
+export interface ListPluginsResponse {
+  plugins?: AvailablePlugin[]
+}

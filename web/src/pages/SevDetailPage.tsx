@@ -1,11 +1,12 @@
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { EyeOff, Lock } from 'lucide-react'
+import { EyeOff, FileText, Lock } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useSevSocket } from '@/lib/ws'
 import { useAuth } from '@/auth/useAuth'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { buttonVariants } from '@/components/ui/button'
 import { SeverityBadge, StatusBadge } from '@/components/sev/badges'
 import { StatusTransitionControl } from '@/components/sev/StatusTransitionControl'
 import { LifecyclePanel } from '@/components/sev/LifecyclePanel'
@@ -68,7 +69,12 @@ export function SevDetailPage() {
           )}
           <span className="text-xs text-muted-foreground">{record.id}</span>
         </div>
-        <h1 className="text-2xl font-semibold">{record.title}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-semibold">{record.title}</h1>
+          <Link to={`/sevs/${sevId}/postmortem`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            <FileText className="h-3.5 w-3.5" /> Postmortem
+          </Link>
+        </div>
         <StatusTransitionControl sev={record} canTransition={canCommand} />
       </div>
 
