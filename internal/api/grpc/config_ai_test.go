@@ -8,7 +8,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
 
 func TestCreateAIPlugin_EncryptsAPIKey(t *testing.T) {
@@ -132,6 +134,50 @@ func TestUpdateAIPlugin_PartialUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateAIPlugin_RateLimitResetToUnlimited(t *testing.T) {
+	ts := newTestConfigServer(testEncryptor(t))
+	ctx := context.Background()
+	created, err := ts.server.CreateAIPlugin(ctx, &pb.CreateAIPluginRequest{
+		Name: "p", HandlerType: "builtin", RateLimitPerMinute: 10,
+	})
+	if err != nil {
+		t.Fatalf("CreateAIPlugin: %v", err)
+	}
+	if created.GetRateLimitPerMinute() != 10 {
+		t.Fatalf("want rate_limit_per_minute=10 after create, got %d", created.GetRateLimitPerMinute())
+	}
+
+	// An explicit 0 must be distinguishable from "field not supplied" — it
+	// resets the plugin to unlimited, not a no-op.
+	updated, err := ts.server.UpdateAIPlugin(ctx, &pb.UpdateAIPluginRequest{
+		Id:                 created.GetId(),
+		RateLimitPerMinute: wrapperspb.Int32(0),
+	})
+	if err != nil {
+		t.Fatalf("UpdateAIPlugin: %v", err)
+	}
+	if updated.GetRateLimitPerMinute() != 0 {
+		t.Errorf("want rate_limit_per_minute reset to 0 (unlimited), got %d", updated.GetRateLimitPerMinute())
+	}
+
+	// Omitting the field entirely (nil) still leaves it untouched.
+	created2, err := ts.server.CreateAIPlugin(ctx, &pb.CreateAIPluginRequest{
+		Name: "q", HandlerType: "builtin", RateLimitPerMinute: 5,
+	})
+	if err != nil {
+		t.Fatalf("CreateAIPlugin: %v", err)
+	}
+	updated2, err := ts.server.UpdateAIPlugin(ctx, &pb.UpdateAIPluginRequest{
+		Id: created2.GetId(), Name: "q-renamed",
+	})
+	if err != nil {
+		t.Fatalf("UpdateAIPlugin: %v", err)
+	}
+	if updated2.GetRateLimitPerMinute() != 5 {
+		t.Errorf("want rate_limit_per_minute left unchanged (5) when omitted, got %d", updated2.GetRateLimitPerMinute())
+	}
+}
+
 func TestUpdateAIPlugin_ReplacesAPIKey(t *testing.T) {
 	enc := testEncryptor(t)
 	ts := newTestConfigServer(enc)
@@ -166,6 +212,39 @@ func TestDeleteAIPlugin(t *testing.T) {
 	}
 	if _, err := ts.server.GetAIPlugin(ctx, &pb.GetAIPluginRequest{Id: created.GetId()}); grpcCode(err) != codes.NotFound {
 		t.Fatalf("want NotFound after delete, got %v", grpcCode(err))
+	}
+}
+
+// fakeRateLimitEvictor records EvictRateLimit calls, standing in for
+// ai.Dispatcher in tests that don't need a real one.
+type fakeRateLimitEvictor struct {
+	evicted []int64
+}
+
+func (f *fakeRateLimitEvictor) EvictRateLimit(pluginID int64) {
+	f.evicted = append(f.evicted, pluginID)
+}
+
+func TestDeleteAIPlugin_EvictsRateLimit(t *testing.T) {
+	ctx := context.Background()
+	services := memory.NewServiceStore()
+	users := memory.NewUserStore()
+	oncall := memory.NewOnCallStore()
+	integrations := memory.NewIntegrationConfigStore()
+	retention := memory.NewRetentionConfigStore()
+	aiPlugins := memory.NewAIPluginStore()
+	evictor := &fakeRateLimitEvictor{}
+	server := grpchandler.NewConfigServer(services, users, oncall, integrations, retention, aiPlugins, testEncryptor(t), evictor)
+
+	created, err := server.CreateAIPlugin(ctx, &pb.CreateAIPluginRequest{Name: "p", HandlerType: "builtin"})
+	if err != nil {
+		t.Fatalf("CreateAIPlugin: %v", err)
+	}
+	if _, err := server.DeleteAIPlugin(ctx, &pb.DeleteAIPluginRequest{Id: created.GetId()}); err != nil {
+		t.Fatalf("DeleteAIPlugin: %v", err)
+	}
+	if len(evictor.evicted) != 1 || evictor.evicted[0] != created.GetId() {
+		t.Fatalf("want EvictRateLimit(%d) called once, got %v", created.GetId(), evictor.evicted)
 	}
 }
 

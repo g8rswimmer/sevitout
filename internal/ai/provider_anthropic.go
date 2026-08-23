@@ -106,7 +106,7 @@ func (p *AnthropicProvider) StreamAction(ctx context.Context, action Action, sev
 	if err != nil {
 		return nil, err
 	}
-	return chunkText(content), nil
+	return chunkText(ctx, content), nil
 }
 
 // ---------- Messages API plumbing ----------
@@ -208,8 +208,11 @@ func stripJSONFence(s string) string {
 // chunkText splits text into a handful of word-grouped Chunks for
 // StreamAction, terminated by a final empty Done chunk carrying the full
 // text (so a caller that only reads the last chunk still gets the complete,
-// storable result).
-func chunkText(text string) <-chan Chunk {
+// storable result). Every send is ctx-aware: if the caller stops reading
+// because ctx was canceled, this goroutine observes the same cancellation on
+// its next blocked send and exits instead of leaking forever on an
+// unbuffered channel nobody drains.
+func chunkText(ctx context.Context, text string) <-chan Chunk {
 	ch := make(chan Chunk)
 	go func() {
 		defer close(ch)
@@ -220,9 +223,16 @@ func chunkText(text string) <-chan Chunk {
 			if end > len(words) {
 				end = len(words)
 			}
-			ch <- Chunk{Content: strings.Join(words[i:end], " ") + " "}
+			select {
+			case ch <- Chunk{Content: strings.Join(words[i:end], " ") + " "}:
+			case <-ctx.Done():
+				return
+			}
 		}
-		ch <- Chunk{Content: text, Done: true}
+		select {
+		case ch <- Chunk{Content: text, Done: true}:
+		case <-ctx.Done():
+		}
 	}()
 	return ch
 }

@@ -27,6 +27,14 @@ type Encryptor interface {
 	Decrypt(ciphertext []byte) ([]byte, error)
 }
 
+// RateLimitEvictor drops a deleted AI plugin's rate-limit window so the
+// limiter doesn't retain an entry for it forever. Declared here (the
+// consumer) per this repo's interface-ownership convention — ai.Dispatcher
+// satisfies it implicitly via EvictRateLimit.
+type RateLimitEvictor interface {
+	EvictRateLimit(pluginID int64)
+}
+
 // ConfigServer implements pb.ConfigServiceServer: the admin configuration API
 // (service registry, user management, on-call rotations, integration
 // credentials, AI plugin registration, and data retention policy).
@@ -38,12 +46,13 @@ type ConfigServer struct {
 	integrations store.IntegrationConfigStore
 	retention    store.RetentionConfigStore
 	aiPlugins    store.AIPluginStore
-	crypto       Encryptor // nil when ENCRYPTION_KEY is not set
+	crypto       Encryptor        // nil when ENCRYPTION_KEY is not set
+	rateLimits   RateLimitEvictor // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
 }
 
 // NewConfigServer returns a ConfigServer. crypto may be nil; in that case
 // UpsertIntegrationConfig and CreateAIPlugin/UpdateAIPlugin reject any
-// request that supplies credentials/an API key.
+// request that supplies credentials/an API key. rateLimits may also be nil.
 func NewConfigServer(
 	services store.ServiceStore,
 	users store.UserStore,
@@ -52,6 +61,7 @@ func NewConfigServer(
 	retention store.RetentionConfigStore,
 	aiPlugins store.AIPluginStore,
 	crypto Encryptor,
+	rateLimits RateLimitEvictor,
 ) *ConfigServer {
 	return &ConfigServer{
 		services:     services,
@@ -61,6 +71,7 @@ func NewConfigServer(
 		retention:    retention,
 		aiPlugins:    aiPlugins,
 		crypto:       crypto,
+		rateLimits:   rateLimits,
 	}
 }
 

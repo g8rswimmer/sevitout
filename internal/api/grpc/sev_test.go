@@ -481,29 +481,44 @@ func TestCreateSEV_DispatchesAIOnOpenForSEV1(t *testing.T) {
 	}
 }
 
-func TestCreateSEV_SensitiveSEVDoesNotDispatchAI(t *testing.T) {
+// TestCreateSEV_SensitiveSEVStillEnqueuesTrigger and
+// TestCreateSEV_AIDisabledSEVStillEnqueuesTrigger: SEVServer.dispatchAI
+// enqueues unconditionally — it deliberately does not re-implement the
+// Sensitive/AIDisabled gate itself (see its doc comment). That gate is
+// enforced once, centrally, by ai.Dispatcher against a freshly-fetched
+// record (internal/ai/dispatcher_test.go's
+// TestDispatch_SensitiveSEVSkipsProactiveTrigger /
+// TestDispatch_AIDisabledSEVSkipsProactiveTrigger /
+// TestDispatch_SensitiveAtExecutionTimeSkipsTrigger cover the actual
+// skip-dispatch behavior); fakeAIDispatcher here is a stand-in for the gRPC
+// layer's Dispatch call, not for that gate.
+func TestCreateSEV_SensitiveSEVStillEnqueuesTrigger(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
-	if _, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "sensitive", SeverityLevel: 1, Sensitive: true}); err != nil {
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "sensitive", SeverityLevel: 1, Sensitive: true})
+	if err != nil {
 		t.Fatalf("CreateSEV: %v", err)
 	}
 
-	if triggers := ts.ai.All(); len(triggers) != 0 {
-		t.Errorf("triggers = %+v, want none for a sensitive SEV", triggers)
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerSEVOpened || triggers[0].sevID != resp.GetId() {
+		t.Errorf("got triggers %+v, want one sev.opened for %s", triggers, resp.GetId())
 	}
 }
 
-func TestCreateSEV_AIDisabledSEVDoesNotDispatchAI(t *testing.T) {
+func TestCreateSEV_AIDisabledSEVStillEnqueuesTrigger(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
-	if _, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "x", SeverityLevel: 1, AiDisabled: true}); err != nil {
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "x", SeverityLevel: 1, AiDisabled: true})
+	if err != nil {
 		t.Fatalf("CreateSEV: %v", err)
 	}
 
-	if triggers := ts.ai.All(); len(triggers) != 0 {
-		t.Errorf("triggers = %+v, want none for an AI-disabled SEV", triggers)
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerSEVOpened || triggers[0].sevID != resp.GetId() {
+		t.Errorf("got triggers %+v, want one sev.opened for %s", triggers, resp.GetId())
 	}
 }
 

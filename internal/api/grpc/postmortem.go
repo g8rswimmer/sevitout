@@ -179,7 +179,9 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 		if !sv.Sensitive {
 			publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
 		}
-		if toStatus == store.PostmortemStatusInReview && s.aiDispatch != nil && !sv.Sensitive && !sv.AIDisabled {
+		// Sensitive/AIDisabled gating is enforced centrally by ai.Dispatcher
+		// (see SEVServer.dispatchAI's doc comment) — not duplicated here.
+		if toStatus == store.PostmortemStatusInReview && s.aiDispatch != nil {
 			s.aiDispatch.Dispatch(ai.TriggerPostmortemInReview, req.GetSevId())
 		}
 	}

@@ -153,5 +153,5 @@ func (p *HTTPProvider) StreamAction(ctx context.Context, action Action, sev *SEV
 	if err != nil {
 		return nil, err
 	}
-	return chunkText(content), nil
+	return chunkText(ctx, content), nil
 }

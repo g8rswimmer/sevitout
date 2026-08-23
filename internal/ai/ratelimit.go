@@ -50,3 +50,12 @@ func (r *RateLimiter) Allow(pluginID int64, limitPerMinute int32) bool {
 	w.count++
 	return true
 }
+
+// Evict drops pluginID's window, if any. Callers should invoke this when a
+// plugin is permanently deleted so the map doesn't retain an entry for it
+// forever — Allow only ever inserts entries, it never removes them.
+func (r *RateLimiter) Evict(pluginID int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.wins, pluginID)
+}

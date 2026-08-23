@@ -6,6 +6,7 @@ import "errors"
 // internal/api/grpc maps these to specific gRPC status codes.
 var (
 	ErrAIDisabledForSEV        = errors.New("ai: disabled for this SEV")
+	ErrSensitiveSEV            = errors.New("ai: SEV is flagged sensitive, excluded from AI dispatch")
 	ErrPluginDisabled          = errors.New("ai: plugin is disabled")
 	ErrNoEnabledPlugin         = errors.New("ai: no enabled plugin configured")
 	ErrRateLimited             = errors.New("ai: plugin rate limit exceeded")

@@ -853,7 +853,8 @@
         },
         "rateLimitPerMinute": {
           "type": "integer",
-          "format": "int32"
+          "format": "int32",
+          "description": "rate_limit_per_minute: unlike the response/create messages, 0 is a\nmeaningful value here (explicitly reset to unlimited), so this must be\nwrapped to distinguish \"not supplied\" (nil) from \"set to 0\"."
         }
       }
     },

@@ -120,6 +120,8 @@ func aiErrorToStatus(err error) error {
 	switch {
 	case errors.Is(err, ai.ErrAIDisabledForSEV):
 		return status.Error(codes.FailedPrecondition, "AI is disabled for this SEV")
+	case errors.Is(err, ai.ErrSensitiveSEV):
+		return status.Error(codes.FailedPrecondition, "AI actions are not available for sensitive SEVs")
 	case errors.Is(err, ai.ErrPluginDisabled):
 		return status.Error(codes.FailedPrecondition, "the requested plugin is disabled")
 	case errors.Is(err, ai.ErrNoEnabledPlugin):

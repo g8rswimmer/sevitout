@@ -117,7 +117,7 @@ func main() {
 	sevLinkServer := grpchandler.NewSEVLinkServer(sevLinkStore, sevStore, auditStore)
 	taskServer := grpchandler.NewTaskServer(taskStore, sevStore, auditStore, issueClient, wsHub)
 	searchServer := grpchandler.NewSearchServer(sevStore, roleStore, announcementStore)
-	configServer := grpchandler.NewConfigServer(serviceStore, userStore, onCallStore, integrationConfigStore, retentionConfigStore, aiPluginStore, encryptor)
+	configServer := grpchandler.NewConfigServer(serviceStore, userStore, onCallStore, integrationConfigStore, retentionConfigStore, aiPluginStore, encryptor, aiDispatcher)
 	aiServer := grpchandler.NewAIServer(aiDispatcher, aiOutputStore, aiPluginStore)
 
 	grpcSrv := grpc.NewServer(

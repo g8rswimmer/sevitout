@@ -514,7 +514,15 @@ func TestTransitionPostmortemStatus_DispatchesAIOnInReview(t *testing.T) {
 	}
 }
 
-func TestTransitionPostmortemStatus_SensitiveSEVDoesNotDispatchAI(t *testing.T) {
+// TestTransitionPostmortemStatus_SensitiveSEVStillEnqueuesTrigger: this
+// handler enqueues unconditionally — it deliberately does not re-implement
+// the Sensitive/AIDisabled gate itself (see SEVServer.dispatchAI's doc
+// comment). That gate is enforced once, centrally, by ai.Dispatcher against
+// a freshly-fetched record (internal/ai/dispatcher_test.go's
+// TestDispatch_SensitiveSEVSkipsProactiveTrigger covers the actual
+// skip-dispatch behavior); fakeAIDispatcher here is a stand-in for the gRPC
+// layer's Dispatch call, not for that gate.
+func TestTransitionPostmortemStatus_SensitiveSEVStillEnqueuesTrigger(t *testing.T) {
 	ts := newTestPostmortemServer()
 	ctx := context.Background()
 	sevID := seedSensitiveSEVWithPostmortem(t, ts)
@@ -525,7 +533,8 @@ func TestTransitionPostmortemStatus_SensitiveSEVDoesNotDispatchAI(t *testing.T) 
 		t.Fatalf("TransitionPostmortemStatus: %v", err)
 	}
 
-	if triggers := ts.ai.All(); len(triggers) != 0 {
-		t.Errorf("triggers = %+v, want none for a sensitive SEV", triggers)
+	triggers := ts.ai.All()
+	if len(triggers) != 1 || triggers[0].event != ai.TriggerPostmortemInReview || triggers[0].sevID != sevID {
+		t.Errorf("got triggers %+v, want one postmortem.in_review for %s", triggers, sevID)
 	}
 }

@@ -136,8 +136,8 @@ func (s *ConfigServer) UpdateAIPlugin(ctx context.Context, req *pb.UpdateAIPlugi
 	if req.GetTriggerOnPostmortemReview() != nil {
 		plugin.TriggerOnPostmortemReview = req.GetTriggerOnPostmortemReview().GetValue()
 	}
-	if req.GetRateLimitPerMinute() != 0 {
-		plugin.RateLimitPerMinute = req.GetRateLimitPerMinute()
+	if req.GetRateLimitPerMinute() != nil {
+		plugin.RateLimitPerMinute = req.GetRateLimitPerMinute().GetValue()
 	}
 	plugin.UpdatedAt = time.Now()
 
@@ -153,6 +153,9 @@ func (s *ConfigServer) DeleteAIPlugin(ctx context.Context, req *pb.DeleteAIPlugi
 			return nil, status.Error(codes.NotFound, "AI plugin not found")
 		}
 		return nil, status.Error(codes.Internal, "failed to delete AI plugin")
+	}
+	if s.rateLimits != nil {
+		s.rateLimits.EvictRateLimit(req.GetId())
 	}
 	return &emptypb.Empty{}, nil
 }

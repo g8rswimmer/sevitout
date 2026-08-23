@@ -67,7 +67,7 @@ func sevPrompt(sev *SEVContext) string {
 	if len(sev.Timeline) > 0 {
 		b.WriteString("Timeline:\n")
 		for _, e := range sev.Timeline {
-			fmt.Fprintf(&b, "- [%s] (%s) %s\n", e.At.Format("2006-01-02T15:04:05Z"), e.Kind, e.Summary)
+			fmt.Fprintf(&b, "- [%s] (%s) %s\n", e.At.UTC().Format("2006-01-02T15:04:05Z"), e.Kind, e.Summary)
 		}
 	}
 	if len(sev.Similar) > 0 {

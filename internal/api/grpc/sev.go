@@ -73,14 +73,17 @@ func NewSEVServer(
 	}
 }
 
-// dispatchAI fires a proactive AI trigger unless aiDispatch is unconfigured,
-// the SEV opted out (AIDisabled, §11.3), or the SEV is sensitive — sensitive
-// SEVs never have their content sent to a configured AI plugin (which may be
-// a third-party API), consistent with their other field-level visibility
-// restrictions (§14, and M11's exclusion of sensitive SEVs from Slack
-// incident channels).
+// dispatchAI fires a proactive AI trigger unless aiDispatch is unconfigured.
+// The Sensitive/AIDisabled (§11.3, §14) gate — sensitive SEVs never have
+// their content sent to a configured AI plugin, which may be a third-party
+// API, consistent with M11's exclusion of sensitive SEVs from Slack incident
+// channels — is deliberately not re-implemented here: it's enforced once,
+// centrally, by ai.Dispatcher itself (against a freshly-fetched record, so a
+// Sensitive flip after this call but before the worker runs is still
+// caught), so every entry point — proactive and on-demand alike — shares one
+// source of truth instead of drifting independently.
 func (s *SEVServer) dispatchAI(event ai.TriggerEvent, record *store.SEV) {
-	if s.aiDispatch == nil || record.Sensitive || record.AIDisabled {
+	if s.aiDispatch == nil {
 		return
 	}
 	s.aiDispatch.Dispatch(event, record.ID)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/g8rswimmer/sevitout/internal/store"
@@ -181,6 +182,26 @@ func (d *Dispatcher) Dispatch(event TriggerEvent, sevID string) {
 	}
 }
 
+// aiEligible reports whether sv may be sent to a configured AI plugin at
+// all. Sensitive SEVs and SEVs with ai_disabled set are excluded from every
+// dispatch path — proactive and on-demand alike — consistent with their
+// other field-level visibility restrictions (§14, and M11's exclusion of
+// sensitive SEVs from Slack incident channels). This is the single, shared
+// gate for that rule: it's checked here (and re-checked by runTrigger against
+// a freshly-fetched record, since a SEV's state can change between when a
+// proactive trigger is enqueued and when a worker actually processes it) so
+// no call site — proactive or on-demand — can independently drift out of
+// sync with it.
+func aiEligible(sv *store.SEV) error {
+	if sv.Sensitive {
+		return ErrSensitiveSEV
+	}
+	if sv.AIDisabled {
+		return ErrAIDisabledForSEV
+	}
+	return nil
+}
+
 // runTrigger looks up the SEV fresh (so it reflects the state as of when the
 // worker actually runs, not when it was enqueued), applies the trigger's
 // gates, and runs the mapped action(s) for every plugin that opts in.
@@ -196,7 +217,7 @@ func (d *Dispatcher) runTrigger(ctx context.Context, event TriggerEvent, sevID s
 		d.log.ErrorContext(ctx, "ai dispatch: get SEV failed", "sev_id", sevID, "err", err)
 		return
 	}
-	if sv.AIDisabled {
+	if err := aiEligible(sv); err != nil {
 		return
 	}
 	// SEV opened only proactively triggers AI for SEV-1/SEV-2 (§11.1); the
@@ -231,8 +252,8 @@ func (d *Dispatcher) Run(ctx context.Context, sevID string, action Action, plugi
 	if err != nil {
 		return nil, fmt.Errorf("get SEV: %w", err)
 	}
-	if sv.AIDisabled {
-		return nil, ErrAIDisabledForSEV
+	if err := aiEligible(sv); err != nil {
+		return nil, err
 	}
 	plugin, err := d.resolvePlugin(ctx, pluginID)
 	if err != nil {
@@ -251,8 +272,8 @@ func (d *Dispatcher) StreamOne(ctx context.Context, sevID string, action Action,
 	if err != nil {
 		return nil, fmt.Errorf("get SEV: %w", err)
 	}
-	if sv.AIDisabled {
-		return nil, ErrAIDisabledForSEV
+	if err := aiEligible(sv); err != nil {
+		return nil, err
 	}
 	plugin, err := d.resolvePlugin(ctx, pluginID)
 	if err != nil {
@@ -278,10 +299,11 @@ func (d *Dispatcher) StreamOne(ctx context.Context, sevID string, action Action,
 	out := make(chan Chunk)
 	go func() {
 		defer close(out)
-		// upstream (built by chunkText) only ever emits a small, fixed
-		// number of chunks and then closes on its own, so exiting early on
-		// ctx.Done() without draining it leaks at most that one bounded
-		// goroutine briefly rather than indefinitely.
+		// upstream (built by chunkText, itself given ctx) is context-aware on
+		// its sends, so exiting early on ctx.Done() below and abandoning the
+		// range lets chunkText's own goroutine observe the same
+		// cancellation on its next blocked send and exit too, instead of
+		// leaking forever on an unbuffered channel nobody drains.
 		for chunk := range upstream {
 			select {
 			case out <- chunk:
@@ -345,6 +367,15 @@ func (d *Dispatcher) run(ctx context.Context, sv *store.SEV, event TriggerEvent,
 
 	d.publish(sv.ID, out)
 	return out, nil
+}
+
+// EvictRateLimit drops pluginID's rate-limit window, if any. Callers should
+// invoke this after permanently deleting a plugin (ConfigServer.DeleteAIPlugin)
+// so a deleted-and-recreated plugin ID doesn't inherit a stale window, and so
+// the limiter's map doesn't grow forever across delete/recreate cycles over a
+// long-lived process.
+func (d *Dispatcher) EvictRateLimit(pluginID int64) {
+	d.limiter.Evict(pluginID)
 }
 
 func (d *Dispatcher) resolvePlugin(ctx context.Context, pluginID int64) (*store.AIPlugin, error) {
@@ -501,6 +532,11 @@ func (d *Dispatcher) buildContext(ctx context.Context, sv *store.SEV) (*SEVConte
 			})
 		}
 	}
+
+	// Status-history and announcement entries are appended in two separate
+	// loops above, so the merged slice isn't necessarily chronological —
+	// sort it into one narrative before it reaches the AI provider.
+	sort.Slice(sc.Timeline, func(i, j int) bool { return sc.Timeline[i].At.Before(sc.Timeline[j].At) })
 
 	if len(sv.AffectedServices) > 0 {
 		candidates, err := d.sevs.List(ctx, store.SEVFilter{
