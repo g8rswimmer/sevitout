@@ -214,11 +214,11 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 	if req.GetStartedAt() != nil {
 		t := req.GetStartedAt().AsTime()
 		record.StartedAt = &t
-	} else {
-		// Default to creation time when the caller doesn't provide started_at;
-		// the requirements say this timestamp "may be estimated".
-		record.StartedAt = &now
 	}
+	// No default when omitted: started_at is left unset until the caller
+	// explicitly sets it (docs/requirements.md §2.1 — "may be estimated", not
+	// "assume now"). ComputeMetrics already treats a nil StartedAt as
+	// "can't compute yet" rather than erroring.
 	if req.GetDetectedAt() != nil {
 		t := req.GetDetectedAt().AsTime()
 		record.DetectedAt = &t
@@ -375,6 +375,9 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	}
 	if v := req.GetSnapshotUrl(); v != "" {
 		record.SnapshotURL = &v
+	}
+	if v := req.GetGithubRepo(); v != "" {
+		record.GitHubRepo = &v
 	}
 	if req.GetRightPeoplePresent() != nil {
 		b := req.GetRightPeoplePresent().GetValue()
@@ -653,6 +656,9 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 	}
 	if s.SnapshotURL != nil {
 		resp.SnapshotUrl = *s.SnapshotURL
+	}
+	if s.GitHubRepo != nil {
+		resp.GithubRepo = *s.GitHubRepo
 	}
 	if s.RightPeoplePresent != nil {
 		resp.RightPeoplePresent = wrapperspb.Bool(*s.RightPeoplePresent)

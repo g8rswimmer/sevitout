@@ -1,13 +1,22 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, Pencil } from 'lucide-react'
+import { Pencil } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { InfoTooltip } from '@/components/ui/tooltip'
 import { Section } from '@/components/sev/Section'
+import { DateTimeField } from '@/components/sev/DateTimeField'
 import { formatDateTime, formatDurationSeconds } from '@/lib/format'
-import type { SEVResponse } from '@/types/api'
+import { SEV_LIFECYCLE_STAGES, SEV_STATUS_LABELS, type SEVResponse } from '@/types/api'
+
+/** Definitions shown in each metric's info tooltip — docs/requirements.md
+ * §2.2 spells out the formula; this is the plain-English acronym expansion. */
+const METRIC_DEFINITIONS = {
+  MTTD: 'Mean Time to Detect — detected_at − started_at',
+  MTTM: 'Mean Time to Mitigate — mitigated_at − started_at',
+  MTTR: 'Mean Time to Resolve — resolved_at − started_at',
+  DTTM: 'Detection to Mitigation — mitigated_at − detected_at',
+} as const
 
 /** yyyy-MM-ddThh:mm for an <input type="datetime-local">, in local time. */
 function toLocalInputValue(iso: string | undefined): string {
@@ -57,33 +66,28 @@ export function LifecyclePanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bo
         )
       }
     >
+      <ol className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Lifecycle stages">
+        {SEV_LIFECYCLE_STAGES.map((stage, i) => (
+          <li key={stage} className="flex items-center gap-1.5">
+            <span
+              className={`rounded-md px-2 py-0.5 ${
+                stage === sev.status
+                  ? 'bg-primary font-medium text-primary-foreground'
+                  : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {SEV_STATUS_LABELS[stage]}
+            </span>
+            {i < SEV_LIFECYCLE_STAGES.length - 1 && <span className="text-muted-foreground">→</span>}
+          </li>
+        ))}
+      </ol>
+
       {editing ? (
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="lp-started" className="flex items-center gap-1.5">
-                <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                Started at
-              </Label>
-              <Input
-                id="lp-started"
-                type="datetime-local"
-                value={startedAt}
-                onChange={(e) => setStartedAt(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="lp-detected" className="flex items-center gap-1.5">
-                <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                Detected at
-              </Label>
-              <Input
-                id="lp-detected"
-                type="datetime-local"
-                value={detectedAt}
-                onChange={(e) => setDetectedAt(e.target.value)}
-              />
-            </div>
+            <DateTimeField id="lp-started" label="Started at" value={startedAt} onChange={setStartedAt} />
+            <DateTimeField id="lp-detected" label="Detected at" value={detectedAt} onChange={setDetectedAt} />
           </div>
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -110,10 +114,10 @@ export function LifecyclePanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bo
       )}
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3 text-sm sm:grid-cols-4">
-        <MetricField label="MTTD" value={sev.mttd_seconds} />
-        <MetricField label="MTTM" value={sev.mttm_seconds} />
-        <MetricField label="MTTR" value={sev.mttr_seconds} />
-        <MetricField label="DTTM" value={sev.dttm_seconds} />
+        <MetricField label="MTTD" definition={METRIC_DEFINITIONS.MTTD} value={sev.mttd_seconds} />
+        <MetricField label="MTTM" definition={METRIC_DEFINITIONS.MTTM} value={sev.mttm_seconds} />
+        <MetricField label="MTTR" definition={METRIC_DEFINITIONS.MTTR} value={sev.mttr_seconds} />
+        <MetricField label="DTTM" definition={METRIC_DEFINITIONS.DTTM} value={sev.dttm_seconds} />
       </div>
     </Section>
   )
@@ -128,10 +132,13 @@ function TimestampField({ label, value }: { label: string; value?: string }) {
   )
 }
 
-function MetricField({ label, value }: { label: string; value?: string }) {
+function MetricField({ label, definition, value }: { label: string; definition: string; value?: string }) {
   return (
     <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dt className="flex items-center gap-1 text-xs text-muted-foreground">
+        {label}
+        <InfoTooltip text={definition} />
+      </dt>
       <dd className="font-medium">{formatDurationSeconds(value)}</dd>
     </div>
   )

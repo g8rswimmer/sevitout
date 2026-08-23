@@ -101,6 +101,34 @@ export const ACTIVE_SEV_STATUSES: SEVStatus[] = [
   'postmortem_in_progress',
 ]
 
+/** The full lifecycle in order (docs/requirements.md §2.3): Open →
+ * Investigating → Mitigated → Resolved → Postmortem In Progress → Postmortem
+ * Complete. The state machine (internal/sev/statemachine.go) also allows
+ * stepping backward/re-opening, so this is a display ordering, not a claim
+ * that a SEV only ever moves forward through it. */
+export const SEV_LIFECYCLE_STAGES: SEVStatus[] = [
+  'open',
+  'investigating',
+  'mitigated',
+  'resolved',
+  'postmortem_in_progress',
+  'postmortem_complete',
+]
+
+/** docs/requirements.md §4.2's root-cause-category examples ("e.g.,
+ * deployment, configuration, hardware, dependency") — not an enforced
+ * backend enum (root_cause_category stays free text server-side, same as
+ * MonitoringTool), just what the dropdown offers before an "Other" free-text
+ * entry. */
+export type RootCauseCategory = 'deployment' | 'configuration' | 'hardware' | 'dependency'
+
+export const ROOT_CAUSE_CATEGORY_LABELS: Record<RootCauseCategory, string> = {
+  deployment: 'Deployment',
+  configuration: 'Configuration',
+  hardware: 'Hardware',
+  dependency: 'Dependency',
+}
+
 /** docs/requirements.md §4.2's fixed detection-method vocabulary — enforced
  * server-side (internal/api/grpc/sev.go's validateDetectionMethod). Unlike
  * MonitoringTool below, there's no "other" escape hatch: this list is closed. */
@@ -153,6 +181,9 @@ export interface SEVResponse {
   alert_url?: string
   metric_link?: string
   snapshot_url?: string
+  // github_repo is the "owner/repo" this SEV's code lives in — see
+  // internal/store.SEV.GitHubRepo. Set via UpdateSEV, not at creation.
+  github_repo?: string
   right_people_present?: boolean
   right_people_notes?: string
   tags?: Record<string, string>
@@ -248,6 +279,7 @@ export interface UpdateSEVRequest {
   alert_url?: string
   metric_link?: string
   snapshot_url?: string
+  github_repo?: string
   right_people_present?: boolean
   right_people_notes?: string
   tags?: Record<string, string>

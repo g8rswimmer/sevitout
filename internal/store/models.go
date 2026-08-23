@@ -127,9 +127,14 @@ type SEV struct {
 	// dashboard/metric query, and a snapshot image of it, respectively. All
 	// three are plain URLs (no file upload/blob storage — see
 	// docs/requirements.md §13.4's "link a dashboard URL" framing).
-	AlertURL              *string
-	MetricLink            *string
-	SnapshotURL           *string
+	AlertURL    *string
+	MetricLink  *string
+	SnapshotURL *string
+	// GitHubRepo is the "owner/repo" this SEV's code lives in (e.g.
+	// "acme-corp/checkout-service") — shown as a link in the Details panel,
+	// and used to pre-fill TaskService.CreateGitHubIssue's owner/repo fields
+	// so a Responder doesn't have to retype it.
+	GitHubRepo            *string
 	RightPeoplePresent    *bool
 	RightPeopleNotes      *string
 	Tags                  map[string]string

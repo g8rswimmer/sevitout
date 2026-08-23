@@ -4,11 +4,11 @@ import { Link } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
+import { SevAutocomplete } from '@/components/sev/SevAutocomplete'
 import { SEV_RELATIONSHIP_LABELS, type SEVRelationshipType } from '@/types/api'
 
 const RELATIONSHIP_TYPES = Object.keys(SEV_RELATIONSHIP_LABELS) as SEVRelationshipType[]
@@ -83,13 +83,14 @@ export function LinkedSevsPanel({ sevId, canManage }: { sevId: string; canManage
             if (targetSevId.trim()) create.mutate()
           }}
         >
-          <Input
-            aria-label="Target SEV ID"
-            placeholder="SEV-2026-0001"
-            value={targetSevId}
-            onChange={(e) => setTargetSevId(e.target.value)}
-            className="w-44"
-          />
+          <div className="w-64 min-w-44 flex-1">
+            <SevAutocomplete
+              ariaLabel="Target SEV ID or title"
+              value={targetSevId}
+              onChange={setTargetSevId}
+              excludeId={sevId}
+            />
+          </div>
           <Select
             aria-label="Relationship type"
             value={relationshipType}

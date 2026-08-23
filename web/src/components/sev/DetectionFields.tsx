@@ -29,6 +29,7 @@ function monitoringSelectValue(monitoringTool: string): string {
 export interface DetectionFieldsValue {
   detectionMethod: DetectionMethod | ''
   monitoringTool: string
+  alertName: string
   alertUrl: string
   metricLink: string
   snapshotUrl: string
@@ -36,10 +37,12 @@ export interface DetectionFieldsValue {
 
 /** The detection-metadata form fragment shared by SevCreatePage and
  * DetailsPanel's edit mode: the detection-method and monitoring-tool
- * dropdowns, and the three supporting links (with a snapshot preview).
- * Lifecycle timestamps (started_at/detected_at) are deliberately not part of
- * this — they're LifecyclePanel's responsibility on the detail page, and
- * SevCreatePage renders its own started_at/detected_at inputs directly. */
+ * dropdowns, the alert name directly above its link (the two describe the
+ * same alert), and the two remaining supporting links (with a snapshot
+ * preview). Lifecycle timestamps (started_at/detected_at) are deliberately
+ * not part of this — they're LifecyclePanel's responsibility on the detail
+ * page, and SevCreatePage renders its own started_at/detected_at inputs
+ * directly. */
 export function DetectionFields({
   value,
   onChange,
@@ -111,6 +114,16 @@ export function DetectionFields({
             />
           )}
         </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="df-alert-name">Alert name</Label>
+        <Input
+          id="df-alert-name"
+          placeholder="What the alert/page was called"
+          value={value.alertName}
+          onChange={(e) => onChange({ ...value, alertName: e.target.value })}
+        />
       </div>
 
       <div className="flex flex-col gap-1.5">

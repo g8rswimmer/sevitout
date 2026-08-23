@@ -62,9 +62,16 @@ describe('SevCreatePage', () => {
     await user.selectOptions(screen.getByLabelText('Detection method'), 'Monitoring Dashboard')
     await user.selectOptions(screen.getByLabelText('Monitoring tool'), 'Other…')
     await user.type(screen.getByLabelText(/custom monitoring tool name/i), 'In-house dashboard')
+    await user.type(screen.getByLabelText('Alert name'), 'checkout-p99-latency')
     await user.type(screen.getByLabelText('Alert link'), 'https://alerts.example.com/1')
     await user.type(screen.getByLabelText(/metric \/ dashboard link/i), 'https://metrics.example.com/q/1')
     await user.type(screen.getByLabelText(/snapshot image link/i), 'https://img.example.com/1.png')
+
+    // Alert name reads directly above its link, not separated by the
+    // detection method/monitoring tool dropdowns.
+    const alertName = screen.getByLabelText('Alert name')
+    const alertLink = screen.getByLabelText('Alert link')
+    expect(alertName.compareDocumentPosition(alertLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: /create sev/i }))
 
@@ -77,10 +84,38 @@ describe('SevCreatePage', () => {
     expect(body).toMatchObject({
       detection_method: 'monitoring-dashboard',
       monitoring_tool: 'In-house dashboard',
+      alert_name: 'checkout-p99-latency',
       alert_url: 'https://alerts.example.com/1',
       metric_link: 'https://metrics.example.com/q/1',
       snapshot_url: 'https://img.example.com/1.png',
     })
+    // started_at/detected_at were never touched — the caller must set them
+    // explicitly; the API shouldn't be asked to default them to "now".
+    expect(body.started_at).toBeUndefined()
+    expect(body.detected_at).toBeUndefined()
+  })
+
+  it('opens the native date/time picker when the calendar button is clicked', async () => {
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = String(input)
+      if (url.startsWith('/v1/config/services')) return Promise.resolve(jsonResponse({}))
+      return Promise.resolve(jsonResponse({ id: 'SEV-2026-0042' }))
+    })
+
+    renderWithProviders(<SevCreatePage />)
+    const showPicker = vi.fn()
+    // jsdom doesn't implement showPicker(); stub it to confirm the button
+    // actually invokes the input's own picker rather than being decorative.
+    HTMLInputElement.prototype.showPicker = showPicker
+
+    try {
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: /open date\/time picker for started at/i }))
+
+      expect(showPicker).toHaveBeenCalledOnce()
+    } finally {
+      delete (HTMLInputElement.prototype as { showPicker?: unknown }).showPicker
+    }
   })
 
   it('shows the server error message when creation fails', async () => {

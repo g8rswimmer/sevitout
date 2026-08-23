@@ -15,7 +15,7 @@ const getSEV = `-- name: GetSEV :one
 SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
-       monitoring_tool, alert_url, metric_link, snapshot_url,
+       monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
@@ -42,6 +42,7 @@ type GetSEVRow struct {
 	AlertUrl              *string            `json:"alert_url"`
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
+	GithubRepo            *string            `json:"github_repo"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -83,6 +84,7 @@ func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
 		&i.AlertUrl,
 		&i.MetricLink,
 		&i.SnapshotUrl,
+		&i.GithubRepo,
 		&i.RightPeoplePresent,
 		&i.RightPeopleNotes,
 		&i.Tags,
@@ -110,7 +112,7 @@ INSERT INTO sevs (
     id, title, description, severity_level, status,
     root_cause_category, root_cause_description, mitigation, prevention,
     business_impact, affected_services, detection_method, alert_name,
-    monitoring_tool, alert_url, metric_link, snapshot_url,
+    monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
     right_people_present, right_people_notes, tags,
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
@@ -119,11 +121,11 @@ INSERT INTO sevs (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
     $10, $11, $12, $13,
-    $14, $15, $16, $17,
-    $18, $19, $20,
-    $21, $22, $23, $24, $25,
-    $26, $27, $28, $29,
-    $30, $31, $32, $33, $34, $35
+    $14, $15, $16, $17, $18,
+    $19, $20, $21,
+    $22, $23, $24, $25, $26,
+    $27, $28, $29, $30,
+    $31, $32, $33, $34, $35, $36
 )
 `
 
@@ -145,6 +147,7 @@ type InsertSEVParams struct {
 	AlertUrl              *string            `json:"alert_url"`
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
+	GithubRepo            *string            `json:"github_repo"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -184,6 +187,7 @@ func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
 		arg.AlertUrl,
 		arg.MetricLink,
 		arg.SnapshotUrl,
+		arg.GithubRepo,
 		arg.RightPeoplePresent,
 		arg.RightPeopleNotes,
 		arg.Tags,
@@ -210,7 +214,7 @@ const listSEVs = `-- name: ListSEVs :many
 SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
-       monitoring_tool, alert_url, metric_link, snapshot_url,
+       monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
@@ -243,6 +247,7 @@ type ListSEVsRow struct {
 	AlertUrl              *string            `json:"alert_url"`
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
+	GithubRepo            *string            `json:"github_repo"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -290,6 +295,7 @@ func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsR
 			&i.AlertUrl,
 			&i.MetricLink,
 			&i.SnapshotUrl,
+			&i.GithubRepo,
 			&i.RightPeoplePresent,
 			&i.RightPeopleNotes,
 			&i.Tags,
@@ -348,22 +354,23 @@ UPDATE sevs SET
     alert_url              = $15,
     metric_link            = $16,
     snapshot_url           = $17,
-    right_people_present   = $18,
-    right_people_notes     = $19,
-    tags                   = $20,
-    started_at             = $21,
-    detected_at            = $22,
-    mitigated_at           = $23,
-    resolved_at            = $24,
-    postmortem_completed_at = $25,
-    mttd_seconds           = $26,
-    mttm_seconds           = $27,
-    mttr_seconds           = $28,
-    dttm_seconds           = $29,
-    locked                 = $30,
-    sensitive              = $31,
-    ai_disabled            = $32,
-    updated_at             = $33
+    github_repo            = $18,
+    right_people_present   = $19,
+    right_people_notes     = $20,
+    tags                   = $21,
+    started_at             = $22,
+    detected_at            = $23,
+    mitigated_at           = $24,
+    resolved_at            = $25,
+    postmortem_completed_at = $26,
+    mttd_seconds           = $27,
+    mttm_seconds           = $28,
+    mttr_seconds           = $29,
+    dttm_seconds           = $30,
+    locked                 = $31,
+    sensitive              = $32,
+    ai_disabled            = $33,
+    updated_at             = $34
 WHERE id = $1
 `
 
@@ -385,6 +392,7 @@ type UpdateSEVParams struct {
 	AlertUrl              *string            `json:"alert_url"`
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
+	GithubRepo            *string            `json:"github_repo"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -422,6 +430,7 @@ func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
 		arg.AlertUrl,
 		arg.MetricLink,
 		arg.SnapshotUrl,
+		arg.GithubRepo,
 		arg.RightPeoplePresent,
 		arg.RightPeopleNotes,
 		arg.Tags,

@@ -1,0 +1,1 @@
+ALTER TABLE sevs ADD COLUMN IF NOT EXISTS github_repo TEXT;

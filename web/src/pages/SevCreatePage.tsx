@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CalendarClock } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,10 +11,12 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { ServiceChipEditor } from '@/components/sev/ServiceChipEditor'
 import { TagRowsEditor, tagRowsToRecord, type TagRow } from '@/components/sev/TagRowsEditor'
 import { DetectionFields, type DetectionFieldsValue } from '@/components/sev/DetectionFields'
+import { DateTimeField } from '@/components/sev/DateTimeField'
 
 const EMPTY_DETECTION: DetectionFieldsValue = {
   detectionMethod: '',
   monitoringTool: '',
+  alertName: '',
   alertUrl: '',
   metricLink: '',
   snapshotUrl: '',
@@ -30,7 +31,6 @@ export function SevCreatePage() {
   const [affectedServices, setAffectedServices] = useState<string[]>([])
   const [startedAt, setStartedAt] = useState('')
   const [detectedAt, setDetectedAt] = useState('')
-  const [alertName, setAlertName] = useState('')
   const [detection, setDetection] = useState<DetectionFieldsValue>(EMPTY_DETECTION)
   const [tags, setTags] = useState<TagRow[]>([])
   const [sensitive, setSensitive] = useState(false)
@@ -49,7 +49,7 @@ export function SevCreatePage() {
         severity_level: severityLevel,
         affected_services: affectedServices.length ? affectedServices : undefined,
         detection_method: detection.detectionMethod || undefined,
-        alert_name: alertName || undefined,
+        alert_name: detection.alertName || undefined,
         monitoring_tool: detection.monitoringTool || undefined,
         alert_url: detection.alertUrl || undefined,
         metric_link: detection.metricLink || undefined,
@@ -110,42 +110,10 @@ export function SevCreatePage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="started-at" className="flex items-center gap-1.5">
-                  <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                  Started at
-                </Label>
-                <Input
-                  id="started-at"
-                  type="datetime-local"
-                  value={startedAt}
-                  onChange={(e) => setStartedAt(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">Defaults to now if left blank.</p>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="detected-at" className="flex items-center gap-1.5">
-                  <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                  Detected at
-                </Label>
-                <Input
-                  id="detected-at"
-                  type="datetime-local"
-                  value={detectedAt}
-                  onChange={(e) => setDetectedAt(e.target.value)}
-                />
-              </div>
+              <DateTimeField id="started-at" label="Started at" value={startedAt} onChange={setStartedAt} />
+              <DateTimeField id="detected-at" label="Detected at" value={detectedAt} onChange={setDetectedAt} />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="alert-name">Alert name</Label>
-              <Input
-                id="alert-name"
-                placeholder="What the alert/page was called"
-                value={alertName}
-                onChange={(e) => setAlertName(e.target.value)}
-              />
-            </div>
             <DetectionFields value={detection} onChange={setDetection} />
           </CardContent>
         </Card>

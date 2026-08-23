@@ -26,6 +26,7 @@ const SEV: SEVResponse = {
   alert_url: 'https://alerts.example.com/1',
   metric_link: 'https://metrics.example.com/q/1',
   snapshot_url: 'https://img.example.com/1.png',
+  github_repo: 'acme-corp/checkout-service',
   started_at: '2026-08-23T20:00:00Z',
   created_at: '2026-08-23T20:00:00Z',
   updated_at: '2026-08-23T20:00:00Z',
@@ -43,7 +44,11 @@ function mockFetchFor(sev: SEVResponse, whoAmI: WhoAmIResponse) {
       const url = String(input)
       const method = init?.method ?? 'GET'
       if (url === '/v1/auth/me') return Promise.resolve(jsonResponse(whoAmI))
-      if (url === `/v1/sevs/${sev.id}`) return Promise.resolve(jsonResponse(sev))
+      if (url === `/v1/sevs/${sev.id}` && method === 'GET') return Promise.resolve(jsonResponse(sev))
+      if (url === `/v1/sevs/${sev.id}` && method === 'PATCH') {
+        const body = JSON.parse(String(init?.body))
+        return Promise.resolve(jsonResponse({ ...sev, ...body }))
+      }
       if (url === `/v1/sevs/${sev.id}/roles` && method === 'GET') return Promise.resolve(jsonResponse({ roles: [] }))
       if (url === `/v1/sevs/${sev.id}/announcements` && method === 'GET')
         return Promise.resolve(jsonResponse({ announcements: [] }))
@@ -56,6 +61,17 @@ function mockFetchFor(sev: SEVResponse, whoAmI: WhoAmIResponse) {
       if (url === `/v1/sevs/${sev.id}/chat` && method === 'GET') return Promise.resolve(jsonResponse({ entries: [] }))
       if (url === `/v1/sevs/${sev.id}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
       if (url === `/v1/sevs/${sev.id}/links` && method === 'GET') return Promise.resolve(jsonResponse({ links: [] }))
+      if (url === `/v1/sevs/${sev.id}/links` && method === 'POST') return Promise.resolve(jsonResponse({}))
+      if (url.startsWith('/v1/search/sevs')) {
+        return Promise.resolve(
+          jsonResponse({
+            sevs: [
+              { id: 'SEV-2026-0099', title: 'Payments API errors', severity_level: 2, status: 'open', created_at: sev.created_at, updated_at: sev.updated_at },
+            ],
+            total: 1,
+          }),
+        )
+      }
       return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
     }),
   )
@@ -85,7 +101,9 @@ describe('SevDetailPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Database outage' })).toBeInTheDocument()
     expect(screen.getByText('SEV-1')).toBeInTheDocument()
-    expect(screen.getByText('Investigating')).toBeInTheDocument()
+    // Appears twice: the header's StatusBadge and the Lifecycle panel's
+    // stage list, which highlights the current stage among all six.
+    expect(screen.getAllByText('Investigating').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('primary db down')).toBeInTheDocument()
     expect(screen.getByText('checkout')).toBeInTheDocument()
 
@@ -110,6 +128,18 @@ describe('SevDetailPage', () => {
       'src',
       'https://img.example.com/1.png',
     )
+
+    // Repository renders as a GitHub link built from github_repo.
+    expect(screen.getByRole('link', { name: /acme-corp\/checkout-service/ })).toHaveAttribute(
+      'href',
+      'https://github.com/acme-corp/checkout-service',
+    )
+
+    // Details is above Lifecycle (DOCUMENT_POSITION_FOLLOWING means the
+    // second node comes after the first in the document).
+    const detailsHeading = screen.getByText('Details')
+    const lifecycleHeading = screen.getByText('Lifecycle')
+    expect(detailsHeading.compareDocumentPosition(lifecycleHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('lets a Responder post an announcement', async () => {
@@ -131,6 +161,88 @@ describe('SevDetailPage', () => {
         expect.objectContaining({ method: 'POST' }),
       ),
     )
+  })
+
+  it('pre-fills the GitHub issue form owner/repo from the SEV repository', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor(SEV, me('responder'))
+    renderDetailPage()
+
+    await screen.findByRole('heading', { name: 'Database outage' })
+    const tasksSection = screen.getByText('Linked tasks').closest('div')!.parentElement!
+
+    const user = userEvent.setup()
+    await user.click(within(tasksSection).getByRole('button', { name: /create github issue/i }))
+
+    expect(within(tasksSection).getByLabelText('Owner')).toHaveValue('acme-corp')
+    expect(within(tasksSection).getByLabelText('Repo')).toHaveValue('checkout-service')
+  })
+
+  it('linked SEVs autocomplete shows matching titles and links the selected SEV', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor(SEV, me('responder'))
+    renderDetailPage()
+
+    await screen.findByRole('heading', { name: 'Database outage' })
+    const linkedSection = screen.getByText('Linked SEVs').closest('div')!.parentElement!
+
+    const user = userEvent.setup()
+    const input = within(linkedSection).getByLabelText(/target sev id or title/i)
+    await user.type(input, 'Payments')
+
+    const option = await within(linkedSection).findByRole('button', { name: /payments api errors/i })
+    await user.click(option)
+    expect(input).toHaveValue('SEV-2026-0099')
+
+    await user.click(within(linkedSection).getByRole('button', { name: /^link$/i }))
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        `/v1/sevs/${SEV_ID}/links`,
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => String(url) === `/v1/sevs/${SEV_ID}/links` && init?.method === 'POST')!
+    expect(JSON.parse(String(call[1]!.body))).toMatchObject({ target_sev_id: 'SEV-2026-0099' })
+  })
+
+  it('lets a Responder edit root cause category (Other), business impact, and repository', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor(SEV, me('responder'))
+    renderDetailPage()
+
+    await screen.findByRole('heading', { name: 'Database outage' })
+    const detailsSection = screen.getByText('Details').closest('div')!.parentElement!
+
+    const user = userEvent.setup()
+    await user.click(within(detailsSection).getByRole('button', { name: /edit/i }))
+
+    await user.selectOptions(within(detailsSection).getByLabelText('Root cause category'), 'Other…')
+    await user.type(within(detailsSection).getByLabelText(/custom root cause category/i), 'network-partition')
+    await user.clear(within(detailsSection).getByLabelText('Business impact'))
+    await user.type(within(detailsSection).getByLabelText('Business impact'), 'Checkout errors for 8% of traffic')
+    await user.clear(within(detailsSection).getByLabelText('Repository'))
+    await user.type(within(detailsSection).getByLabelText('Repository'), 'acme-corp/checkout-service')
+
+    await user.click(within(detailsSection).getByRole('button', { name: /save/i }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(([url, init]) => String(url) === `/v1/sevs/${SEV_ID}` && init?.method === 'PATCH')
+      expect(call).toBeDefined()
+    })
+    const [, init] = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, i]) => String(url) === `/v1/sevs/${SEV_ID}` && i?.method === 'PATCH')!
+    const body = JSON.parse(String(init!.body))
+    expect(body).toMatchObject({
+      root_cause_category: 'network-partition',
+      business_impact: 'Checkout errors for 8% of traffic',
+      github_repo: 'acme-corp/checkout-service',
+    })
   })
 
   it('shows status transition options for an Incident Commander', async () => {

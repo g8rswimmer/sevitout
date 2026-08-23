@@ -334,6 +334,9 @@
         },
         "snapshotUrl": {
           "type": "string"
+        },
+        "githubRepo": {
+          "type": "string"
         }
       }
     },
@@ -574,6 +577,10 @@
         "snapshotUrl": {
           "type": "string",
           "description": "snapshot_url links to an already-hosted image of the monitoring chart at\ndetection time; rendered as an inline preview in the UI. No file upload\nis supported — this is a URL to an image hosted elsewhere."
+        },
+        "githubRepo": {
+          "type": "string",
+          "description": "github_repo is the \"owner/repo\" this SEV's code lives in (e.g.\n\"acme-corp/checkout-service\"); pre-fills TaskService.CreateGitHubIssue's\nowner/repo fields in the web UI. Set via UpdateSEV, not at creation."
         }
       }
     }

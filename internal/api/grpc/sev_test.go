@@ -101,6 +101,26 @@ func TestCreateSEV_ValidRequest(t *testing.T) {
 	}
 }
 
+// TestCreateSEV_StartedAtNotDefaulted guards against reintroducing the
+// previous "default started_at to now when omitted" behavior — the caller
+// must set it explicitly (docs/requirements.md §2.1: "may be estimated", not
+// assumed to be the moment the record was opened).
+func TestCreateSEV_StartedAtNotDefaulted(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:         "Test SEV",
+		SeverityLevel: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+	if resp.GetStartedAt() != nil {
+		t.Errorf("StartedAt = %v, want nil (unset) when omitted from the request", resp.GetStartedAt())
+	}
+}
+
 func TestCreateSEV_PublishesSEVCreated(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
@@ -303,6 +323,7 @@ func TestUpdateSEV_DetectionMetadataAndLinks(t *testing.T) {
 		AlertUrl:        "https://alerts.example.com/1",
 		MetricLink:      "https://metrics.example.com/q/1",
 		SnapshotUrl:     "https://img.example.com/2.png",
+		GithubRepo:      "acme-corp/checkout-service",
 	})
 	if err != nil {
 		t.Fatalf("UpdateSEV: %v", err)
@@ -321,6 +342,9 @@ func TestUpdateSEV_DetectionMetadataAndLinks(t *testing.T) {
 	}
 	if got, want := resp.GetSnapshotUrl(), "https://img.example.com/2.png"; got != want {
 		t.Errorf("SnapshotUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetGithubRepo(), "acme-corp/checkout-service"; got != want {
+		t.Errorf("GithubRepo = %q, want %q", got, want)
 	}
 }
 

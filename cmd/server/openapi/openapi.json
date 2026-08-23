@@ -298,6 +298,9 @@
         "snapshotUrl": {
           "type": "string"
         },
+        "githubRepo": {
+          "type": "string"
+        },
         "rightPeoplePresent": {
           "type": "boolean"
         },
@@ -485,6 +488,9 @@
           "type": "string"
         },
         "snapshotUrl": {
+          "type": "string"
+        },
+        "githubRepo": {
           "type": "string"
         },
         "rightPeoplePresent": {

@@ -35,12 +35,15 @@ wired up live.
     `validateDetectionMethod`); monitoring tool as a dropdown (Datadog/Prometheus/
     CloudWatch/None/Other, the last with a free-text companion field, since
     monitoring_tool itself stays unrestricted text on the wire); and three optional
-    links — the alert, the monitoring metric/dashboard, and a snapshot image URL,
-    the last rendered as an inline `<img>` preview with a graceful fallback if it
-    fails to load. `started_at`/`detected_at` (Lifecycle panel, and the create
-    form) now show a small calendar/clock icon — they were already
-    `<input type="datetime-local">` (a native browser date+time picker), just made
-    to visually read as one.
+    links — alert name directly above its link, then the monitoring metric/
+    dashboard link and a snapshot image URL, the last rendered as an inline
+    `<img>` preview with a graceful fallback if it fails to load. `started_at`/
+    `detected_at` (Lifecycle panel, and the create form; `components/sev/
+    DateTimeField.tsx`) pair an `<input type="datetime-local">` (a native
+    browser date+time picker) with an explicit calendar button that calls the
+    input's own `showPicker()` — an unambiguous "open the picker" affordance
+    rather than a passive icon. Left blank, `started_at` is no longer defaulted
+    to "now" on create: the caller sets it explicitly or it stays unset.
   - **Roles** — list + assign/remove (Incident-Commander+), matching every
     `internal/store.SEVRoleType`.
   - **Announcements** — feed + post form with audience (`internal`/`external`/
@@ -173,10 +176,11 @@ go build ./... && go vet ./... && gofmt -l . && go test ./... && go test -race .
 
 The Go side did later gain the detection-links backend (migration `000005`, three new
 `SEVResponse`/`CreateSEVRequest`/`UpdateSEVRequest` proto fields, and
-`validateDetectionMethod`) — see "Richer detection metadata" below; all the above
-still passes with that included.
+`validateDetectionMethod`) and the repository field (migration `000006`,
+`github_repo`) — see "Richer detection metadata" and "SEV page layout and reference
+fields" below; all the above still passes with both included.
 
-42 Vitest/RTL tests:
+46 Vitest/RTL tests:
 
 - `lib/ws.ts` — connects to `/ws?sev_id=`, invalidates the matching query key on a
   same-SEV event, ignores events for other SEVs and malformed frames, reconnects
@@ -186,13 +190,20 @@ still passes with that included.
   a tab click, requests the typed `query` on search submit.
 - `pages/SevCreatePage.tsx` — submits the exact expected `CreateSEVRequest` body
   (including a chip-added affected service and, separately, a selected detection
-  method, a custom "Other" monitoring tool, and all three detection links),
-  surfaces a server validation error.
+  method, a custom "Other" monitoring tool, an alert name, and all three detection
+  links — asserting `started_at`/`detected_at` are omitted, not defaulted, when
+  left untouched, and that alert name sits before alert link in DOM order),
+  surfaces a server validation error, and confirms the date/time picker button
+  calls the input's own `showPicker()`.
 - `pages/SevDetailPage.tsx` — renders every section read-only for a Viewer with no
-  write affordances present, including detection metadata as human labels and the
-  three links/snapshot preview; a Responder can post an announcement end-to-end; an
-  Incident Commander sees the correct valid-next-status transition buttons for the
-  SEV's current status.
+  write affordances present, including detection metadata as human labels, the
+  three links/snapshot preview, and the repository link, with Details positioned
+  before Lifecycle in the DOM; a Responder can post an announcement end-to-end, edit
+  the root cause category via "Other" plus business impact plus repository and see
+  the exact `UpdateSEVRequest` body, pre-fill a GitHub issue's owner/repo from the
+  SEV's repository, and pick a Linked SEVs autocomplete suggestion by title to link
+  it; an Incident Commander sees the correct valid-next-status transition buttons
+  for the SEV's current status.
 
 ---
 
@@ -216,13 +227,52 @@ Details panel:
   `metric_link` (the monitoring dashboard/metric/query), and `snapshot_url` — a URL
   to an already-hosted image, not a file upload (no blob storage exists in this
   system), rendered as an inline `<img>` preview with a graceful fallback if the
-  link doesn't load.
-- `started_at`/`detected_at` gained a small calendar/clock icon — they were already
-  `<input type="datetime-local">` (a native date+time picker in every modern
-  browser), just made to visually read as one.
+  link doesn't load. **Alert name sits directly above alert link** — the two
+  describe the same alert — rather than being separated by the detection-method/
+  monitoring-tool dropdowns.
+- `started_at`/`detected_at` (`web/src/components/sev/DateTimeField.tsx`) pair the
+  existing `<input type="datetime-local">` with a calendar button that calls the
+  input's own `showPicker()`, so opening the native date+time picker is an
+  explicit, clickable action rather than an undiscoverable side effect of clicking
+  the text field. **`started_at` is no longer defaulted to "now" when omitted on
+  create** — `docs/requirements.md` §2.1 already said this timestamp "may be
+  estimated"; leaving it unset until the caller sets it explicitly reads that more
+  literally than assuming "now" ever did.
 
-New shared component: `web/src/components/sev/DetectionFields.tsx`, used by both
-`SevCreatePage` and `DetailsPanel`'s edit mode.
+New shared components: `web/src/components/sev/DetectionFields.tsx` and
+`DateTimeField.tsx`, used by both `SevCreatePage` and `DetailsPanel`'s (plus
+`LifecyclePanel`'s) edit mode.
+
+---
+
+## SEV page layout and reference fields (second follow-up)
+
+- **Details now renders above Lifecycle** on `/sevs/:id` — reads better as "what
+  happened" before "when it happened."
+- **Lifecycle lists the full six-stage sequence** (`docs/requirements.md` §2.3: Open
+  → Investigating → Mitigated → Resolved → Postmortem In Progress → Postmortem
+  Complete), current stage highlighted, above the existing timestamp/metric facts —
+  the state machine allows stepping back/re-opening, so this is a display ordering,
+  not a claim a SEV only moves forward through it.
+- **MTTD/MTTM/MTTR/DTTM each have an info icon** (`components/ui/tooltip.tsx`, a
+  small CSS-only tooltip — hover *or* keyboard focus, plus a native `title`
+  fallback; no new dependency) spelling out the acronym and formula.
+- **Details**: business impact is now its own line (previously paired with root
+  cause category in a two-column row); **root cause category is a dropdown**
+  (deployment/configuration/hardware/dependency — `docs/requirements.md` §4.2's
+  literal examples — plus "Other" with a free-text companion, same pattern
+  `DetectionFields` already uses for monitoring tool; stays free text server-side,
+  no new validation); and a new **Repository** field (`github_repo`, "owner/repo",
+  new migration `000006`) renders as a `github.com` link.
+- **Linked tasks' "Create GitHub issue" pre-fills owner/repo** from that same
+  `github_repo` field (split on `/`) when you switch to that mode with both fields
+  still empty — one less thing to retype.
+- **Linked SEVs now has an autocomplete** (`components/sev/SevAutocomplete.tsx`):
+  typing 2+ characters searches `SearchService.SearchSEVs` (debounced 250ms) and
+  shows up to 6 matches with their severity badge and title, not just a bare ID
+  list. The field's value is still literally the `target_sev_id` being submitted,
+  so typing an exact known ID directly — no suggestion click — works exactly as
+  before; picking a suggestion just fills the ID in for you.
 
 ---
 

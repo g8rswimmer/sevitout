@@ -85,6 +85,10 @@ message SEVResponse {
   // detection time; rendered as an inline preview in the UI. No file upload
   // is supported — this is a URL to an image hosted elsewhere.
   string snapshot_url = 35;
+  // github_repo is the "owner/repo" this SEV's code lives in (e.g.
+  // "acme-corp/checkout-service"); pre-fills TaskService.CreateGitHubIssue's
+  // owner/repo fields in the web UI. Set via UpdateSEV, not at creation.
+  string github_repo = 36;
 }
 
 message CreateSEVRequest {
@@ -137,6 +141,7 @@ message UpdateSEVRequest {
   string alert_url = 23;
   string metric_link = 24;
   string snapshot_url = 25;
+  string github_repo = 26;
 }
 
 message ListSEVsRequest {

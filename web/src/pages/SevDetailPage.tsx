@@ -72,12 +72,12 @@ export function SevDetailPage() {
         <StatusTransitionControl sev={record} canTransition={canCommand} />
       </div>
 
-      <LifecyclePanel sev={record} canEdit={canEditDetails} />
       <DetailsPanel sev={record} canEdit={canEditDetails} />
+      <LifecyclePanel sev={record} canEdit={canEditDetails} />
       <RolesPanel sevId={sevId} canManage={canCommand} />
       <AnnouncementsPanel sevId={sevId} canPost={canRespond} />
       <ChatLogPanel sevId={sevId} canAdd={canRespond} />
-      <TasksPanel sevId={sevId} canManage={canRespond} />
+      <TasksPanel sevId={sevId} canManage={canRespond} defaultRepo={record.github_repo} />
       <LinkedSevsPanel sevId={sevId} canManage={canRespond} />
     </div>
   )

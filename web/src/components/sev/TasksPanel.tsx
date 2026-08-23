@@ -16,7 +16,25 @@ const RELATIONSHIP_TYPES = Object.keys(TASK_RELATIONSHIP_LABELS) as TaskRelation
 
 type Mode = 'link' | 'github'
 
-export function TasksPanel({ sevId, canManage }: { sevId: string; canManage: boolean }) {
+/** "owner/repo" → its parts, or null if it isn't shaped that way. */
+function parseRepo(value?: string): { owner: string; repo: string } | null {
+  if (!value) return null
+  const i = value.indexOf('/')
+  if (i <= 0 || i === value.length - 1) return null
+  return { owner: value.slice(0, i), repo: value.slice(i + 1) }
+}
+
+export function TasksPanel({
+  sevId,
+  canManage,
+  defaultRepo,
+}: {
+  sevId: string
+  canManage: boolean
+  /** The SEV's Details-panel "owner/repo" (SEVResponse.github_repo), used to
+   * pre-fill the Create-GitHub-issue form so a Responder isn't retyping it. */
+  defaultRepo?: string
+}) {
   const queryClient = useQueryClient()
   const tasks = useQuery({ queryKey: ['sevs', sevId, 'tasks'], queryFn: () => api.tasks.list(sevId) })
 
@@ -137,7 +155,21 @@ export function TasksPanel({ sevId, canManage }: { sevId: string; canManage: boo
             <Button type="button" size="sm" variant={mode === 'link' ? 'default' : 'outline'} onClick={() => setMode('link')}>
               Link existing
             </Button>
-            <Button type="button" size="sm" variant={mode === 'github' ? 'default' : 'outline'} onClick={() => setMode('github')}>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === 'github' ? 'default' : 'outline'}
+              onClick={() => {
+                setMode('github')
+                if (!owner && !repo) {
+                  const parsed = parseRepo(defaultRepo)
+                  if (parsed) {
+                    setOwner(parsed.owner)
+                    setRepo(parsed.repo)
+                  }
+                }
+              }}
+            >
               Create GitHub issue
             </Button>
           </div>
