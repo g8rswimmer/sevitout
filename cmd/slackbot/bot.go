@@ -41,15 +41,20 @@ type bot struct {
 	api   apiClients
 	log   *slog.Logger
 
+	mu sync.Mutex
 	// defaultChannel is where SEV lifecycle notifications go when a SEV has
 	// no auto-created incident channel of its own (any SEV-3/4, or a
 	// SEV-1/2 opened before the channel finished being created).
+	//
+	// defaultChannel and channelNamingConvention are set at startup
+	// (loadSlackSettings) and kept current afterward by
+	// runSettingsRefresher, which polls ConfigService in the background —
+	// both are guarded by mu since that goroutine writes them concurrently
+	// with request-handling goroutines reading them.
 	defaultChannel string
 	// channelNamingConvention renders an incident channel's name; see
 	// incidentChannelName.
 	channelNamingConvention string
-
-	mu sync.Mutex
 	// channels maps a SEV ID to the Slack channel ID auto-created for it.
 	// In-memory only: a bot restart forgets the mapping, and future
 	// notifications for that SEV fall back to defaultChannel. Acceptable
@@ -95,8 +100,28 @@ func (b *bot) setChannelFor(sevID, channelID string) {
 // set, which callers must treat as a no-op rather than an error — a bot
 // with no default channel configured is a valid (if quiet) configuration.
 func (b *bot) notifyChannel(sevID string) string {
-	if ch := b.channelFor(sevID); ch != "" {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if ch := b.channels[sevID]; ch != "" {
 		return ch
 	}
 	return b.defaultChannel
+}
+
+// namingConvention returns the current channel-naming-convention setting,
+// for incidentChannelName. See the mu comment above for why this is locked.
+func (b *bot) namingConvention() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.channelNamingConvention
+}
+
+// setSlackSettings updates the bot's default-channel and
+// channel-naming-convention settings, e.g. after runSettingsRefresher polls
+// a change out of ConfigService.
+func (b *bot) setSlackSettings(defaultChannel, namingConvention string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.defaultChannel = defaultChannel
+	b.channelNamingConvention = namingConvention
 }

@@ -91,6 +91,7 @@ func main() {
 
 	wsURL := (&url.URL{Scheme: "ws", Host: apiAddr, Path: "/ws", RawQuery: "sev_id=" + url.QueryEscape(ws.BroadcastRoom)}).String()
 	go b.runEventListener(ctx, wsURL, serviceToken)
+	go b.runSettingsRefresher(ctx, api.config)
 
 	go runSocketMode(ctx, log, b, smClient)
 

@@ -119,6 +119,19 @@ func TestParseCaptureArgs(t *testing.T) {
 	}
 }
 
+func TestParseTransitionArgs(t *testing.T) {
+	if _, _, err := parseTransitionArgs([]string{"SEV-1"}); err == nil {
+		t.Error("expected error when status is missing")
+	}
+	id, status, err := parseTransitionArgs([]string{"SEV-1", "Investigating"})
+	if err != nil {
+		t.Fatalf("parseTransitionArgs: %v", err)
+	}
+	if id != "SEV-1" || status != "investigating" {
+		t.Errorf("got (%q, %q), want (%q, %q) (status lowercased)", id, status, "SEV-1", "investigating")
+	}
+}
+
 func TestParseSlackTimestamp(t *testing.T) {
 	got := parseSlackTimestamp("1700000000.000100")
 	want := time.Unix(1700000000, 100000).UTC()
@@ -184,6 +197,39 @@ func TestHandleUpdate_PostsInternalAnnouncement(t *testing.T) {
 	}
 	if !strings.Contains(reply, "SEV-1") {
 		t.Errorf("reply = %q", reply)
+	}
+}
+
+func TestHandleTransition_MovesToRequestedStatus(t *testing.T) {
+	sevs := &fakeSevAPI{transResp: &pb.SEVResponse{Id: "SEV-1", Title: "checkout down", Status: "investigating"}}
+	b := newTestBot(nil, sevs, nil, nil, nil, "", "")
+
+	reply := b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "transition SEV-1 investigating"})
+
+	if sevs.lastTransReq.GetId() != "SEV-1" || sevs.lastTransReq.GetToStatus() != "investigating" {
+		t.Errorf("TransitionStatus request = %+v", sevs.lastTransReq)
+	}
+	if !strings.Contains(reply, "investigating") {
+		t.Errorf("reply = %q", reply)
+	}
+}
+
+func TestHandleTransition_InvalidTransitionSurfacesServerErrorAndHint(t *testing.T) {
+	sevs := &fakeSevAPI{transErr: errAlways}
+	b := newTestBot(nil, sevs, nil, nil, nil, "", "")
+
+	reply := b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "transition SEV-1 resolved"})
+
+	if !strings.Contains(reply, "failed") || !strings.Contains(reply, "valid statuses") {
+		t.Errorf("reply = %q, want the error plus a list of valid statuses", reply)
+	}
+}
+
+func TestHandleTransition_MissingArgsReturnsUsage(t *testing.T) {
+	b := newTestBot(nil, nil, nil, nil, nil, "", "")
+	reply := b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "transition SEV-1"})
+	if !strings.Contains(reply, "usage") {
+		t.Errorf("reply = %q, want a usage message", reply)
 	}
 }
 

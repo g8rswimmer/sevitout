@@ -16,7 +16,14 @@ import (
 )
 
 // usageText is returned whenever a /sev invocation can't be parsed.
-const usageText = "usage: `/sev open [severity 1-4] <title>` | `/sev update <sev-id> <message>` | `/sev resolve <sev-id>` | `/sev capture <sev-id> [limit]`"
+const usageText = "usage: `/sev open [severity 1-4] <title>` | `/sev update <sev-id> <message>` | `/sev transition <sev-id> <status>` | `/sev resolve <sev-id>` | `/sev capture <sev-id> [limit]`"
+
+// validStatusNames lists every status the state machine
+// (internal/sev.ValidateTransition) recognizes, purely so `/sev transition`
+// can remind the caller what's valid on a rejected transition — the actual
+// legality of a given from→to move is still enforced server-side, since it
+// depends on the SEV's current status, which this bot doesn't track.
+const validStatusNames = "open, investigating, mitigated, resolved, postmortem_in_progress, postmortem_complete"
 
 // parseAction splits a command's free-text argument into its first
 // whitespace-separated token (the action) and everything after it, for
@@ -55,6 +62,18 @@ func parseIDAndText(args []string, usage string) (id, text string, err error) {
 		return "", "", errors.New(usage)
 	}
 	return args[0], strings.Join(args[1:], " "), nil
+}
+
+// parseTransitionArgs parses "<sev-id> <status>", used by `/sev transition`.
+// status is lowercased so `/sev transition SEV-1 Resolved` works the same as
+// `/sev transition SEV-1 resolved`; anything after the second token is
+// ignored rather than rejected, matching parseID's tolerance.
+func parseTransitionArgs(args []string) (id, toStatus string, err error) {
+	const usage = "usage: `/sev transition <sev-id> <status>` (one of: " + validStatusNames + ")"
+	if len(args) < 2 {
+		return "", "", errors.New(usage)
+	}
+	return args[0], strings.ToLower(args[1]), nil
 }
 
 // parseID parses a single required "<sev-id>" argument, used by `/sev
@@ -125,6 +144,8 @@ func (b *bot) handleSlashCommand(ctx context.Context, cmd slack.SlashCommand) st
 		return b.handleOpen(ctx, cmd, args)
 	case "update":
 		return b.handleUpdate(ctx, cmd, args)
+	case "transition":
+		return b.handleTransition(ctx, cmd, args)
 	case "resolve":
 		return b.handleResolve(ctx, cmd, args)
 	case "capture":
@@ -163,6 +184,28 @@ func (b *bot) handleUpdate(ctx context.Context, cmd slack.SlashCommand, args []s
 		return fmt.Sprintf("failed to post update on %s: %v", id, err)
 	}
 	return fmt.Sprintf("Posted update on %s", id)
+}
+
+// handleTransition moves a SEV to an arbitrary status, e.g. `open` →
+// `investigating` → `mitigated` — the intermediate steps `/sev resolve`
+// can't skip, since resolved is only reachable from mitigated
+// (internal/sev.ValidateTransition). The state machine itself still enforces
+// which from→to moves are legal; this command doesn't second-guess it, it
+// just gives Slack users a way to drive any of them without dropping to the
+// REST API.
+func (b *bot) handleTransition(ctx context.Context, cmd slack.SlashCommand, args []string) string {
+	id, toStatus, err := parseTransitionArgs(args)
+	if err != nil {
+		return err.Error()
+	}
+	resp, err := b.api.sevs.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+		Id:       id,
+		ToStatus: toStatus,
+	})
+	if err != nil {
+		return fmt.Sprintf("failed to transition %s to %q: %v\nvalid statuses: %s", id, toStatus, err, validStatusNames)
+	}
+	return fmt.Sprintf(":arrows_counterclockwise: %s is now *%s*: %s", id, resp.GetStatus(), resp.GetTitle())
 }
 
 func (b *bot) handleResolve(ctx context.Context, cmd slack.SlashCommand, args []string) string {

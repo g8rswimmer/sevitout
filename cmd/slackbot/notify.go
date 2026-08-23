@@ -67,6 +67,7 @@ func (b *bot) handleSEVCreated(ctx context.Context, payload json.RawMessage) {
 
 	channel := b.notifyChannel(sev.ID)
 	if channel == "" {
+		b.log.WarnContext(ctx, "sev.created notification dropped: no incident channel and no default_channel configured", "sev_id", sev.ID)
 		return
 	}
 	text := fmt.Sprintf(":rotating_light: SEV-%d opened: *%s* (%s)", sev.SeverityLevel, sev.Title, sev.ID)
@@ -86,6 +87,7 @@ func (b *bot) handleSEVStatusChanged(ctx context.Context, payload json.RawMessag
 
 	channel := b.notifyChannel(sev.ID)
 	if channel == "" {
+		b.log.WarnContext(ctx, "sev.status_changed notification dropped: no incident channel and no default_channel configured", "sev_id", sev.ID)
 		return
 	}
 	text := fmt.Sprintf("%s *%s* is now *%s*", statusEmoji(sev.Status), sev.Title, sev.Status)
@@ -109,6 +111,7 @@ func (b *bot) handleAnnouncementCreated(ctx context.Context, payload json.RawMes
 
 	channel := b.notifyChannel(a.SevID)
 	if channel == "" {
+		b.log.WarnContext(ctx, "announcement.created push dropped: no incident channel and no default_channel configured", "sev_id", a.SevID)
 		return
 	}
 	text := fmt.Sprintf(":mega: *%s* update: %s", a.SevID, a.Message)

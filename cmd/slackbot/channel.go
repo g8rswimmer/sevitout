@@ -56,7 +56,7 @@ var emailInAngleBrackets = regexp.MustCompile(`<([^>@\s]+@[^>]+)>`)
 // since incident-channel creation must never be the reason a SEV-open
 // response fails or blocks.
 func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, severityLevel int32) {
-	name := incidentChannelName(b.channelNamingConvention, severityLevel, sevID)
+	name := incidentChannelName(b.namingConvention(), severityLevel, sevID)
 
 	channelID, err := b.slack.CreateChannel(ctx, name)
 	if err != nil {

@@ -12,8 +12,17 @@ Slack over **Socket Mode** (no public ingress required) and to the API server ov
     severity defaults to 3 when omitted.
   - `/sev update <sev-id> <message>` — posts an internal announcement
     (`AnnouncementService.CreateAnnouncement`).
-  - `/sev resolve <sev-id>` — transitions the SEV to `resolved`
-    (`SEVService.TransitionStatus`).
+  - `/sev transition <sev-id> <status>` — moves a SEV to any status
+    (`SEVService.TransitionStatus`). The lifecycle state machine
+    (`internal/sev.ValidateTransition`, from M02) still enforces which moves
+    are legal from the SEV's current status — e.g. `resolved` is only
+    reachable from `mitigated` — so this command doesn't skip steps, it just
+    lets you drive them from Slack instead of the REST API. Valid statuses:
+    `open`, `investigating`, `mitigated`, `resolved`,
+    `postmortem_in_progress`, `postmortem_complete`.
+  - `/sev resolve <sev-id>` — shorthand for `/sev transition <sev-id>
+    resolved` (kept since it's the exact command name
+    `docs/project-plan.md` specifies).
   - `/sev capture <sev-id> [limit]` — pulls the last `limit` (default 20) messages
     from the *current* Slack channel into the SEV's chat log
     (`ChatService.AddChatEntry`), oldest first.
@@ -80,7 +89,7 @@ features:
   slash_commands:
     - command: /sev
       description: Open, update, resolve, or capture chat for a SEV
-      usage_hint: "open [severity 1-4] <title> | update <sev-id> <message> | resolve <sev-id> | capture <sev-id> [limit]"
+      usage_hint: "open [severity 1-4] <title> | update <sev-id> <message> | transition <sev-id> <status> | resolve <sev-id> | capture <sev-id> [limit]"
       should_escape: false
 oauth_config:
   scopes:
@@ -173,7 +182,14 @@ curl -s -X PUT "$API/v1/config/integrations/slack" -H "Authorization: Bearer $AD
 
 `default_channel` must be a Slack **channel ID** (e.g. `C0123456`, visible in a
 channel's "About" panel), not its `#name` — the bot posts via `chat.postMessage`,
-which takes an ID.
+which takes an ID. Make sure `@sevbot` has been invited to that channel first
+(`/invite @sevbot`), or `chat.postMessage` will fail with `not_in_channel`.
+
+The bot polls this config every few minutes (`slackSettingsRefreshInterval` in
+`cmd/slackbot/settings.go`) and applies changes automatically — you don't need to
+restart the container after changing `default_channel` or
+`channel_naming_convention`, just wait for the next poll (or restart it if you don't
+want to wait).
 
 ## Start the stack
 
@@ -226,14 +242,20 @@ This lands as an **internal** announcement on the SEV (visible via
 The bot replies in-thread-less plain text with the SEV's current title, severity, and
 status.
 
-### 4. Resolve it
+### 4. Advance it through the lifecycle, then resolve it
+
+`resolved` is only reachable from `mitigated` — `/sev resolve` on a SEV that's still
+`open` fails with `invalid status transition`. Drive it through the intermediate
+states with `/sev transition` first:
 
 ```
+/sev transition SEV-2026-0001 investigating
+/sev transition SEV-2026-0001 mitigated
 /sev resolve SEV-2026-0001
 ```
 
-The default (or incident) channel receives a `:white_check_mark:` notification, and
-`@sevbot status SEV-2026-0001` now reports `resolved`.
+The default (or incident) channel receives a `:white_check_mark:` notification on the
+final step, and `@sevbot status SEV-2026-0001` now reports `resolved`.
 
 ### 5. Capture chat into the SEV
 
