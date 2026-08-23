@@ -43,5 +43,19 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  slackbot:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    command: ["/app/slackbot"]
+    environment:
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      API_GRPC_ADDR: api:8080
+      SLACKBOT_SERVICE_EMAIL: ${SLACKBOT_SERVICE_EMAIL}
+      SLACKBOT_SERVICE_PASSWORD: ${SLACKBOT_SERVICE_PASSWORD}
+    depends_on:
+      - api
+
 volumes:
   postgres_data:

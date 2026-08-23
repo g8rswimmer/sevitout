@@ -22,6 +22,14 @@ type Event struct {
 // consumer must never block delivery to other subscribers.
 const clientBufferSize = 16
 
+// BroadcastRoom is a well-known room ID a client can Subscribe to (e.g. via
+// the WebSocket handler's ordinary ?sev_id= parameter) to receive every
+// event published to any SEV's room, not just one. It exists for consumers
+// that don't know SEV IDs in advance — chiefly the Slack bot (M11), which
+// needs to react to "a SEV was just opened" before it has anything to
+// subscribe to by ID.
+const BroadcastRoom = "*"
+
 // Client is a single WebSocket connection's outbound event queue. It is not
 // bound to any particular room until passed to Hub.Subscribe. rooms is
 // mutated only by Hub's methods, all of which hold Hub.mu — it never needs
@@ -112,14 +120,28 @@ func (h *Hub) removeFromRoomLocked(c *Client, sevID string) {
 	}
 }
 
-// Publish fans evt out to every client currently subscribed to sevID.
-// Publish never blocks on a slow client (see Client.enqueue) and is a no-op
-// if sevID has no subscribers.
+// Publish fans evt out to every client currently subscribed to sevID, plus
+// every client subscribed to BroadcastRoom. Publish never blocks on a slow
+// client (see Client.enqueue) and is a no-op if sevID has no subscribers (and
+// nobody is on the broadcast room).
+//
+// A client subscribed to both sevID and BroadcastRoom is only delivered the
+// event once — the two room lookups aren't assumed disjoint, since a client
+// is free to subscribe to both.
 func (h *Hub) Publish(sevID, eventType string, payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	evt := Event{Type: eventType, SEVID: sevID, Payload: payload}
 	for c := range h.rooms[sevID] {
+		c.enqueue(evt)
+	}
+	if sevID == BroadcastRoom {
+		return
+	}
+	for c := range h.rooms[BroadcastRoom] {
+		if _, dup := h.rooms[sevID][c]; dup {
+			continue
+		}
 		c.enqueue(evt)
 	}
 }

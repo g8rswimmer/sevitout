@@ -8,6 +8,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.1
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/slack-go/slack v0.29.0
 	github.com/soheilhy/cmux v0.1.5
 	golang.org/x/crypto v0.51.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171

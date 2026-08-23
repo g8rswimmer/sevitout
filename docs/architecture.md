@@ -235,11 +235,17 @@ The Slack bot runs as a separate binary and connects to Slack via **Socket Mode*
 **Responsibilities:**
 - Handle `/sev open`, `/sev update`, `/sev resolve` slash commands
 - Respond to `@sevbot status`, `@sevbot timeline` in-channel mentions
-- Create a dedicated incident channel on SEV-1/SEV-2 open (via Slack API), invite IC and on-call
+- Create a dedicated incident channel on every SEV open, regardless of severity (via Slack API), invite IC, on-call, and the `/sev open` caller
 - Push announcements from Sevitout to configured Slack channels
 - Capture messages from an incident channel into the SEV chat log
 
-The bot authenticates to the API server using a dedicated service account JWT.
+The bot authenticates to the API server as a dedicated service-account user, logging
+itself in via `POST /auth/login` (the same host:port as its gRPC connection — the API
+server multiplexes both over one TCP port) using a durable `SLACKBOT_SERVICE_EMAIL` /
+`SLACKBOT_SERVICE_PASSWORD` credential pair, rather than a manually pre-issued,
+manually rotated JWT. It refreshes proactively on a fixed interval and reactively on
+any RPC the server rejects as unauthenticated, so it stays authenticated indefinitely
+without operator intervention.
 
 ---
 
