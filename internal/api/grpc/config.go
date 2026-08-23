@@ -29,7 +29,7 @@ type Encryptor interface {
 
 // ConfigServer implements pb.ConfigServiceServer: the admin configuration API
 // (service registry, user management, on-call rotations, integration
-// credentials, and data retention policy).
+// credentials, AI plugin registration, and data retention policy).
 type ConfigServer struct {
 	pb.UnimplementedConfigServiceServer
 	services     store.ServiceStore
@@ -37,17 +37,20 @@ type ConfigServer struct {
 	oncall       store.OnCallStore
 	integrations store.IntegrationConfigStore
 	retention    store.RetentionConfigStore
+	aiPlugins    store.AIPluginStore
 	crypto       Encryptor // nil when ENCRYPTION_KEY is not set
 }
 
 // NewConfigServer returns a ConfigServer. crypto may be nil; in that case
-// UpsertIntegrationConfig rejects any request that supplies credentials.
+// UpsertIntegrationConfig and CreateAIPlugin/UpdateAIPlugin reject any
+// request that supplies credentials/an API key.
 func NewConfigServer(
 	services store.ServiceStore,
 	users store.UserStore,
 	oncall store.OnCallStore,
 	integrations store.IntegrationConfigStore,
 	retention store.RetentionConfigStore,
+	aiPlugins store.AIPluginStore,
 	crypto Encryptor,
 ) *ConfigServer {
 	return &ConfigServer{
@@ -56,6 +59,7 @@ func NewConfigServer(
 		oncall:       oncall,
 		integrations: integrations,
 		retention:    retention,
+		aiPlugins:    aiPlugins,
 		crypto:       crypto,
 	}
 }

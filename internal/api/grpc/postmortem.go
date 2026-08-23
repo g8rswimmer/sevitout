@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/g8rswimmer/sevitout/internal/ai"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
@@ -29,7 +30,8 @@ type PostmortemServer struct {
 	sevs        store.SEVStore
 	audit       store.AuditStore
 	unlock      Unlocker
-	publisher   Publisher // nil when WebSocket support is not wired up
+	publisher   Publisher    // nil when WebSocket support is not wired up
+	aiDispatch  AIDispatcher // nil when no AI plugin is configured
 }
 
 // NewPostmortemServer returns a PostmortemServer backed by the given stores.
@@ -39,6 +41,7 @@ func NewPostmortemServer(
 	audit store.AuditStore,
 	unlock Unlocker,
 	publisher Publisher,
+	aiDispatch AIDispatcher,
 ) *PostmortemServer {
 	return &PostmortemServer{
 		postmortems: postmortems,
@@ -46,6 +49,7 @@ func NewPostmortemServer(
 		audit:       audit,
 		unlock:      unlock,
 		publisher:   publisher,
+		aiDispatch:  aiDispatch,
 	}
 }
 
@@ -171,8 +175,13 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 	})
 
 	resp := postmortemToProto(pm)
-	if sev, err := s.sevs.Get(ctx, req.GetSevId()); err == nil && !sev.Sensitive {
-		publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+	if sv, err := s.sevs.Get(ctx, req.GetSevId()); err == nil {
+		if !sv.Sensitive {
+			publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+		}
+		if toStatus == store.PostmortemStatusInReview && s.aiDispatch != nil && !sv.Sensitive && !sv.AIDisabled {
+			s.aiDispatch.Dispatch(ai.TriggerPostmortemInReview, req.GetSevId())
+		}
 	}
 
 	return resp, nil

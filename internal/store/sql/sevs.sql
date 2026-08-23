@@ -6,7 +6,7 @@ INSERT INTO sevs (
     monitoring_tool, right_people_present, right_people_notes, tags,
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-    locked, sensitive, created_at, updated_at, created_by
+    locked, sensitive, ai_disabled, created_at, updated_at, created_by
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
@@ -14,7 +14,7 @@ INSERT INTO sevs (
     $14, $15, $16, $17,
     $18, $19, $20, $21, $22,
     $23, $24, $25, $26,
-    $27, $28, $29, $30, $31
+    $27, $28, $29, $30, $31, $32
 );
 
 -- name: GetSEV :one
@@ -24,7 +24,7 @@ SELECT id, title, description, severity_level, status,
        monitoring_tool, right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by
 FROM sevs
 WHERE id = $1;
 
@@ -57,7 +57,8 @@ UPDATE sevs SET
     dttm_seconds           = $26,
     locked                 = $27,
     sensitive              = $28,
-    updated_at             = $29
+    ai_disabled            = $29,
+    updated_at             = $30
 WHERE id = $1;
 
 -- name: UpdateSEVLocked :exec
@@ -70,7 +71,7 @@ SELECT id, title, description, severity_level, status,
        monitoring_tool, right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by
 FROM sevs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;

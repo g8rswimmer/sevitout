@@ -1,0 +1,252 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "sevitout/v1/ai.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "AIService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/ai/plugins": {
+      "get": {
+        "summary": "ListPlugins returns the currently enabled AI plugins that\nTriggerAction/StreamAction can route to. Unlike\nConfigService.ListAIPlugins (Admin-only, full record), this is readable\nby any authenticated user and never includes credentials or handler\ninternals — just enough to populate a \"run AI action\" menu.",
+        "operationId": "AIService_ListPlugins",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListPluginsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/ai/actions": {
+      "post": {
+        "summary": "TriggerAction runs one AI action against a SEV and returns once the\nprovider responds; the result is also stored (ai_outputs) and broadcast\nover WebSocket as an ai.output event, same as a proactive trigger.",
+        "operationId": "AIService_TriggerAction",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIOutputResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AIServiceTriggerActionBody"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/ai/outputs": {
+      "get": {
+        "summary": "ListOutputs returns previously generated AI output for a SEV, proactive\nand user-triggered alike, oldest first.",
+        "operationId": "AIService_ListOutputs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAIOutputsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "AIServiceTriggerActionBody": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/v1AIAction"
+        },
+        "pluginId": {
+          "type": "string",
+          "format": "int64",
+          "description": "plugin_id selects which registered plugin to use. 0 (unset) uses the\nfirst enabled plugin found — sufficient for v1, where orgs are expected\nto configure at most one active plugin at a time."
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AIAction": {
+      "type": "string",
+      "enum": [
+        "AI_ACTION_UNSPECIFIED",
+        "AI_ACTION_SUMMARIZE",
+        "AI_ACTION_SUGGEST_ROOT_CAUSE",
+        "AI_ACTION_DRAFT_POSTMORTEM",
+        "AI_ACTION_SUGGEST_TASKS",
+        "AI_ACTION_FIND_SIMILAR",
+        "AI_ACTION_SUGGEST_RESPONDERS",
+        "AI_ACTION_DRAFT_ANNOUNCEMENT"
+      ],
+      "default": "AI_ACTION_UNSPECIFIED",
+      "description": "AIAction enumerates the Provider methods a caller can invoke on demand\n(§11.2) or that a lifecycle trigger invokes proactively (§11.1). Not every\naction is meaningful for every trigger — see internal/ai.Dispatcher."
+    },
+    "v1AIActionChunk": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "done": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1AIOutputResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "pluginId": {
+          "type": "string",
+          "format": "int64"
+        },
+        "triggerEvent": {
+          "type": "string",
+          "description": "trigger_event is the lifecycle event that produced this output (e.g.\n\"sev.opened\", \"sev.mitigated\", \"sev.resolved\", \"postmortem.in_review\"),\nor \"manual\" for a TriggerAction/StreamAction call."
+        },
+        "action": {
+          "$ref": "#/definitions/v1AIAction"
+        },
+        "content": {
+          "type": "string",
+          "description": "content is plain text for narrative actions (Summarize,\nDraftPostmortem, DraftAnnouncement) and JSON for structured, list-shaped\nactions (SuggestRootCause, SuggestTasks, FindSimilar, SuggestResponders).\nAlways clearly labeled AI-generated wherever the UI renders it (§11)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1AvailablePlugin": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      }
+    },
+    "v1ListAIOutputsResponse": {
+      "type": "object",
+      "properties": {
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AIOutputResponse"
+          }
+        }
+      }
+    },
+    "v1ListPluginsResponse": {
+      "type": "object",
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AvailablePlugin"
+          }
+        }
+      }
+    }
+  }
+}

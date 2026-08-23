@@ -1,6 +1,10 @@
 package grpc_test
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/g8rswimmer/sevitout/internal/ai"
+)
 
 // publishedEvent records one Publisher.Publish call, captured verbatim so
 // tests can assert on both the routing (sevID/eventType) and the payload
@@ -31,5 +35,33 @@ func (f *fakePublisher) All() []publishedEvent {
 	defer f.mu.Unlock()
 	out := make([]publishedEvent, len(f.events))
 	copy(out, f.events)
+	return out
+}
+
+// dispatchedTrigger records one AIDispatcher.Dispatch call.
+type dispatchedTrigger struct {
+	event ai.TriggerEvent
+	sevID string
+}
+
+// fakeAIDispatcher is a grpchandler.AIDispatcher that records every proactive
+// trigger instead of running internal/ai.Dispatcher's real worker pool.
+type fakeAIDispatcher struct {
+	mu       sync.Mutex
+	triggers []dispatchedTrigger
+}
+
+func (f *fakeAIDispatcher) Dispatch(event ai.TriggerEvent, sevID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.triggers = append(f.triggers, dispatchedTrigger{event: event, sevID: sevID})
+}
+
+// All returns a snapshot of every trigger dispatched so far.
+func (f *fakeAIDispatcher) All() []dispatchedTrigger {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]dispatchedTrigger, len(f.triggers))
+	copy(out, f.triggers)
 	return out
 }

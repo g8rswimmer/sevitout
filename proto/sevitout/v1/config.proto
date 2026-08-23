@@ -149,6 +149,42 @@ service ConfigService {
       get: "/v1/config/retention"
     };
   }
+
+  // --- AI plugin registration (§18.6) ---
+  //
+  // Registering, enabling/disabling, and configuring AI plugins (provider,
+  // model, encrypted API key, per-trigger enable flags, rate limit) is
+  // Admin-only, same as every other resource in this service. The
+  // functional, non-admin surface for actually running AI actions and
+  // reading their output lives on AIService (proto/sevitout/v1/ai.proto).
+
+  rpc CreateAIPlugin(CreateAIPluginRequest) returns (AIPluginResponse) {
+    option (google.api.http) = {
+      post: "/v1/config/ai-plugins"
+      body: "*"
+    };
+  }
+  rpc GetAIPlugin(GetAIPluginRequest) returns (AIPluginResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/ai-plugins/{id}"
+    };
+  }
+  rpc UpdateAIPlugin(UpdateAIPluginRequest) returns (AIPluginResponse) {
+    option (google.api.http) = {
+      patch: "/v1/config/ai-plugins/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteAIPlugin(DeleteAIPluginRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/config/ai-plugins/{id}"
+    };
+  }
+  rpc ListAIPlugins(ListAIPluginsRequest) returns (ListAIPluginsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/ai-plugins"
+    };
+  }
 }
 
 // ── Service registry ─────────────────────────────────────────────────────────
@@ -351,4 +387,84 @@ message ListRetentionConfigRequest {}
 
 message ListRetentionConfigResponse {
   repeated RetentionConfigResponse configs = 1;
+}
+
+// ── AI plugin registration ───────────────────────────────────────────────────
+
+message AIPluginResponse {
+  int64 id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+  // handler_type: "builtin" (internal/ai's built-in Anthropic provider) or "http".
+  string handler_type = 5;
+  string http_endpoint = 6;
+  string provider = 7;
+  string model = 8;
+  // api_key_configured is true when an encrypted API key has been stored;
+  // the decrypted value itself is never returned, same policy as
+  // IntegrationConfigResponse.credentials_configured.
+  bool api_key_configured = 9;
+  bool enabled = 10;
+  bool trigger_on_open = 11;
+  bool trigger_on_mitigated = 12;
+  bool trigger_on_resolved = 13;
+  bool trigger_on_postmortem_review = 14;
+  // rate_limit_per_minute caps AI actions per minute for this plugin; 0 means unlimited.
+  int32 rate_limit_per_minute = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
+}
+
+message CreateAIPluginRequest {
+  string name = 1;
+  string version = 2;
+  string description = 3;
+  string handler_type = 4;
+  string http_endpoint = 5;
+  string provider = 6;
+  string model = 7;
+  // api_key is write-only: encrypted with AES-256-GCM before storage, like
+  // UpsertIntegrationConfigRequest.credentials.
+  string api_key = 8;
+  bool enabled = 9;
+  bool trigger_on_open = 10;
+  bool trigger_on_mitigated = 11;
+  bool trigger_on_resolved = 12;
+  bool trigger_on_postmortem_review = 13;
+  int32 rate_limit_per_minute = 14;
+}
+
+message GetAIPluginRequest {
+  int64 id = 1;
+}
+
+message UpdateAIPluginRequest {
+  int64 id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+  string handler_type = 5;
+  string http_endpoint = 6;
+  string provider = 7;
+  string model = 8;
+  // api_key, when non-empty, replaces the stored key; omit to keep the
+  // existing one unchanged.
+  string api_key = 9;
+  google.protobuf.BoolValue enabled = 10;
+  google.protobuf.BoolValue trigger_on_open = 11;
+  google.protobuf.BoolValue trigger_on_mitigated = 12;
+  google.protobuf.BoolValue trigger_on_resolved = 13;
+  google.protobuf.BoolValue trigger_on_postmortem_review = 14;
+  int32 rate_limit_per_minute = 15;
+}
+
+message DeleteAIPluginRequest {
+  int64 id = 1;
+}
+
+message ListAIPluginsRequest {}
+
+message ListAIPluginsResponse {
+  repeated AIPluginResponse plugins = 1;
 }

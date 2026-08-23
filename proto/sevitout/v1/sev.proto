@@ -72,6 +72,9 @@ message SEVResponse {
   google.protobuf.Timestamp created_at = 29;
   google.protobuf.Timestamp updated_at = 30;
   string created_by = 31;
+  // ai_disabled opts this SEV out of all AI plugin dispatch, proactive and
+  // user-triggered (§11.3).
+  bool ai_disabled = 32;
 }
 
 message CreateSEVRequest {
@@ -87,6 +90,7 @@ message CreateSEVRequest {
   string monitoring_tool = 10;
   map<string, string> tags = 11;
   bool sensitive = 12;
+  bool ai_disabled = 13;
 }
 
 message GetSEVRequest {
@@ -116,6 +120,7 @@ message UpdateSEVRequest {
   string user_id = 20;
   // unlock_token is required when the SEV is locked (PostmortemComplete status).
   string unlock_token = 21;
+  google.protobuf.BoolValue ai_disabled = 22;
 }
 
 message ListSEVsRequest {

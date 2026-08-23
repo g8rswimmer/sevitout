@@ -35,6 +35,7 @@ type AiPlugin struct {
 	TriggerOnPostmortemReview bool               `json:"trigger_on_postmortem_review"`
 	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	RateLimitPerMinute        int32              `json:"rate_limit_per_minute"`
 }
 
 type AuditLog struct {
@@ -144,6 +145,7 @@ type Sev struct {
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
 	SearchVector          interface{}        `json:"search_vector"`
+	AiDisabled            bool               `json:"ai_disabled"`
 }
 
 type SevAnnouncement struct {

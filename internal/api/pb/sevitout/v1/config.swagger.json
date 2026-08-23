@@ -16,6 +16,156 @@
     "application/json"
   ],
   "paths": {
+    "/v1/config/ai-plugins": {
+      "get": {
+        "operationId": "ConfigService_ListAIPlugins",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAIPluginsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "post": {
+        "operationId": "ConfigService_CreateAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIPluginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateAIPluginRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/ai-plugins/{id}": {
+      "get": {
+        "operationId": "ConfigService_GetAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIPluginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "operationId": "ConfigService_DeleteAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "patch": {
+        "operationId": "ConfigService_UpdateAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIPluginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateAIPluginBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
     "/v1/config/integrations": {
       "get": {
         "operationId": "ConfigService_ListIntegrationConfigs",
@@ -658,6 +808,55 @@
     "ConfigServiceReactivateUserBody": {
       "type": "object"
     },
+    "ConfigServiceUpdateAIPluginBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handlerType": {
+          "type": "string"
+        },
+        "httpEndpoint": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "apiKey": {
+          "type": "string",
+          "description": "api_key, when non-empty, replaces the stored key; omit to keep the\nexisting one unchanged."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "triggerOnOpen": {
+          "type": "boolean"
+        },
+        "triggerOnMitigated": {
+          "type": "boolean"
+        },
+        "triggerOnResolved": {
+          "type": "boolean"
+        },
+        "triggerOnPostmortemReview": {
+          "type": "boolean"
+        },
+        "rateLimitPerMinute": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "ConfigServiceUpdateOnCallRotationBody": {
       "type": "object",
       "properties": {
@@ -779,6 +978,118 @@
         }
       }
     },
+    "v1AIPluginResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handlerType": {
+          "type": "string",
+          "description": "handler_type: \"builtin\" (internal/ai's built-in Anthropic provider) or \"http\"."
+        },
+        "httpEndpoint": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "apiKeyConfigured": {
+          "type": "boolean",
+          "description": "api_key_configured is true when an encrypted API key has been stored;\nthe decrypted value itself is never returned, same policy as\nIntegrationConfigResponse.credentials_configured."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "triggerOnOpen": {
+          "type": "boolean"
+        },
+        "triggerOnMitigated": {
+          "type": "boolean"
+        },
+        "triggerOnResolved": {
+          "type": "boolean"
+        },
+        "triggerOnPostmortemReview": {
+          "type": "boolean"
+        },
+        "rateLimitPerMinute": {
+          "type": "integer",
+          "format": "int32",
+          "description": "rate_limit_per_minute caps AI actions per minute for this plugin; 0 means unlimited."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1CreateAIPluginRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handlerType": {
+          "type": "string"
+        },
+        "httpEndpoint": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "apiKey": {
+          "type": "string",
+          "description": "api_key is write-only: encrypted with AES-256-GCM before storage, like\nUpsertIntegrationConfigRequest.credentials."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "triggerOnOpen": {
+          "type": "boolean"
+        },
+        "triggerOnMitigated": {
+          "type": "boolean"
+        },
+        "triggerOnResolved": {
+          "type": "boolean"
+        },
+        "triggerOnPostmortemReview": {
+          "type": "boolean"
+        },
+        "rateLimitPerMinute": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "v1CreateOnCallRotationRequest": {
       "type": "object",
       "properties": {
@@ -858,6 +1169,18 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "v1ListAIPluginsResponse": {
+      "type": "object",
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AIPluginResponse"
+          }
         }
       }
     },

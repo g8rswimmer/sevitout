@@ -294,6 +294,10 @@
         },
         "createdBy": {
           "type": "string"
+        },
+        "aiDisabled": {
+          "type": "boolean",
+          "description": "ai_disabled opts this SEV out of all AI plugin dispatch, proactive and\nuser-triggered (§11.3)."
         }
       }
     },

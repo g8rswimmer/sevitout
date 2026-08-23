@@ -1084,6 +1084,61 @@ func TestAIPluginStore(t *testing.T) {
 	})
 }
 
+// ── AIOutputStore ─────────────────────────────────────────────────────────────
+
+func TestAIOutputStore(t *testing.T) {
+	s := memory.NewAIOutputStore()
+
+	t.Run("ListEmpty", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 0 {
+			t.Fatalf("want 0, got %d", len(items))
+		}
+	})
+
+	t.Run("CreateAndList", func(t *testing.T) {
+		out1 := &store.AIOutput{SEVID: "SEV-2026-0001", PluginID: 1, TriggerEvent: "manual", Action: "summarize", Content: "first"}
+		out2 := &store.AIOutput{SEVID: "SEV-2026-0001", PluginID: 1, TriggerEvent: "sev.resolved", Action: "draft_postmortem", Content: "second"}
+		if err := s.Create(ctx, out1); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := s.Create(ctx, out2); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if out1.ID == 0 || out2.ID == 0 || out1.ID == out2.ID {
+			t.Fatalf("expected distinct assigned IDs, got %d and %d", out1.ID, out2.ID)
+		}
+
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2, got %d", len(items))
+		}
+		if items[0].Content != "first" || items[1].Content != "second" {
+			t.Fatal("expected insertion order preserved")
+		}
+	})
+
+	t.Run("ScopedBySEVID", func(t *testing.T) {
+		other := &store.AIOutput{SEVID: "SEV-2026-0002", PluginID: 1, TriggerEvent: "manual", Action: "summarize", Content: "unrelated"}
+		if err := s.Create(ctx, other); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2 (unaffected by other SEV's output), got %d", len(items))
+		}
+	})
+}
+
 // ── IntegrationConfigStore ────────────────────────────────────────────────────
 
 func TestIntegrationConfigStore(t *testing.T) {
