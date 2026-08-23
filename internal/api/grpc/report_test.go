@@ -77,6 +77,54 @@ func TestGetDashboardMetrics_ActiveByLevel(t *testing.T) {
 	}
 }
 
+func TestGetDashboardMetrics_ExcludesSensitiveSEVs(t *testing.T) {
+	ts := newTestReportServer()
+	mustCreateSEV(t, ts.sevs, &store.SEV{Title: "A", SeverityLevel: 1, Status: store.SEVStatusOpen})
+	mustCreateSEV(t, ts.sevs, &store.SEV{Title: "Secret", SeverityLevel: 1, Status: store.SEVStatusOpen, Sensitive: true})
+
+	resp, err := ts.server.GetDashboardMetrics(context.Background(), &pb.GetDashboardMetricsRequest{})
+	if err != nil {
+		t.Fatalf("GetDashboardMetrics: %v", err)
+	}
+
+	got := map[int32]int32{}
+	for _, c := range resp.GetActiveByLevel() {
+		got[c.GetSeverityLevel()] = c.GetCount()
+	}
+	if got[1] != 1 {
+		t.Errorf("severity 1 active count = %d, want 1 (sensitive SEV excluded)", got[1])
+	}
+}
+
+func TestGetSEVTrends_ExcludesSensitiveSEVs(t *testing.T) {
+	ts := newTestReportServer()
+	cat := "deployment"
+	mustCreateSEV(t, ts.sevs, &store.SEV{Title: "A", SeverityLevel: 2, AffectedServices: []string{"checkout"}, RootCauseCategory: &cat})
+	mustCreateSEV(t, ts.sevs, &store.SEV{Title: "Secret", SeverityLevel: 2, AffectedServices: []string{"checkout"}, RootCauseCategory: &cat, Sensitive: true})
+
+	resp, err := ts.server.GetSEVTrends(context.Background(), &pb.GetSEVTrendsRequest{})
+	if err != nil {
+		t.Fatalf("GetSEVTrends: %v", err)
+	}
+	if len(resp.GetRecurringPatterns()) != 0 {
+		t.Errorf("recurring patterns = %v, want none (only 1 non-sensitive SEV in the group)", resp.GetRecurringPatterns())
+	}
+}
+
+func TestExportSEVs_ExcludesSensitiveSEVs(t *testing.T) {
+	ts := newTestReportServer()
+	mustCreateSEV(t, ts.sevs, &store.SEV{Title: "A", SeverityLevel: 1, Status: store.SEVStatusOpen})
+	mustCreateSEV(t, ts.sevs, &store.SEV{Title: "Secret", SeverityLevel: 1, Status: store.SEVStatusOpen, Sensitive: true})
+
+	body, err := ts.server.ExportSEVs(context.Background(), &pb.ExportSEVsRequest{})
+	if err != nil {
+		t.Fatalf("ExportSEVs: %v", err)
+	}
+	if strings.Contains(string(body.GetData()), "Secret") {
+		t.Errorf("CSV export contains a sensitive SEV's title:\n%s", body.GetData())
+	}
+}
+
 func TestGetDashboardMetrics_MTTRTrend(t *testing.T) {
 	ts := newTestReportServer()
 	now := time.Now()

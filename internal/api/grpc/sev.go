@@ -94,6 +94,11 @@ func (s *SEVServer) autoLinkRecurrence(ctx context.Context, record *store.SEV, c
 		ServiceIDs:        record.AffectedServices,
 		RootCauseCategory: *record.RootCauseCategory,
 		Limit:             5,
+		// A non-sensitive SEV shouldn't get auto-linked to a Sensitive one —
+		// that would surface the sensitive SEV's ID (via ListLinkedSEVs) to
+		// anyone who can view the new, non-sensitive record. Same rationale
+		// as SearchServer's ExcludeSensitive use (search.go).
+		ExcludeSensitive: true,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "recurrence auto-link lookup failed", "sev_id", record.ID, "err", err)

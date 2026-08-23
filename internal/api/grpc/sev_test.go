@@ -598,6 +598,39 @@ func TestUpdateSEV_AutoLinksRecurrence_SameServiceAndCategory(t *testing.T) {
 	}
 }
 
+func TestUpdateSEV_NoAutoLinkToSensitiveSEV(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	first, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Sensitive outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"}, Sensitive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(first): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: first.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(first): %v", err)
+	}
+
+	second, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Second outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(second): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: second.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(second): %v", err)
+	}
+
+	// A non-sensitive SEV must never get auto-linked to a Sensitive one —
+	// that would surface the sensitive SEV's ID to anyone who can view the
+	// new, non-sensitive record via ListLinkedSEVs.
+	links, _ := ts.links.ListBySEVID(ctx, second.GetId())
+	if len(links) != 0 {
+		t.Errorf("want no auto-link to a sensitive SEV, got %+v", links)
+	}
+}
+
 func TestUpdateSEV_NoAutoLinkForDifferentService(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()

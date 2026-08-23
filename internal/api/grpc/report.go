@@ -88,6 +88,11 @@ func (s *ReportServer) ExportSEVs(ctx context.Context, req *pb.ExportSEVsRequest
 		RootCauseCategory: req.GetRootCauseCategory(),
 		ServiceIDs:        req.GetServiceIds(),
 		Limit:             reportFanoutLimit,
+		// Reports/exports are Viewer-accessible; there's no sensitive-SEV
+		// visibility/ACL mechanism yet (docs/requirements.md §14), so these
+		// shouldn't be a way a Sensitive SEV's content leaks out. Same
+		// rationale as SearchServer's ExcludeSensitive use (search.go).
+		ExcludeSensitive: true,
 	}
 	for _, l := range req.GetSeverityLevels() {
 		filter.SeverityLevels = append(filter.SeverityLevels, int16(l))
@@ -127,7 +132,7 @@ func (s *ReportServer) ExportSEVs(ctx context.Context, req *pb.ExportSEVsRequest
 // (rather than silently truncating) if it hits reportFanoutLimit — the same
 // defensive pattern SearchServer.searchWithAnnouncements uses.
 func (s *ReportServer) fetchAllSEVs(ctx context.Context) ([]*store.SEV, error) {
-	records, err := s.sevs.List(ctx, store.SEVFilter{Limit: reportFanoutLimit})
+	records, err := s.sevs.List(ctx, store.SEVFilter{Limit: reportFanoutLimit, ExcludeSensitive: true})
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to list SEVs")
 	}
