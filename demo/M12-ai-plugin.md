@@ -45,7 +45,8 @@ authenticated user.
 - M05 (postmortem) and M10 (Config API, `ENCRYPTION_KEY`) complete
 - `ENCRYPTION_KEY` set — required to register a plugin with an `api_key`; this demo's
   HTTP plugin doesn't need one, so it works without it too
-- `curl`, `jq`, and `python3` (to run a one-line mock AI endpoint) installed
+- `curl` and `jq` installed (the mock AI endpoint below is plain Go, so no extra
+  runtime is needed beyond the Go toolchain this repo already requires)
 
 ---
 
@@ -85,40 +86,83 @@ TOKEN=$(curl -s -X POST http://localhost:8080/auth/login \
 
 `HTTPProvider` POSTs `{"action": "...", "sev": {...}}` to a configured endpoint and
 expects back whichever field matches the action (see `internal/ai/provider_http.go`).
-This one-liner answers every action the same way, which is enough to exercise the
-whole pipeline without a real AI vendor:
+This small script answers every action the same way, which is enough to exercise the
+whole pipeline without a real AI vendor. It listens on `0.0.0.0:8899` rather than
+`127.0.0.1:8899` — this **must** run on the host (not inside a container), and if
+the API server itself is running via `make up`/Docker Compose, the `api` container
+needs to reach *this host* process, not something inside its own network namespace:
 
 ```bash
-python3 -c '
-import json, http.server
+cat > /tmp/mock-ai.go <<'EOF'
+package main
 
-class H(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        length = int(self.headers["Content-Length"])
-        req = json.loads(self.rfile.read(length))
-        action = req["action"]
-        resp = {
-            "summarize": {"text": "The checkout service returned elevated 500s after a bad deploy."},
-            "draft_announcement": {"text": "We are investigating elevated errors on checkout."},
-            "suggest_root_cause": {"root_causes": [{"category": "deployment", "rationale": "coincides with a recent release"}]},
-            "draft_postmortem": {"postmortem": {"summary": "Checkout degraded for 20 minutes.", "root_cause": "TBD", "action_items": "Add a canary stage."}},
-            "suggest_tasks": {"tasks": [{"title": "Add canary deploy stage", "priority": "critical", "relationship_type": "action-item"}]},
-            "find_similar": {"similar": []},
-            "suggest_responders": {"responders": [{"role": "Incident Commander", "rationale": "SEV-1, needs coordination"}]},
-        }.get(action, {"text": "ok"})
-        body = json.dumps(resp).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body)
-    def log_message(self, *args): pass
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+)
 
-http.server.HTTPServer(("127.0.0.1", 8899), H).serve_forever()
-' &
+func main() {
+	responses := map[string]any{
+		"summarize":          map[string]string{"text": "The checkout service returned elevated 500s after a bad deploy."},
+		"draft_announcement": map[string]string{"text": "We are investigating elevated errors on checkout."},
+		"suggest_root_cause": map[string]any{"root_causes": []map[string]string{
+			{"category": "deployment", "rationale": "coincides with a recent release"},
+		}},
+		"draft_postmortem": map[string]any{"postmortem": map[string]string{
+			"summary": "Checkout degraded for 20 minutes.", "root_cause": "TBD", "action_items": "Add a canary stage.",
+		}},
+		"suggest_tasks": map[string]any{"tasks": []map[string]string{
+			{"title": "Add canary deploy stage", "priority": "critical", "relationship_type": "action-item"},
+		}},
+		"find_similar": map[string]any{"similar": []any{}},
+		"suggest_responders": map[string]any{"responders": []map[string]string{
+			{"role": "Incident Commander", "rationale": "SEV-1, needs coordination"},
+		}},
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Action string `json:"action"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, ok := responses[req.Action]
+		if !ok {
+			resp = map[string]string{"text": "ok"}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	log.Fatal(http.ListenAndServe("0.0.0.0:8899", nil))
+}
+EOF
+
+go run /tmp/mock-ai.go &
 MOCK_PID=$!
 ```
 
 (Run `kill $MOCK_PID` when you're done with the demo.)
+
+Pick the hostname the **API server** will use to reach it, based on how you started
+the stack in the previous section:
+
+```bash
+# make up / docker compose: the api container reaches the host via Docker
+# Desktop's special DNS name (Mac/Windows only — see Known limitations for Linux).
+AI_ENDPOINT=http://host.docker.internal:8899
+
+# go run ./cmd/server (no Docker): the server is just another process on
+# localhost, so plain loopback works.
+# AI_ENDPOINT=http://127.0.0.1:8899
+```
+
+Using `127.0.0.1` while the server runs in Docker is exactly what produces
+`"connect: connection refused"` in the `api` container's logs — `127.0.0.1` inside
+that container refers to the container itself, which has nothing listening on 8899.
 
 ### 2. Register the plugin
 
@@ -129,7 +173,7 @@ PLUGIN=$(curl -s -X POST http://localhost:8080/v1/config/ai-plugins \
     "name": "demo-mock",
     "version": "1.0.0",
     "handler_type": "http",
-    "http_endpoint": "http://127.0.0.1:8899",
+    "http_endpoint": "'"$AI_ENDPOINT"'",
     "enabled": true,
     "trigger_on_open": true,
     "trigger_on_mitigated": true,
@@ -261,6 +305,13 @@ Key coverage:
 
 ## Known limitations
 
+- `host.docker.internal` (step 1's `AI_ENDPOINT` for the `make up` case) is resolved
+  automatically inside containers by Docker **Desktop** (Mac/Windows) only. On Linux
+  Docker Engine it isn't available unless `deploy/docker-compose.yml`'s `api` service
+  adds `extra_hosts: ["host.docker.internal:host-gateway"]` (Docker Engine 20.10+),
+  which it doesn't today — on plain Linux Docker, run the server via
+  `go run ./cmd/server` for this demo instead, or run the mock endpoint as its own
+  container on the compose network and point `http_endpoint` at its service name.
 - `AIPluginStore`/`AIOutputStore` are in-memory only even when `DATABASE_URL` is set —
   same "postgres implementation deferred" treatment M10 gave `IntegrationConfigStore`
   and `RetentionConfigStore` (the `ai_plugins`/`ai_outputs` tables themselves have
