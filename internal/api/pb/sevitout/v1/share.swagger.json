@@ -1,12 +1,12 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "sevitout/v1/postmortem.proto",
+    "title": "sevitout/v1/share.proto",
     "version": "version not set"
   },
   "tags": [
     {
-      "name": "PostmortemService"
+      "name": "ShareService"
     }
   ],
   "consumes": [
@@ -16,42 +16,15 @@
     "application/json"
   ],
   "paths": {
-    "/v1/sevs/{sevId}/postmortem": {
-      "get": {
-        "operationId": "PostmortemService_GetPostmortem",
+    "/v1/sevs/{sevId}/share": {
+      "post": {
+        "summary": "CreateShareLink is rejected for a Sensitive SEV (§14.1: \"Sensitive SEVs\ncannot have shareable links generated\").",
+        "operationId": "ShareService_CreateShareLink",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/v1PostmortemResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/rpcStatus"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "sevId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "PostmortemService"
-        ]
-      },
-      "patch": {
-        "operationId": "PostmortemService_UpdatePostmortem",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/v1PostmortemResponse"
+              "$ref": "#/definitions/v1ShareLinkResponse"
             }
           },
           "default": {
@@ -73,23 +46,24 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/PostmortemServiceUpdatePostmortemBody"
+              "$ref": "#/definitions/ShareServiceCreateShareLinkBody"
             }
           }
         ],
         "tags": [
-          "PostmortemService"
+          "ShareService"
         ]
       }
     },
-    "/v1/sevs/{sevId}/postmortem/transition": {
-      "post": {
-        "operationId": "PostmortemService_TransitionPostmortemStatus",
+    "/v1/sevs/{sevId}/share/{token}": {
+      "delete": {
+        "operationId": "ShareService_RevokeShareLink",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/v1PostmortemResponse"
+              "type": "object",
+              "properties": {}
             }
           },
           "default": {
@@ -107,94 +81,28 @@
             "type": "string"
           },
           {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/PostmortemServiceTransitionPostmortemStatusBody"
-            }
-          }
-        ],
-        "tags": [
-          "PostmortemService"
-        ]
-      }
-    },
-    "/v1/sevs/{sevId}/unlock": {
-      "post": {
-        "operationId": "PostmortemService_UnlockSEV",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/v1UnlockSEVResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/rpcStatus"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "sevId",
+            "name": "token",
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/PostmortemServiceUnlockSEVBody"
-            }
           }
         ],
         "tags": [
-          "PostmortemService"
+          "ShareService"
         ]
       }
     }
   },
   "definitions": {
-    "PostmortemServiceTransitionPostmortemStatusBody": {
+    "ShareServiceCreateShareLinkBody": {
       "type": "object",
       "properties": {
-        "toStatus": {
-          "type": "string",
-          "title": "to_status must be one of: draft, in-review, approved"
+        "expiresInDays": {
+          "type": "integer",
+          "format": "int32",
+          "description": "expires_in_days: how many days from now the link stays valid. Defaults\nto 30 when unset or \u003c= 0."
         },
-        "userId": {
-          "type": "string"
-        }
-      }
-    },
-    "PostmortemServiceUnlockSEVBody": {
-      "type": "object",
-      "properties": {
-        "reason": {
-          "type": "string",
-          "description": "reason is required and is written to the audit log."
-        },
-        "userId": {
-          "type": "string"
-        }
-      }
-    },
-    "PostmortemServiceUpdatePostmortemBody": {
-      "type": "object",
-      "properties": {
-        "content": {
-          "type": "string"
-        },
-        "unlockToken": {
-          "type": "string",
-          "description": "unlock_token is required when the SEV is locked (PostmortemComplete status)."
-        },
-        "userId": {
+        "createdBy": {
           "type": "string"
         }
       }
@@ -229,7 +137,7 @@
         }
       }
     },
-    "v1PostmortemResponse": {
+    "v1ShareLinkResponse": {
       "type": "object",
       "properties": {
         "id": {
@@ -239,31 +147,26 @@
         "sevId": {
           "type": "string"
         },
-        "status": {
+        "token": {
           "type": "string"
         },
-        "content": {
+        "path": {
+          "type": "string",
+          "description": "path is the public view's URL path on this server — GET path needs no\nauthentication and returns the curated public SEV view."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "createdBy": {
           "type": "string"
         },
         "createdAt": {
           "type": "string",
           "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "updatedBy": {
-          "type": "string"
-        }
-      }
-    },
-    "v1UnlockSEVResponse": {
-      "type": "object",
-      "properties": {
-        "unlockToken": {
-          "type": "string",
-          "description": "unlock_token is a short-lived JWT scoped to sev_id.\nPass it as unlock_token in subsequent mutation requests."
         }
       }
     }

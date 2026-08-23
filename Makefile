@@ -10,6 +10,7 @@ GATEWAY_PROTO = $(shell go env GOPATH)/pkg/mod/github.com/grpc-ecosystem/grpc-ga
 proto:
 	protoc \
 	  -I $(PROTO_DIR) \
+	  -I $(PROTO_DIR)/third_party \
 	  -I $(GATEWAY_PROTO) \
 	  --go_out=$(PB_OUT) --go_opt=module=github.com/g8rswimmer/sevitout \
 	  --go-grpc_out=$(PB_OUT) --go-grpc_opt=module=github.com/g8rswimmer/sevitout \

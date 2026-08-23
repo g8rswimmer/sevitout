@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/api/httpbody.proto";
+import "google/protobuf/timestamp.proto";
+
+// ReportService provides dashboard metrics, recurring-incident trend
+// detection, and CSV export over SEV records (docs/requirements.md §17).
+service ReportService {
+  rpc GetDashboardMetrics(GetDashboardMetricsRequest) returns (DashboardMetricsResponse) {
+    option (google.api.http) = {
+      get: "/v1/reports/dashboard"
+    };
+  }
+  // GetSEVTrends surfaces recurring failure patterns: SEVs sharing the same
+  // affected service and root cause category (§17's "recurring incident
+  // flag").
+  rpc GetSEVTrends(GetSEVTrendsRequest) returns (SEVTrendsResponse) {
+    option (google.api.http) = {
+      get: "/v1/reports/trends"
+    };
+  }
+  // ExportSEVs returns a filtered SEV list as CSV. The response is raw
+  // text/csv bytes (google.api.HttpBody), not JSON — cmd/server/main.go
+  // wraps the gateway's marshaler in runtime.HTTPBodyMarshaler, which
+  // detects this response type and writes GetData() as the HTTP body with
+  // GetContentType() as Content-Type instead of JSON-encoding it.
+  rpc ExportSEVs(ExportSEVsRequest) returns (google.api.HttpBody) {
+    option (google.api.http) = {
+      get: "/v1/sevs/export.csv"
+    };
+  }
+}
+
+message GetDashboardMetricsRequest {}
+
+message ActiveSEVCount {
+  int32 severity_level = 1;
+  int32 count = 2;
+}
+
+message MTTRTrend {
+  // window_days is one of: 7, 30, 90.
+  int32 window_days = 1;
+  // average_mttr_seconds is the mean MTTRSeconds across SEVs resolved within
+  // the last window_days days. 0 when no SEV resolved in that window.
+  int64 average_mttr_seconds = 2;
+  int32 sample_size = 3;
+}
+
+message ServiceLevelFrequency {
+  string service_id = 1;
+  int32 severity_level = 2;
+  int32 count = 3;
+}
+
+message DashboardMetricsResponse {
+  repeated ActiveSEVCount active_by_level = 1;
+  // mttr_trends always has exactly 3 entries: 7, 30, and 90-day windows.
+  repeated MTTRTrend mttr_trends = 2;
+  repeated ServiceLevelFrequency frequency_by_service_and_level = 3;
+  // postmortem_completion_rate is approved postmortems divided by total
+  // postmortems, in [0, 1]. 0 when there are no postmortems yet.
+  double postmortem_completion_rate = 4;
+  int32 overdue_task_count = 5;
+}
+
+message GetSEVTrendsRequest {}
+
+message RecurringPattern {
+  string service_id = 1;
+  string root_cause_category = 2;
+  int32 count = 3;
+  // sev_ids is sorted most-recently-created first.
+  repeated string sev_ids = 4;
+}
+
+message SEVTrendsResponse {
+  repeated RecurringPattern recurring_patterns = 1;
+}
+
+message ExportSEVsRequest {
+  repeated int32 severity_levels = 1;
+  repeated string statuses = 2;
+  repeated string service_ids = 3;
+  string root_cause_category = 4;
+  google.protobuf.Timestamp started_after = 5;
+  google.protobuf.Timestamp started_before = 6;
+}

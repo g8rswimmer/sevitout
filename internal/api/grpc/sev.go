@@ -41,6 +41,7 @@ type SEVServer struct {
 	roles       store.RoleStore
 	services    store.ServiceStore
 	postmortems store.PostmortemStore
+	links       store.SEVLinkStore
 	onCaller    OnCaller // nil when PagerDuty is not configured
 	unlock      Unlocker
 	publisher   Publisher    // nil when WebSocket support is not wired up
@@ -54,6 +55,7 @@ func NewSEVServer(
 	roles store.RoleStore,
 	services store.ServiceStore,
 	postmortems store.PostmortemStore,
+	links store.SEVLinkStore,
 	onCaller OnCaller,
 	unlock Unlocker,
 	publisher Publisher,
@@ -66,10 +68,58 @@ func NewSEVServer(
 		roles:       roles,
 		services:    services,
 		postmortems: postmortems,
+		links:       links,
 		onCaller:    onCaller,
 		unlock:      unlock,
 		publisher:   publisher,
 		aiDispatch:  aiDispatch,
+	}
+}
+
+// autoLinkRecurrence implements docs/requirements.md §17's "recurring
+// incident flag": when record has a root cause category set, look for the
+// most recent other SEV sharing both that category and at least one
+// affected service, and link record → that SEV as recurrence-of. Only the
+// single most recent match is linked (not every match) so one common
+// service+category pair doesn't fan out into a link per historical
+// incident — "recurrence of" reads most naturally as "the same pattern seen
+// last time" anyway. Best-effort: failures are logged, never surfaced to the
+// caller, matching the on-call auto-population pattern in CreateSEV above.
+func (s *SEVServer) autoLinkRecurrence(ctx context.Context, record *store.SEV, callerID string) {
+	if record.RootCauseCategory == nil || *record.RootCauseCategory == "" || len(record.AffectedServices) == 0 {
+		return
+	}
+
+	matches, err := s.sevs.List(ctx, store.SEVFilter{
+		ServiceIDs:        record.AffectedServices,
+		RootCauseCategory: *record.RootCauseCategory,
+		Limit:             5,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "recurrence auto-link lookup failed", "sev_id", record.ID, "err", err)
+		return
+	}
+
+	var prior *store.SEV
+	for _, m := range matches {
+		if m.ID != record.ID {
+			prior = m
+			break
+		}
+	}
+	if prior == nil {
+		return
+	}
+
+	err = s.links.Create(ctx, &store.SEVLink{
+		SourceSEVID:      record.ID,
+		TargetSEVID:      prior.ID,
+		RelationshipType: store.SEVRelationshipRecurrenceOf,
+		CreatedAt:        time.Now(),
+		CreatedBy:        callerID,
+	})
+	if err != nil && !errors.Is(err, store.ErrConflict) {
+		slog.ErrorContext(ctx, "recurrence auto-link create failed", "sev_id", record.ID, "target_sev_id", prior.ID, "err", err)
 	}
 }
 
@@ -192,6 +242,14 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 	// stored record, since this async trigger may run after further writes.
 	s.dispatchAI(ai.TriggerSEVOpened, record)
 
+	// §17's "new SEV auto-linked on create": root cause category isn't part
+	// of CreateSEVRequest today (it's set later via UpdateSEV, once
+	// investigation identifies it — see the equivalent call there), so this
+	// will normally be a no-op at creation time. It's still called here so
+	// the rare caller that does have a root cause pinned down immediately
+	// gets the same auto-link behavior as everyone else.
+	s.autoLinkRecurrence(ctx, record, callerID)
+
 	return resp, nil
 }
 
@@ -240,7 +298,11 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		}
 		record.SeverityLevel = int16(v)
 	}
+	rootCauseCategoryChanged := false
 	if v := req.GetRootCauseCategory(); v != "" {
+		if record.RootCauseCategory == nil || *record.RootCauseCategory != v {
+			rootCauseCategoryChanged = true
+		}
 		record.RootCauseCategory = &v
 	}
 	if v := req.GetRootCauseDescription(); v != "" {
@@ -314,6 +376,15 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	resp := sevToProto(record)
 	if !record.Sensitive {
 		publishProto(s.publisher, record.ID, "sev.updated", resp)
+	}
+
+	// §17's "new SEV auto-linked on create": in practice, root cause category
+	// is usually identified during investigation rather than at creation
+	// time (see the equivalent call in CreateSEV), so this is the point
+	// where recurrence detection actually fires for most SEVs — only when
+	// the category was just set or changed, not on every unrelated update.
+	if rootCauseCategoryChanged {
+		s.autoLinkRecurrence(ctx, record, updaterID)
 	}
 
 	return resp, nil

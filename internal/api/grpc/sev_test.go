@@ -21,6 +21,7 @@ type testSEVServer struct {
 	sevs    *memory.SEVStore
 	audit   *memory.AuditStore
 	history *memory.StatusHistoryStore
+	links   *memory.SEVLinkStore
 	pub     *fakePublisher
 	ai      *fakeAIDispatcher
 }
@@ -30,13 +31,15 @@ func newTestSEVServer() *testSEVServer {
 	sevs := memory.NewSEVStore()
 	audit := memory.NewAuditStore()
 	history := memory.NewStatusHistoryStore()
+	links := memory.NewSEVLinkStore()
 	pub := &fakePublisher{}
 	aiDispatch := &fakeAIDispatcher{}
 	return &testSEVServer{
-		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), nil, nil, pub, aiDispatch),
+		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), links, nil, nil, pub, aiDispatch),
 		sevs:    sevs,
 		audit:   audit,
 		history: history,
+		links:   links,
 		pub:     pub,
 		ai:      aiDispatch,
 	}
@@ -551,5 +554,143 @@ func TestTransitionStatus_InvestigatingDoesNotDispatchAI(t *testing.T) {
 
 	if triggers := ts.ai.All(); len(triggers) != 0 {
 		t.Errorf("triggers = %+v, want none for a transition to investigating", triggers)
+	}
+}
+
+// ── Recurrence auto-link (§17) ───────────────────────────────────────────────
+
+func TestUpdateSEV_AutoLinksRecurrence_SameServiceAndCategory(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	first, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "First outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(first): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: first.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(first): %v", err)
+	}
+
+	second, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Second outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(second): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: second.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(second): %v", err)
+	}
+
+	links, err := ts.links.ListBySEVID(ctx, second.GetId())
+	if err != nil {
+		t.Fatalf("ListBySEVID: %v", err)
+	}
+	found := false
+	for _, l := range links {
+		if l.SourceSEVID == second.GetId() && l.TargetSEVID == first.GetId() && l.RelationshipType == store.SEVRelationshipRecurrenceOf {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want a recurrence-of link from %s to %s, got %+v", second.GetId(), first.GetId(), links)
+	}
+}
+
+func TestUpdateSEV_NoAutoLinkForDifferentService(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	first, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "API outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(first): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: first.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(first): %v", err)
+	}
+
+	second, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "DB outage", SeverityLevel: 2, AffectedServices: []string{"svc-db"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(second): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: second.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(second): %v", err)
+	}
+
+	links, _ := ts.links.ListBySEVID(ctx, second.GetId())
+	if len(links) != 0 {
+		t.Errorf("want no auto-link for a different affected service, got %+v", links)
+	}
+}
+
+func TestUpdateSEV_NoAutoLinkForDifferentCategory(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	first, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "First outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(first): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: first.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(first): %v", err)
+	}
+
+	second, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Second outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(second): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: second.GetId(), RootCauseCategory: "hardware"}); err != nil {
+		t.Fatalf("UpdateSEV(second): %v", err)
+	}
+
+	links, _ := ts.links.ListBySEVID(ctx, second.GetId())
+	if len(links) != 0 {
+		t.Errorf("want no auto-link for a different root cause category, got %+v", links)
+	}
+}
+
+func TestUpdateSEV_UnrelatedUpdateDoesNotReLink(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	first, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "First outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(first): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: first.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(first): %v", err)
+	}
+
+	second, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Second outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV(second): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: second.GetId(), RootCauseCategory: "deployment"}); err != nil {
+		t.Fatalf("UpdateSEV(second): %v", err)
+	}
+	// An unrelated follow-up update (root cause category unchanged) must not
+	// attempt to re-link (which would otherwise surface as a duplicate-link
+	// error being silently swallowed — this asserts the guard that prevents
+	// the attempt in the first place).
+	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: second.GetId(), Mitigation: "rolled back the bad deploy"}); err != nil {
+		t.Fatalf("UpdateSEV(second, unrelated): %v", err)
+	}
+
+	links, _ := ts.links.ListBySEVID(ctx, second.GetId())
+	if len(links) != 1 {
+		t.Errorf("want exactly 1 link after an unrelated update, got %+v", links)
 	}
 }

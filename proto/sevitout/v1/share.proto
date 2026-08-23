@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// ShareService creates and revokes public, read-only shareable links for a
+// SEV (docs/requirements.md §14.1). The public view itself — fetching a SEV
+// by token, no login required — is deliberately NOT an RPC on this service:
+// every gRPC method, and every REST route grpc-gateway generates from one,
+// passes through the JWT auth interceptor unconditionally
+// (internal/auth/interceptor.go), so a route that must work without a login
+// can't be implemented as one. It's served instead by a plain net/http
+// handler (internal/api/grpc.ShareViewHandler, GET /s/{token}, registered
+// directly on the HTTP mux ahead of the gateway) — the same pattern this
+// codebase already uses for /ws and /admin/integrations/health, the other
+// two endpoints that can't go through the interceptor.
+service ShareService {
+  // CreateShareLink is rejected for a Sensitive SEV (§14.1: "Sensitive SEVs
+  // cannot have shareable links generated").
+  rpc CreateShareLink(CreateShareLinkRequest) returns (ShareLinkResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/share"
+      body: "*"
+    };
+  }
+  rpc RevokeShareLink(RevokeShareLinkRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/sevs/{sev_id}/share/{token}"
+    };
+  }
+}
+
+message ShareLinkResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  string token = 3;
+  // path is the public view's URL path on this server — GET path needs no
+  // authentication and returns the curated public SEV view.
+  string path = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  bool revoked = 6;
+  string created_by = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message CreateShareLinkRequest {
+  string sev_id = 1;
+  // expires_in_days: how many days from now the link stays valid. Defaults
+  // to 30 when unset or <= 0.
+  int32 expires_in_days = 2;
+  string created_by = 3;
+}
+
+message RevokeShareLinkRequest {
+  string sev_id = 1;
+  string token = 2;
+}

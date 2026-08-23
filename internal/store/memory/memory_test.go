@@ -454,6 +454,28 @@ func TestPostmortemStore(t *testing.T) {
 			t.Fatal("status not updated")
 		}
 	})
+
+	t.Run("CountByStatus", func(t *testing.T) {
+		if err := s.Create(ctx, &store.Postmortem{
+			SEVID:     "SEV-2026-0002",
+			Status:    store.PostmortemStatusApproved,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		counts, err := s.CountByStatus(ctx)
+		if err != nil {
+			t.Fatalf("CountByStatus: %v", err)
+		}
+		// pm was moved to InReview above; the freshly-created one is Approved.
+		if counts[store.PostmortemStatusInReview] != 1 {
+			t.Errorf("InReview count = %d, want 1", counts[store.PostmortemStatusInReview])
+		}
+		if counts[store.PostmortemStatusApproved] != 1 {
+			t.Errorf("Approved count = %d, want 1", counts[store.PostmortemStatusApproved])
+		}
+	})
 }
 
 // ── AuditStore ────────────────────────────────────────────────────────────────
@@ -665,6 +687,31 @@ func TestTaskStore(t *testing.T) {
 		}
 		if len(items) != 1 {
 			t.Fatalf("want 1, got %d", len(items))
+		}
+	})
+
+	t.Run("CountOverdue", func(t *testing.T) {
+		past := time.Now().Add(-24 * time.Hour)
+		if err := s.Create(ctx, &store.LinkedTask{
+			SEVID:            "SEV-2026-0002",
+			ExternalSystem:   "github",
+			TaskID:           "99",
+			URL:              "https://github.com/org/repo/issues/99",
+			Title:            "Overdue task",
+			RelationshipType: store.TaskRelationshipActionItem,
+			Priority:         store.TaskPriorityCritical,
+			DueDate:          &past,
+			CreatedBy:        "user-1",
+		}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		n, err := s.CountOverdue(ctx, time.Now())
+		if err != nil {
+			t.Fatalf("CountOverdue: %v", err)
+		}
+		// task (no due date) is not overdue; the freshly-created one is.
+		if n != 1 {
+			t.Errorf("CountOverdue = %d, want 1", n)
 		}
 	})
 

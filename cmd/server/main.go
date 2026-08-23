@@ -27,6 +27,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/integrations/slack"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
+	"github.com/g8rswimmer/sevitout/internal/share"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/crypto"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
@@ -42,7 +43,7 @@ func main() {
 
 	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore,
 		announcementStore, chatStore, sevLinkStore, taskStore, onCallStore, integrationConfigStore,
-		retentionConfigStore, aiPluginStore, aiOutputStore := buildStores(ctx, log)
+		retentionConfigStore, aiPluginStore, aiOutputStore, shareStore := buildStores(ctx, log)
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
@@ -77,6 +78,9 @@ func main() {
 	// --- Unlock token signer (reuses JWT_SECRET; 15-min TTL) ---
 	unlockSigner := postmortem.NewUnlockSigner(jwtSecret)
 
+	// --- Shareable link signer (reuses JWT_SECRET; per-link expiry) ---
+	shareSigner := share.NewSigner(jwtSecret)
+
 	// --- Credential encryptor (optional): integration credentials are only
 	// encryptable/decryptable when ENCRYPTION_KEY is set. Config API writes
 	// that include credentials are rejected while it's absent. ---
@@ -107,7 +111,9 @@ func main() {
 	aiDispatcher := ai.NewDispatcher(ctx, sevStore, historyStore, announcementStore, aiPluginStore, aiOutputStore, encryptor, wsHub, log, 0)
 
 	// --- gRPC server with auth interceptors ---
-	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, postmortemStore, onCaller, unlockSigner, wsHub, aiDispatcher)
+	sevServer := grpchandler.NewSEVServer(sevStore, auditStore, historyStore, roleStore, serviceStore, postmortemStore, sevLinkStore, onCaller, unlockSigner, wsHub, aiDispatcher)
+	reportServer := grpchandler.NewReportServer(sevStore, postmortemStore, taskStore)
+	shareServer := grpchandler.NewShareServer(shareStore, sevStore, auditStore, shareSigner)
 	auditServer := grpchandler.NewAuditServer(auditStore)
 	authServer := grpchandler.NewAuthServer(userStore)
 	roleServer := grpchandler.NewRoleServer(roleStore, sevStore, auditStore, wsHub)
@@ -136,6 +142,8 @@ func main() {
 	pb.RegisterSearchServiceServer(grpcSrv, searchServer)
 	pb.RegisterConfigServiceServer(grpcSrv, configServer)
 	pb.RegisterAIServiceServer(grpcSrv, aiServer)
+	pb.RegisterReportServiceServer(grpcSrv, reportServer)
+	pb.RegisterShareServiceServer(grpcSrv, shareServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -143,8 +151,14 @@ func main() {
 	// "token" httpOnly cookie and forwards it as gRPC metadata so the auth
 	// interceptors can validate it.
 	gwMux := runtime.NewServeMux(
-		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{
-			MarshalOptions: protojson.MarshalOptions{UseProtoNames: true},
+		// HTTPBodyMarshaler falls back to the wrapped JSONPb marshaler for
+		// every response except google.api.HttpBody (ReportService.ExportSEVs'
+		// CSV response), which it writes as raw bytes with the message's own
+		// content_type instead of JSON-encoding it.
+		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.HTTPBodyMarshaler{
+			Marshaler: &runtime.JSONPb{
+				MarshalOptions: protojson.MarshalOptions{UseProtoNames: true},
+			},
 		}),
 		runtime.WithMetadata(func(_ context.Context, r *http.Request) metadata.MD {
 			if v := r.Header.Get("Authorization"); v != "" {
@@ -213,6 +227,14 @@ func main() {
 		log.Error("register ai gateway", "err", err)
 		os.Exit(1)
 	}
+	if err := pb.RegisterReportServiceHandlerClient(ctx, gwMux, pb.NewReportServiceClient(conn)); err != nil {
+		log.Error("register report gateway", "err", err)
+		os.Exit(1)
+	}
+	if err := pb.RegisterShareServiceHandlerClient(ctx, gwMux, pb.NewShareServiceClient(conn)); err != nil {
+		log.Error("register share gateway", "err", err)
+		os.Exit(1)
+	}
 
 	// --- Password auth handler ---
 	passwordHandler := auth.NewPasswordHandler(jwtSigner, userStore)
@@ -231,6 +253,10 @@ func main() {
 	passwordHandler.RegisterRoutes(httpMux)                           // POST /auth/register, POST /auth/login
 	httpMux.Handle("/ws", ws.NewHandler(wsHub, jwtSigner, userStore)) // WebSocket subscriptions
 	httpMux.Handle("/admin/integrations/health", integrationsHealthHandler)
+	// GET /s/{token}: public shareable-link view (§14.1) — no auth, so it
+	// can't be a gRPC/grpc-gateway route (see share.proto's doc comment).
+	// Go's ServeMux prefers this more specific pattern over "/" below.
+	httpMux.Handle("/s/{token}", grpchandler.NewShareViewHandler(shareStore, sevStore, announcementStore, shareSigner))
 	httpMux.Handle("/", gwMux) // gRPC-gateway routes
 	httpMux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -282,6 +308,7 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 	store.RetentionConfigStore,
 	store.AIPluginStore,
 	store.AIOutputStore,
+	store.ShareStore,
 ) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -301,7 +328,8 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 			memory.NewIntegrationConfigStore(),
 			memory.NewRetentionConfigStore(),
 			memory.NewAIPluginStore(),
-			memory.NewAIOutputStore()
+			memory.NewAIOutputStore(),
+			memory.NewShareStore()
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
@@ -309,7 +337,7 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
-	log.Warn("service, postmortem, announcement, chat, sev-link, task, oncall, integration-config, retention-config, ai-plugin, and ai-output stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
+	log.Warn("service, postmortem, announcement, chat, sev-link, task, oncall, integration-config, retention-config, ai-plugin, ai-output, and share stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
 	return postgres.NewSEVStore(pool),
 		postgres.NewAuditStore(pool),
 		postgres.NewStatusHistoryStore(pool),
@@ -325,7 +353,8 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		memory.NewIntegrationConfigStore(),
 		memory.NewRetentionConfigStore(),
 		memory.NewAIPluginStore(),
-		memory.NewAIOutputStore()
+		memory.NewAIOutputStore(),
+		memory.NewShareStore()
 }
 
 // githubIssueClient adapts *github.Client to grpchandler.IssueClient,

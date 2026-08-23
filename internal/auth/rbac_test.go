@@ -79,6 +79,19 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleViewer, "/sevitout.v1.SearchService/SearchSEVs", true},
 		{store.OrgRoleResponder, "/sevitout.v1.SearchService/SearchSEVs", true},
 
+		// Report service — read-only, same floor as Search
+		{store.OrgRoleViewer, "/sevitout.v1.ReportService/GetDashboardMetrics", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ReportService/GetSEVTrends", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ReportService/ExportSEVs", true},
+
+		// Share service — creating/revoking a link needs Incident Commander
+		{store.OrgRoleViewer, "/sevitout.v1.ShareService/CreateShareLink", false},
+		{store.OrgRoleResponder, "/sevitout.v1.ShareService/CreateShareLink", false},
+		{store.OrgRoleIncidentCommander, "/sevitout.v1.ShareService/CreateShareLink", true},
+		{store.OrgRoleIncidentCommander, "/sevitout.v1.ShareService/RevokeShareLink", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ShareService/CreateShareLink", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ShareService/RevokeShareLink", true},
+
 		// Config service — Viewer can read the service registry and on-call
 		// rotations, but not user/integration/retention config or write anything
 		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListServices", true},
