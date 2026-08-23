@@ -27,6 +27,10 @@ type PostmortemStore interface {
 	Create(ctx context.Context, pm *Postmortem) error
 	GetBySEVID(ctx context.Context, sevID string) (*Postmortem, error)
 	Update(ctx context.Context, pm *Postmortem) error
+	// CountByStatus returns the number of postmortems in each status, across
+	// all SEVs — used to compute the dashboard's postmortem completion rate
+	// without an unbounded per-SEV fetch.
+	CountByStatus(ctx context.Context) (map[PostmortemStatus]int, error)
 }
 
 // AuditStore is an append-only log of all SEV mutations.
@@ -63,6 +67,11 @@ type TaskStore interface {
 	SetDueDateIfUnset(ctx context.Context, id int64, dueDate time.Time) (applied bool, err error)
 	Delete(ctx context.Context, id int64) error
 	ListBySEVID(ctx context.Context, sevID string) ([]*LinkedTask, error)
+	// CountOverdue reports the number of linked tasks, across all SEVs, with a
+	// due date before now. Mirrors the overdue definition used to derive
+	// LinkedTask.Overdue on read (internal/api/grpc/task.go's isOverdue): a
+	// task without a due date is never overdue.
+	CountOverdue(ctx context.Context, now time.Time) (int, error)
 }
 
 // SEVLinkStore manages typed bidirectional relationships between SEVs.

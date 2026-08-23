@@ -54,3 +54,13 @@ func (s *PostmortemStore) Update(_ context.Context, pm *store.Postmortem) error 
 	s.data[pm.SEVID] = &cp
 	return nil
 }
+
+func (s *PostmortemStore) CountByStatus(_ context.Context) (map[store.PostmortemStatus]int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := make(map[store.PostmortemStatus]int)
+	for _, pm := range s.data {
+		counts[pm.Status]++
+	}
+	return counts, nil
+}

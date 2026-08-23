@@ -51,6 +51,16 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.TaskService/CreateGitHubIssue": store.OrgRoleResponder,
 	// Search service
 	"/sevitout.v1.SearchService/SearchSEVs": store.OrgRoleViewer,
+	// Report service — dashboard/trends/export are all read-only, same Viewer
+	// floor as ListSEVs/SearchSEVs.
+	"/sevitout.v1.ReportService/GetDashboardMetrics": store.OrgRoleViewer,
+	"/sevitout.v1.ReportService/GetSEVTrends":        store.OrgRoleViewer,
+	"/sevitout.v1.ReportService/ExportSEVs":          store.OrgRoleViewer,
+	// Share service — creating/revoking a public link is scoped the same as
+	// unlocking a completed SEV (§10.1, §14.1): IC or Admin. The public view
+	// itself (GET /s/{token}) isn't a gRPC method at all — see share.proto.
+	"/sevitout.v1.ShareService/CreateShareLink": store.OrgRoleIncidentCommander,
+	"/sevitout.v1.ShareService/RevokeShareLink": store.OrgRoleIncidentCommander,
 	// Config service — service registry and on-call rotations are readable
 	// by any authenticated user (referenced elsewhere in the UI); everything
 	// else is Admin-only per docs/requirements.md §18.

@@ -1,12 +1,12 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "sevitout/v1/search.proto",
+    "title": "sevitout/v1/report.proto",
     "version": "version not set"
   },
   "tags": [
     {
-      "name": "SearchService"
+      "name": "ReportService"
     }
   ],
   "consumes": [
@@ -16,15 +16,60 @@
     "application/json"
   ],
   "paths": {
-    "/v1/search/sevs": {
+    "/v1/reports/dashboard": {
       "get": {
-        "summary": "SearchSEVs returns SEVs matching the given filters, sorted and paginated.\nquery performs full-text search across a SEV's title, description, root\ncause description, and business impact, plus any linked announcement.",
-        "operationId": "SearchService_SearchSEVs",
+        "operationId": "ReportService_GetDashboardMetrics",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/v1SearchSEVsResponse"
+              "$ref": "#/definitions/v1DashboardMetricsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ReportService"
+        ]
+      }
+    },
+    "/v1/reports/trends": {
+      "get": {
+        "summary": "GetSEVTrends surfaces recurring failure patterns: SEVs sharing the same\naffected service and root cause category (§17's \"recurring incident\nflag\").",
+        "operationId": "ReportService_GetSEVTrends",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVTrendsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ReportService"
+        ]
+      }
+    },
+    "/v1/sevs/export.csv": {
+      "get": {
+        "summary": "ExportSEVs returns a filtered SEV list as CSV. The response is raw\ntext/csv bytes (google.api.HttpBody), not JSON — cmd/server/main.go\nwraps the gateway's marshaler in runtime.HTTPBodyMarshaler, which\ndetects this response type and writes GetData() as the HTTP body with\nGetContentType() as Content-Type instead of JSON-encoding it.",
+        "operationId": "ReportService_ExportSEVs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/apiHttpBody"
             }
           },
           "default": {
@@ -35,12 +80,6 @@
           }
         },
         "parameters": [
-          {
-            "name": "query",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
           {
             "name": "severityLevels",
             "in": "query",
@@ -73,26 +112,7 @@
             "collectionFormat": "multi"
           },
           {
-            "name": "onCallUser",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "detectedBy",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
             "name": "rootCauseCategory",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "tags",
-            "description": "This is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
             "in": "query",
             "required": false,
             "type": "string"
@@ -110,49 +130,38 @@
             "required": false,
             "type": "string",
             "format": "date-time"
-          },
-          {
-            "name": "quickView",
-            "description": "quick_view: \"open\" | \"my_sevs\" | \"awaiting_postmortem\"",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "sort",
-            "description": "sort: \"started_at\" | \"severity\" | \"mttr\" | \"updated_at\"\n(default: most recently created first)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "sortDesc",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
           }
         ],
         "tags": [
-          "SearchService"
+          "ReportService"
         ]
       }
     }
   },
   "definitions": {
+    "apiHttpBody": {
+      "type": "object",
+      "properties": {
+        "contentType": {
+          "type": "string",
+          "description": "The HTTP Content-Type header value specifying the content type of the body."
+        },
+        "data": {
+          "type": "string",
+          "format": "byte",
+          "description": "The HTTP request/response body as raw binary."
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          },
+          "description": "Application specific response metadata. Must be set in the first response\nfor streaming APIs."
+        }
+      },
+      "description": "Message that represents an arbitrary HTTP body. It should only be used for\npayload formats that can't be represented as JSON, such as raw binary or\nan HTML page.\n\n\nThis message can be used both in streaming and non-streaming API methods in\nthe request as well as the response.\n\nIt can be used as a top-level request field, which is convenient if one\nwants to extract parameters from either the URL or HTTP template into the\nrequest fields and also want access to the raw HTTP body.\n\nExample:\n\n    message GetResourceRequest {\n      // A unique request id.\n      string request_id = 1;\n\n      // The raw HTTP body is bound to this field.\n      google.api.HttpBody http_body = 2;\n    }\n\n    service ResourceService {\n      rpc GetResource(GetResourceRequest) returns (google.api.HttpBody);\n      rpc UpdateResource(google.api.HttpBody) returns\n      (google.protobuf.Empty);\n    }\n\nExample with streaming methods:\n\n    service CaldavService {\n      rpc GetCalendar(stream google.api.HttpBody)\n        returns (stream google.api.HttpBody);\n      rpc UpdateCalendar(stream google.api.HttpBody)\n        returns (stream google.api.HttpBody);\n    }\n\nUse of this type only changes how the request and response bodies are\nhandled, all other features will continue to work unchanged."
+    },
     "protobufAny": {
       "type": "object",
       "properties": {
@@ -183,137 +192,119 @@
         }
       }
     },
-    "v1SEVResponse": {
+    "v1ActiveSEVCount": {
       "type": "object",
       "properties": {
-        "id": {
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "count": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1DashboardMetricsResponse": {
+      "type": "object",
+      "properties": {
+        "activeByLevel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ActiveSEVCount"
+          }
+        },
+        "mttrTrends": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1MTTRTrend"
+          },
+          "description": "mttr_trends always has exactly 3 entries: 7, 30, and 90-day windows."
+        },
+        "frequencyByServiceAndLevel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ServiceLevelFrequency"
+          }
+        },
+        "postmortemCompletionRate": {
+          "type": "number",
+          "format": "double",
+          "description": "postmortem_completion_rate is approved postmortems divided by total\npostmortems, in [0, 1]. 0 when there are no postmortems yet."
+        },
+        "overdueTaskCount": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1MTTRTrend": {
+      "type": "object",
+      "properties": {
+        "windowDays": {
+          "type": "integer",
+          "format": "int32",
+          "description": "window_days is one of: 7, 30, 90."
+        },
+        "averageMttrSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "average_mttr_seconds is the mean MTTRSeconds across SEVs resolved within\nthe last window_days days. 0 when no SEV resolved in that window."
+        },
+        "sampleSize": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1RecurringPattern": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
           "type": "string"
         },
-        "title": {
+        "rootCauseCategory": {
           "type": "string"
         },
-        "description": {
+        "count": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "sevIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "sev_ids is sorted most-recently-created first."
+        }
+      }
+    },
+    "v1SEVTrendsResponse": {
+      "type": "object",
+      "properties": {
+        "recurringPatterns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RecurringPattern"
+          }
+        }
+      }
+    },
+    "v1ServiceLevelFrequency": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
           "type": "string"
         },
         "severityLevel": {
           "type": "integer",
           "format": "int32"
         },
-        "status": {
-          "type": "string"
-        },
-        "rootCauseCategory": {
-          "type": "string"
-        },
-        "rootCauseDescription": {
-          "type": "string"
-        },
-        "mitigation": {
-          "type": "string"
-        },
-        "prevention": {
-          "type": "string"
-        },
-        "businessImpact": {
-          "type": "string"
-        },
-        "affectedServices": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "detectionMethod": {
-          "type": "string"
-        },
-        "alertName": {
-          "type": "string"
-        },
-        "monitoringTool": {
-          "type": "string"
-        },
-        "rightPeoplePresent": {
-          "type": "boolean"
-        },
-        "rightPeopleNotes": {
-          "type": "string"
-        },
-        "tags": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "startedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "detectedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "mitigatedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "resolvedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "postmortemCompletedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "mttdSeconds": {
-          "type": "string",
-          "format": "int64"
-        },
-        "mttmSeconds": {
-          "type": "string",
-          "format": "int64"
-        },
-        "mttrSeconds": {
-          "type": "string",
-          "format": "int64"
-        },
-        "dttmSeconds": {
-          "type": "string",
-          "format": "int64"
-        },
-        "locked": {
-          "type": "boolean"
-        },
-        "sensitive": {
-          "type": "boolean"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "createdBy": {
-          "type": "string"
-        },
-        "aiDisabled": {
-          "type": "boolean",
-          "description": "ai_disabled opts this SEV out of all AI plugin dispatch, proactive and\nuser-triggered (§11.3)."
-        }
-      }
-    },
-    "v1SearchSEVsResponse": {
-      "type": "object",
-      "properties": {
-        "sevs": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1SEVResponse"
-          }
-        },
-        "total": {
+        "count": {
           "type": "integer",
           "format": "int32"
         }

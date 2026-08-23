@@ -112,3 +112,15 @@ func (s *TaskStore) ListBySEVID(_ context.Context, sevID string) ([]*store.Linke
 	}
 	return out, nil
 }
+
+func (s *TaskStore) CountOverdue(_ context.Context, now time.Time) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, t := range s.data {
+		if t.DueDate != nil && t.DueDate.Before(now) {
+			n++
+		}
+	}
+	return n, nil
+}
