@@ -1,10 +1,17 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, LogOut, Siren } from 'lucide-react'
+import { LayoutDashboard, ListChecks, LogOut, Siren } from 'lucide-react'
 import { useAuth } from '@/auth/useAuth'
 import { Button } from '@/components/ui/button'
 import { ORG_ROLE_LABELS } from '@/types/api'
 
-const NAV_ITEMS = [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }]
+const NAV_ITEMS = [
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/sevs', label: 'SEVs', icon: ListChecks },
+]
+
+function isActive(pathname: string, to: string): boolean {
+  return pathname === to || (to !== '/' && pathname.startsWith(`${to}/`))
+}
 
 /** Shared shell: top nav, breadcrumb slot, user menu. Every authenticated
  * route renders inside this via <Outlet/> (see App.tsx's route tree). */
@@ -23,7 +30,7 @@ export function AppLayout() {
             </Link>
             <nav className="flex items-center gap-1" aria-label="Primary">
               {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
-                const active = location.pathname === to
+                const active = isActive(location.pathname, to)
                 return (
                   <Link
                     key={to}

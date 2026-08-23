@@ -15,7 +15,8 @@ const getSEV = `-- name: GetSEV :one
 SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
-       monitoring_tool, right_people_present, right_people_notes, tags,
+       monitoring_tool, alert_url, metric_link, snapshot_url,
+       right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by
@@ -38,6 +39,9 @@ type GetSEVRow struct {
 	DetectionMethod       *string            `json:"detection_method"`
 	AlertName             *string            `json:"alert_name"`
 	MonitoringTool        *string            `json:"monitoring_tool"`
+	AlertUrl              *string            `json:"alert_url"`
+	MetricLink            *string            `json:"metric_link"`
+	SnapshotUrl           *string            `json:"snapshot_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -76,6 +80,9 @@ func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
 		&i.DetectionMethod,
 		&i.AlertName,
 		&i.MonitoringTool,
+		&i.AlertUrl,
+		&i.MetricLink,
+		&i.SnapshotUrl,
 		&i.RightPeoplePresent,
 		&i.RightPeopleNotes,
 		&i.Tags,
@@ -103,7 +110,8 @@ INSERT INTO sevs (
     id, title, description, severity_level, status,
     root_cause_category, root_cause_description, mitigation, prevention,
     business_impact, affected_services, detection_method, alert_name,
-    monitoring_tool, right_people_present, right_people_notes, tags,
+    monitoring_tool, alert_url, metric_link, snapshot_url,
+    right_people_present, right_people_notes, tags,
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
     locked, sensitive, ai_disabled, created_at, updated_at, created_by
@@ -112,9 +120,10 @@ INSERT INTO sevs (
     $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16, $17,
-    $18, $19, $20, $21, $22,
-    $23, $24, $25, $26,
-    $27, $28, $29, $30, $31, $32
+    $18, $19, $20,
+    $21, $22, $23, $24, $25,
+    $26, $27, $28, $29,
+    $30, $31, $32, $33, $34, $35
 )
 `
 
@@ -133,6 +142,9 @@ type InsertSEVParams struct {
 	DetectionMethod       *string            `json:"detection_method"`
 	AlertName             *string            `json:"alert_name"`
 	MonitoringTool        *string            `json:"monitoring_tool"`
+	AlertUrl              *string            `json:"alert_url"`
+	MetricLink            *string            `json:"metric_link"`
+	SnapshotUrl           *string            `json:"snapshot_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -169,6 +181,9 @@ func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
 		arg.DetectionMethod,
 		arg.AlertName,
 		arg.MonitoringTool,
+		arg.AlertUrl,
+		arg.MetricLink,
+		arg.SnapshotUrl,
 		arg.RightPeoplePresent,
 		arg.RightPeopleNotes,
 		arg.Tags,
@@ -195,7 +210,8 @@ const listSEVs = `-- name: ListSEVs :many
 SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
-       monitoring_tool, right_people_present, right_people_notes, tags,
+       monitoring_tool, alert_url, metric_link, snapshot_url,
+       right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by
@@ -224,6 +240,9 @@ type ListSEVsRow struct {
 	DetectionMethod       *string            `json:"detection_method"`
 	AlertName             *string            `json:"alert_name"`
 	MonitoringTool        *string            `json:"monitoring_tool"`
+	AlertUrl              *string            `json:"alert_url"`
+	MetricLink            *string            `json:"metric_link"`
+	SnapshotUrl           *string            `json:"snapshot_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -268,6 +287,9 @@ func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsR
 			&i.DetectionMethod,
 			&i.AlertName,
 			&i.MonitoringTool,
+			&i.AlertUrl,
+			&i.MetricLink,
+			&i.SnapshotUrl,
 			&i.RightPeoplePresent,
 			&i.RightPeopleNotes,
 			&i.Tags,
@@ -323,22 +345,25 @@ UPDATE sevs SET
     detection_method       = $12,
     alert_name             = $13,
     monitoring_tool        = $14,
-    right_people_present   = $15,
-    right_people_notes     = $16,
-    tags                   = $17,
-    started_at             = $18,
-    detected_at            = $19,
-    mitigated_at           = $20,
-    resolved_at            = $21,
-    postmortem_completed_at = $22,
-    mttd_seconds           = $23,
-    mttm_seconds           = $24,
-    mttr_seconds           = $25,
-    dttm_seconds           = $26,
-    locked                 = $27,
-    sensitive              = $28,
-    ai_disabled            = $29,
-    updated_at             = $30
+    alert_url              = $15,
+    metric_link            = $16,
+    snapshot_url           = $17,
+    right_people_present   = $18,
+    right_people_notes     = $19,
+    tags                   = $20,
+    started_at             = $21,
+    detected_at            = $22,
+    mitigated_at           = $23,
+    resolved_at            = $24,
+    postmortem_completed_at = $25,
+    mttd_seconds           = $26,
+    mttm_seconds           = $27,
+    mttr_seconds           = $28,
+    dttm_seconds           = $29,
+    locked                 = $30,
+    sensitive              = $31,
+    ai_disabled            = $32,
+    updated_at             = $33
 WHERE id = $1
 `
 
@@ -357,6 +382,9 @@ type UpdateSEVParams struct {
 	DetectionMethod       *string            `json:"detection_method"`
 	AlertName             *string            `json:"alert_name"`
 	MonitoringTool        *string            `json:"monitoring_tool"`
+	AlertUrl              *string            `json:"alert_url"`
+	MetricLink            *string            `json:"metric_link"`
+	SnapshotUrl           *string            `json:"snapshot_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -391,6 +419,9 @@ func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
 		arg.DetectionMethod,
 		arg.AlertName,
 		arg.MonitoringTool,
+		arg.AlertUrl,
+		arg.MetricLink,
+		arg.SnapshotUrl,
 		arg.RightPeoplePresent,
 		arg.RightPeopleNotes,
 		arg.Tags,

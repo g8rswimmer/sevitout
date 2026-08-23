@@ -4,6 +4,8 @@ import { ProtectedRoute } from '@/auth/ProtectedRoute'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { DashboardPage } from '@/pages/DashboardPage'
+import { SevListPage } from '@/pages/SevListPage'
+import { SevCreatePage } from '@/pages/SevCreatePage'
 import { SevDetailPage } from '@/pages/SevDetailPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
@@ -21,6 +23,15 @@ export function App() {
         }
       >
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/sevs" element={<SevListPage />} />
+        <Route
+          path="/sevs/new"
+          element={
+            <ProtectedRoute minRole="responder">
+              <SevCreatePage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/sevs/:id" element={<SevDetailPage />} />
       </Route>
 

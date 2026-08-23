@@ -1,9 +1,31 @@
 import type {
+  AnnouncementResponse,
+  AssignRoleRequest,
   AuthResponse,
+  ChatEntryResponse,
+  CreateAnnouncementRequest,
+  CreateGitHubIssueRequest,
+  CreateSEVRequest,
   DashboardMetricsResponse,
+  AddChatEntryRequest,
+  LinkSEVsRequest,
+  LinkTaskRequest,
+  ListAnnouncementsResponse,
+  ListChatEntriesResponse,
+  ListLinkedSEVsResponse,
+  ListRolesResponse,
   ListSEVsParams,
   ListSEVsResponse,
+  ListServicesResponse,
+  ListTasksResponse,
+  SEVLinkResponse,
   SEVResponse,
+  SEVRoleResponse,
+  SearchSEVsParams,
+  SearchSEVsResponse,
+  TaskResponse,
+  TransitionStatusRequest,
+  UpdateSEVRequest,
   WhoAmIResponse,
 } from '@/types/api'
 
@@ -19,6 +41,34 @@ export class ApiError extends Error {
 }
 
 const TOKEN_STORAGE_KEY = 'sevitout.token'
+const TOKEN_COOKIE_NAME = 'token'
+
+/** Mirrors the token into a plain (non-httpOnly — JS can't set httpOnly)
+ * cookie, purely so a browser WebSocket handshake carries it. A native
+ * browser `WebSocket` cannot set an `Authorization` header (there's no API
+ * for it), so `lib/ws.ts`'s connection relies on the browser's normal
+ * automatic-cookie-on-request behavior instead — which `internal/auth`'s
+ * `ExtractBearerToken` already reads as a fallback (it was seemingly built
+ * for exactly this: cmd/server/main.go's REST gateway has the identical
+ * header-or-cookie fallback). This cookie is exactly as exposed to XSS as
+ * the localStorage copy already is — it grants nothing an attacker who can
+ * run JS in this origin doesn't already have via localStorage — so mirroring
+ * it here doesn't weaken anything. */
+function mirrorTokenCookie(token: string) {
+  try {
+    document.cookie = `${TOKEN_COOKIE_NAME}=${encodeURIComponent(token)}; path=/; samesite=lax`
+  } catch {
+    // ignore — WS auth degrades to "reconnect after login fixes it"
+  }
+}
+
+function clearTokenCookie() {
+  try {
+    document.cookie = `${TOKEN_COOKIE_NAME}=; path=/; max-age=0; samesite=lax`
+  } catch {
+    // ignore
+  }
+}
 
 /** Reads/writes the JWT to localStorage. The backend's /auth/login only
  * returns the token in the JSON body (no httpOnly cookie is set — see
@@ -43,6 +93,7 @@ export const tokenStorage = {
       // Storage unavailable (private browsing, quota) — the session simply
       // won't survive a reload; not fatal.
     }
+    mirrorTokenCookie(token)
   },
   clear() {
     try {
@@ -50,6 +101,7 @@ export const tokenStorage = {
     } catch {
       // ignore
     }
+    clearTokenCookie()
   },
 }
 
@@ -131,9 +183,63 @@ export const api = {
     list: (params: ListSEVsParams = {}) =>
       request<ListSEVsResponse>(`/v1/sevs${buildQuery(params)}`),
     get: (id: string) => request<SEVResponse>(`/v1/sevs/${id}`),
+    create: (req: CreateSEVRequest) =>
+      request<SEVResponse>('/v1/sevs', { method: 'POST', body: JSON.stringify(req) }),
+    update: (id: string, req: UpdateSEVRequest) =>
+      request<SEVResponse>(`/v1/sevs/${id}`, { method: 'PATCH', body: JSON.stringify(req) }),
+    transition: (id: string, req: TransitionStatusRequest) =>
+      request<SEVResponse>(`/v1/sevs/${id}/transition`, { method: 'POST', body: JSON.stringify(req) }),
+  },
+  search: {
+    sevs: (params: SearchSEVsParams = {}) =>
+      request<SearchSEVsResponse>(`/v1/search/sevs${buildQuery(params)}`),
   },
   reports: {
     dashboardMetrics: () =>
       request<DashboardMetricsResponse>('/v1/reports/dashboard'),
+  },
+  roles: {
+    list: (sevId: string) => request<ListRolesResponse>(`/v1/sevs/${sevId}/roles`),
+    assign: (sevId: string, req: AssignRoleRequest) =>
+      request<SEVRoleResponse>(`/v1/sevs/${sevId}/roles`, { method: 'POST', body: JSON.stringify(req) }),
+    remove: (sevId: string, id: string) =>
+      request<void>(`/v1/sevs/${sevId}/roles/${id}`, { method: 'DELETE' }),
+  },
+  announcements: {
+    list: (sevId: string) => request<ListAnnouncementsResponse>(`/v1/sevs/${sevId}/announcements`),
+    create: (sevId: string, req: CreateAnnouncementRequest) =>
+      request<AnnouncementResponse>(`/v1/sevs/${sevId}/announcements`, {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }),
+  },
+  chat: {
+    list: (sevId: string) => request<ListChatEntriesResponse>(`/v1/sevs/${sevId}/chat`),
+    add: (sevId: string, req: AddChatEntryRequest) =>
+      request<ChatEntryResponse>(`/v1/sevs/${sevId}/chat`, { method: 'POST', body: JSON.stringify(req) }),
+  },
+  tasks: {
+    list: (sevId: string) => request<ListTasksResponse>(`/v1/sevs/${sevId}/tasks`),
+    link: (sevId: string, req: LinkTaskRequest) =>
+      request<TaskResponse>(`/v1/sevs/${sevId}/tasks`, { method: 'POST', body: JSON.stringify(req) }),
+    unlink: (sevId: string, id: string) =>
+      request<void>(`/v1/sevs/${sevId}/tasks/${id}`, { method: 'DELETE' }),
+    updateDueDate: (sevId: string, id: string, dueDate: string) =>
+      request<TaskResponse>(`/v1/sevs/${sevId}/tasks/${id}/due-date`, {
+        method: 'PATCH',
+        body: JSON.stringify({ due_date: dueDate }),
+      }),
+    createGitHubIssue: (sevId: string, req: CreateGitHubIssueRequest) =>
+      request<TaskResponse>(`/v1/sevs/${sevId}/github-issues`, { method: 'POST', body: JSON.stringify(req) }),
+  },
+  sevLinks: {
+    list: (sevId: string) => request<ListLinkedSEVsResponse>(`/v1/sevs/${sevId}/links`),
+    link: (sevId: string, req: LinkSEVsRequest) =>
+      request<SEVLinkResponse>(`/v1/sevs/${sevId}/links`, { method: 'POST', body: JSON.stringify(req) }),
+    unlink: (sevId: string, targetSevId: string) =>
+      request<void>(`/v1/sevs/${sevId}/links/${targetSevId}`, { method: 'DELETE' }),
+  },
+  services: {
+    list: () => request<ListServicesResponse>('/v1/config/services'),
   },
 }

@@ -144,12 +144,33 @@ func (s *SEVServer) dispatchAI(event ai.TriggerEvent, record *store.SEV) {
 	s.aiDispatch.Dispatch(event, record.ID)
 }
 
+// validateDetectionMethod rejects a non-empty detection_method that isn't one
+// of docs/requirements.md §4.2's fixed vocabulary — same "switch over the
+// known consts, reject unknown" pattern role.go uses for role_type. An empty
+// value is allowed (detection method just wasn't recorded).
+func validateDetectionMethod(v string) error {
+	if v == "" {
+		return nil
+	}
+	switch store.DetectionMethod(v) {
+	case store.DetectionMethodAlert, store.DetectionMethodMonitoringDashboard,
+		store.DetectionMethodCustomerReport, store.DetectionMethodSyntheticTest,
+		store.DetectionMethodManualDiscovery, store.DetectionMethodSlackEscalation:
+		return nil
+	default:
+		return status.Error(codes.InvalidArgument, "unknown detection_method")
+	}
+}
+
 func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*pb.SEVResponse, error) {
 	if req.GetTitle() == "" {
 		return nil, status.Error(codes.InvalidArgument, "title is required")
 	}
 	if req.GetSeverityLevel() < 1 || req.GetSeverityLevel() > 4 {
 		return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
+	}
+	if err := validateDetectionMethod(req.GetDetectionMethod()); err != nil {
+		return nil, err
 	}
 
 	callerID := req.GetCreatedBy()
@@ -180,6 +201,15 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 	}
 	if v := req.GetMonitoringTool(); v != "" {
 		record.MonitoringTool = &v
+	}
+	if v := req.GetAlertUrl(); v != "" {
+		record.AlertURL = &v
+	}
+	if v := req.GetMetricLink(); v != "" {
+		record.MetricLink = &v
+	}
+	if v := req.GetSnapshotUrl(); v != "" {
+		record.SnapshotURL = &v
 	}
 	if req.GetStartedAt() != nil {
 		t := req.GetStartedAt().AsTime()
@@ -325,6 +355,9 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	if v := req.GetAffectedServices(); len(v) > 0 {
 		record.AffectedServices = v
 	}
+	if err := validateDetectionMethod(req.GetDetectionMethod()); err != nil {
+		return nil, err
+	}
 	if v := req.GetDetectionMethod(); v != "" {
 		record.DetectionMethod = &v
 	}
@@ -333,6 +366,15 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	}
 	if v := req.GetMonitoringTool(); v != "" {
 		record.MonitoringTool = &v
+	}
+	if v := req.GetAlertUrl(); v != "" {
+		record.AlertURL = &v
+	}
+	if v := req.GetMetricLink(); v != "" {
+		record.MetricLink = &v
+	}
+	if v := req.GetSnapshotUrl(); v != "" {
+		record.SnapshotURL = &v
 	}
 	if req.GetRightPeoplePresent() != nil {
 		b := req.GetRightPeoplePresent().GetValue()
@@ -602,6 +644,15 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 	}
 	if s.MonitoringTool != nil {
 		resp.MonitoringTool = *s.MonitoringTool
+	}
+	if s.AlertURL != nil {
+		resp.AlertUrl = *s.AlertURL
+	}
+	if s.MetricLink != nil {
+		resp.MetricLink = *s.MetricLink
+	}
+	if s.SnapshotURL != nil {
+		resp.SnapshotUrl = *s.SnapshotURL
 	}
 	if s.RightPeoplePresent != nil {
 		resp.RightPeoplePresent = wrapperspb.Bool(*s.RightPeoplePresent)

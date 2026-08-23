@@ -325,6 +325,15 @@
         },
         "aiDisabled": {
           "type": "boolean"
+        },
+        "alertUrl": {
+          "type": "string"
+        },
+        "metricLink": {
+          "type": "string"
+        },
+        "snapshotUrl": {
+          "type": "string"
         }
       }
     },
@@ -408,6 +417,15 @@
         },
         "aiDisabled": {
           "type": "boolean"
+        },
+        "alertUrl": {
+          "type": "string"
+        },
+        "metricLink": {
+          "type": "string"
+        },
+        "snapshotUrl": {
+          "type": "string"
         }
       }
     },
@@ -544,6 +562,18 @@
         "aiDisabled": {
           "type": "boolean",
           "description": "ai_disabled opts this SEV out of all AI plugin dispatch, proactive and\nuser-triggered (§11.3)."
+        },
+        "alertUrl": {
+          "type": "string",
+          "description": "alert_url links to the alert that fired (e.g. a PagerDuty incident or\nDatadog monitor URL)."
+        },
+        "metricLink": {
+          "type": "string",
+          "description": "metric_link links to the monitoring dashboard, metric, or saved query\nreferenced by monitoring_tool (§13.4)."
+        },
+        "snapshotUrl": {
+          "type": "string",
+          "description": "snapshot_url links to an already-hosted image of the monitoring chart at\ndetection time; rendered as an inline preview in the UI. No file upload\nis supported — this is a URL to an image hosted elsewhere."
         }
       }
     }

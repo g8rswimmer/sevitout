@@ -90,22 +90,46 @@ const (
 	AIHandlerHTTP    AIHandlerType = "http"
 )
 
+// DetectionMethod is how a SEV was first identified (docs/requirements.md §4.2).
+// Unlike MonitoringTool (free text — "Datadog", "Prometheus", "CloudWatch" aren't
+// exhaustive, and a caller can always name something new), this vocabulary is
+// closed and validated in internal/api/grpc/sev.go the same way role.go validates
+// SEVRoleType.
+type DetectionMethod string
+
+const (
+	DetectionMethodAlert               DetectionMethod = "alert"
+	DetectionMethodMonitoringDashboard DetectionMethod = "monitoring-dashboard"
+	DetectionMethodCustomerReport      DetectionMethod = "customer-report"
+	DetectionMethodSyntheticTest       DetectionMethod = "synthetic-test"
+	DetectionMethodManualDiscovery     DetectionMethod = "manual-discovery"
+	DetectionMethodSlackEscalation     DetectionMethod = "slack-escalation"
+)
+
 // SEV is the central incident record.
 type SEV struct {
-	ID                    string
-	Title                 string
-	Description           string
-	SeverityLevel         int16
-	Status                SEVStatus
-	RootCauseCategory     *string
-	RootCauseDescription  *string
-	Mitigation            *string
-	Prevention            *string
-	BusinessImpact        *string
-	AffectedServices      []string
-	DetectionMethod       *string
-	AlertName             *string
-	MonitoringTool        *string
+	ID                   string
+	Title                string
+	Description          string
+	SeverityLevel        int16
+	Status               SEVStatus
+	RootCauseCategory    *string
+	RootCauseDescription *string
+	Mitigation           *string
+	Prevention           *string
+	BusinessImpact       *string
+	AffectedServices     []string
+	DetectionMethod      *string
+	AlertName            *string
+	MonitoringTool       *string
+	// AlertURL, MetricLink, and SnapshotURL are optional supporting links for
+	// the detection metadata above — the alert that fired, the monitoring
+	// dashboard/metric query, and a snapshot image of it, respectively. All
+	// three are plain URLs (no file upload/blob storage — see
+	// docs/requirements.md §13.4's "link a dashboard URL" framing).
+	AlertURL              *string
+	MetricLink            *string
+	SnapshotURL           *string
 	RightPeoplePresent    *bool
 	RightPeopleNotes      *string
 	Tags                  map[string]string

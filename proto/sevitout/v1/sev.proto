@@ -75,6 +75,16 @@ message SEVResponse {
   // ai_disabled opts this SEV out of all AI plugin dispatch, proactive and
   // user-triggered (§11.3).
   bool ai_disabled = 32;
+  // alert_url links to the alert that fired (e.g. a PagerDuty incident or
+  // Datadog monitor URL).
+  string alert_url = 33;
+  // metric_link links to the monitoring dashboard, metric, or saved query
+  // referenced by monitoring_tool (§13.4).
+  string metric_link = 34;
+  // snapshot_url links to an already-hosted image of the monitoring chart at
+  // detection time; rendered as an inline preview in the UI. No file upload
+  // is supported — this is a URL to an image hosted elsewhere.
+  string snapshot_url = 35;
 }
 
 message CreateSEVRequest {
@@ -91,6 +101,9 @@ message CreateSEVRequest {
   map<string, string> tags = 11;
   bool sensitive = 12;
   bool ai_disabled = 13;
+  string alert_url = 14;
+  string metric_link = 15;
+  string snapshot_url = 16;
 }
 
 message GetSEVRequest {
@@ -121,6 +134,9 @@ message UpdateSEVRequest {
   // unlock_token is required when the SEV is locked (PostmortemComplete status).
   string unlock_token = 21;
   google.protobuf.BoolValue ai_disabled = 22;
+  string alert_url = 23;
+  string metric_link = 24;
+  string snapshot_url = 25;
 }
 
 message ListSEVsRequest {

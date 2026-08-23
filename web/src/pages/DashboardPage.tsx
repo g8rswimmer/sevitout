@@ -5,8 +5,9 @@ import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge, severityVariant } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { SeverityBadge, StatusBadge } from '@/components/sev/badges'
 import { formatDateTime } from '@/lib/format'
-import { ACTIVE_SEV_STATUSES, SEV_STATUS_BADGE_CLASS, SEV_STATUS_LABELS } from '@/types/api'
+import { ACTIVE_SEV_STATUSES } from '@/types/api'
 
 export function DashboardPage() {
   const metrics = useQuery({
@@ -129,13 +130,11 @@ export function DashboardPage() {
               {activeSevs.data.sevs.map((sev) => (
                 <li key={sev.id} className="flex items-center justify-between gap-3 py-2.5">
                   <Link to={`/sevs/${sev.id}`} className="flex min-w-0 items-center gap-3">
-                    <Badge variant={severityVariant(sev.severity_level)}>SEV-{sev.severity_level}</Badge>
+                    <SeverityBadge level={sev.severity_level} />
                     <span className="truncate font-medium hover:underline">{sev.title}</span>
                   </Link>
                   <div className="flex shrink-0 items-center gap-3">
-                    <Badge className={SEV_STATUS_BADGE_CLASS[sev.status]}>
-                      {SEV_STATUS_LABELS[sev.status]}
-                    </Badge>
+                    <StatusBadge status={sev.status} />
                     <span className="text-xs text-muted-foreground">{formatDateTime(sev.started_at)}</span>
                   </div>
                 </li>

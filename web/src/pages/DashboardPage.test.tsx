@@ -37,7 +37,6 @@ const SEVS: ListSEVsResponse = {
       prevention: '',
       business_impact: '',
       affected_services: [],
-      detection_method: '',
       alert_name: '',
       monitoring_tool: '',
       right_people_notes: '',

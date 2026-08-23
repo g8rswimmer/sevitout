@@ -2,8 +2,11 @@
 // messages under proto/sevitout/v1/*.proto. The gateway marshals with
 // protojson + UseProtoNames, so JSON keys are snake_case (matching the .proto
 // field names verbatim) rather than camelCase. Per the protojson spec, int64
-// fields (the *_seconds duration fields below) are encoded as JSON strings,
-// not numbers — every such field is typed `string` here for that reason.
+// fields are encoded as JSON strings, not numbers — confirmed against a live
+// server for both the *_seconds duration fields and every sub-resource's
+// database `id` (roles, announcements, chat entries, tasks, SEV links — all
+// `int64` in proto, e.g. role.proto's SEVRoleResponse.id). Every such field
+// is typed `string` here for that reason, even though it looks numeric.
 //
 // protojson also omits any proto3 scalar/repeated/map field holding its zero
 // value ("", 0, false, [], {}) from the JSON output entirely, rather than
@@ -98,6 +101,38 @@ export const ACTIVE_SEV_STATUSES: SEVStatus[] = [
   'postmortem_in_progress',
 ]
 
+/** docs/requirements.md §4.2's fixed detection-method vocabulary — enforced
+ * server-side (internal/api/grpc/sev.go's validateDetectionMethod). Unlike
+ * MonitoringTool below, there's no "other" escape hatch: this list is closed. */
+export type DetectionMethod =
+  | 'alert'
+  | 'monitoring-dashboard'
+  | 'customer-report'
+  | 'synthetic-test'
+  | 'manual-discovery'
+  | 'slack-escalation'
+
+export const DETECTION_METHOD_LABELS: Record<DetectionMethod, string> = {
+  alert: 'Alert',
+  'monitoring-dashboard': 'Monitoring Dashboard',
+  'customer-report': 'Customer Report',
+  'synthetic-test': 'Synthetic Test',
+  'manual-discovery': 'Manual Discovery',
+  'slack-escalation': 'Slack Escalation',
+}
+
+/** The monitoring tools named throughout docs/requirements.md §13.4 — not an
+ * exhaustive backend enum (monitoring_tool stays free text server-side), just
+ * what the dropdown offers directly before falling back to a free-text
+ * "Other" entry. */
+export type MonitoringTool = 'datadog' | 'prometheus' | 'cloudwatch'
+
+export const MONITORING_TOOL_LABELS: Record<MonitoringTool, string> = {
+  datadog: 'Datadog',
+  prometheus: 'Prometheus',
+  cloudwatch: 'CloudWatch',
+}
+
 export interface SEVResponse {
   id: string
   title: string
@@ -110,9 +145,14 @@ export interface SEVResponse {
   prevention?: string
   business_impact?: string
   affected_services?: string[]
-  detection_method?: string
+  detection_method?: DetectionMethod
   alert_name?: string
   monitoring_tool?: string
+  // alert_url, metric_link, and snapshot_url are optional supporting links —
+  // see internal/store.SEV's matching fields for the full rationale.
+  alert_url?: string
+  metric_link?: string
+  snapshot_url?: string
   right_people_present?: boolean
   right_people_notes?: string
   tags?: Record<string, string>
@@ -170,4 +210,305 @@ export interface DashboardMetricsResponse {
   frequency_by_service_and_level?: ServiceLevelFrequency[]
   postmortem_completion_rate?: number
   overdue_task_count?: number
+}
+
+// --- CreateSEV / UpdateSEV / TransitionStatus request bodies -------------
+
+export interface CreateSEVRequest {
+  title: string
+  description?: string
+  severity_level: number
+  started_at?: string
+  detected_at?: string
+  affected_services?: string[]
+  detection_method?: DetectionMethod | ''
+  alert_name?: string
+  monitoring_tool?: string
+  alert_url?: string
+  metric_link?: string
+  snapshot_url?: string
+  tags?: Record<string, string>
+  sensitive?: boolean
+  ai_disabled?: boolean
+}
+
+export interface UpdateSEVRequest {
+  title?: string
+  description?: string
+  severity_level?: number
+  root_cause_category?: string
+  root_cause_description?: string
+  mitigation?: string
+  prevention?: string
+  business_impact?: string
+  affected_services?: string[]
+  detection_method?: DetectionMethod | ''
+  alert_name?: string
+  monitoring_tool?: string
+  alert_url?: string
+  metric_link?: string
+  snapshot_url?: string
+  right_people_present?: boolean
+  right_people_notes?: string
+  tags?: Record<string, string>
+  started_at?: string
+  detected_at?: string
+  sensitive?: boolean
+  ai_disabled?: boolean
+  /** Required when the SEV is locked (postmortem_complete) — see SEVResponse.locked. */
+  unlock_token?: string
+}
+
+/** Mirrors internal/sev/statemachine.go's validTransitions map. The server
+ * is the actual authority (this is UX sugar to only offer valid buttons);
+ * an out-of-sync copy here would just mean a rejected request, not a
+ * security or data-integrity issue. */
+export const VALID_STATUS_TRANSITIONS: Record<SEVStatus, SEVStatus[]> = {
+  open: ['investigating', 'mitigated'],
+  investigating: ['mitigated', 'open'],
+  mitigated: ['resolved', 'investigating'],
+  resolved: ['postmortem_in_progress'],
+  postmortem_in_progress: ['postmortem_complete'],
+  postmortem_complete: ['open'],
+}
+
+export interface TransitionStatusRequest {
+  to_status: SEVStatus
+  mitigated_at?: string
+  resolved_at?: string
+  postmortem_completed_at?: string
+  unlock_token?: string
+}
+
+// --- Search -----------------------------------------------------------
+
+export type QuickView = 'open' | 'my_sevs' | 'awaiting_postmortem'
+
+export const QUICK_VIEW_LABELS: Record<QuickView, string> = {
+  open: 'Open',
+  my_sevs: 'My SEVs',
+  awaiting_postmortem: 'Awaiting Postmortem',
+}
+
+export type SEVSortField = 'started_at' | 'severity' | 'mttr' | 'updated_at'
+
+export interface SearchSEVsParams {
+  query?: string
+  severity_levels?: number[]
+  statuses?: SEVStatus[]
+  service_ids?: string[]
+  on_call_user?: string
+  detected_by?: string
+  root_cause_category?: string
+  quick_view?: QuickView | ''
+  sort?: SEVSortField
+  sort_desc?: boolean
+  limit?: number
+  offset?: number
+}
+
+export interface SearchSEVsResponse {
+  sevs?: SEVResponse[]
+  total?: number
+}
+
+// --- Roles --------------------------------------------------------------
+
+export type SEVRoleType =
+  | 'on-call'
+  | 'detected-by'
+  | 'incident-commander'
+  | 'comms-lead'
+  | 'recorder'
+  | 'responder'
+
+export const SEV_ROLE_LABELS: Record<SEVRoleType, string> = {
+  'on-call': 'On-call',
+  'detected-by': 'Detected By',
+  'incident-commander': 'Incident Commander',
+  'comms-lead': 'Communications Lead',
+  recorder: 'Recorder',
+  responder: 'Responder',
+}
+
+export interface SEVRoleResponse {
+  id: string
+  sev_id: string
+  role_type: SEVRoleType
+  user_id?: string
+  display_name?: string
+  created_at: string
+  created_by?: string
+}
+
+export interface AssignRoleRequest {
+  role_type: SEVRoleType
+  user_id?: string
+  display_name: string
+}
+
+export interface ListRolesResponse {
+  roles?: SEVRoleResponse[]
+}
+
+// --- Announcements --------------------------------------------------------
+
+export type AnnouncementAudience = 'internal' | 'external' | 'status-page'
+
+export const AUDIENCE_LABELS: Record<AnnouncementAudience, string> = {
+  internal: 'Internal',
+  external: 'External',
+  'status-page': 'Status Page',
+}
+
+export interface AnnouncementResponse {
+  id: string
+  sev_id: string
+  author_id?: string
+  message: string
+  audience: AnnouncementAudience
+  is_milestone?: boolean
+  created_at: string
+}
+
+export interface CreateAnnouncementRequest {
+  message: string
+  audience: AnnouncementAudience
+  is_milestone?: boolean
+}
+
+export interface ListAnnouncementsResponse {
+  announcements?: AnnouncementResponse[]
+}
+
+// --- Chat log -------------------------------------------------------------
+
+export interface ChatEntryResponse {
+  id: string
+  sev_id: string
+  occurred_at: string
+  source: string
+  author: string
+  content: string
+  added_at: string
+  added_by?: string
+}
+
+export interface AddChatEntryRequest {
+  occurred_at: string
+  source: string
+  author: string
+  content: string
+}
+
+export interface ListChatEntriesResponse {
+  entries?: ChatEntryResponse[]
+}
+
+// --- Linked tasks -----------------------------------------------------
+
+export type TaskRelationshipType = 'action-item' | 'contributing-factor' | 'follow-up' | 'dependency'
+
+export const TASK_RELATIONSHIP_LABELS: Record<TaskRelationshipType, string> = {
+  'action-item': 'Action Item',
+  'contributing-factor': 'Contributing Factor',
+  'follow-up': 'Follow-up',
+  dependency: 'Dependency',
+}
+
+export type TaskPriority = 'critical' | 'non-critical'
+
+export interface TaskResponse {
+  id: string
+  sev_id: string
+  external_system: string
+  task_id: string
+  url: string
+  title: string
+  description?: string
+  relationship_type: TaskRelationshipType
+  priority: TaskPriority
+  due_date?: string
+  overdue?: boolean
+  created_at: string
+  created_by?: string
+}
+
+export interface LinkTaskRequest {
+  external_system: string
+  task_id: string
+  url: string
+  title: string
+  description?: string
+  relationship_type: TaskRelationshipType
+  priority: TaskPriority
+  due_date?: string
+}
+
+export interface CreateGitHubIssueRequest {
+  owner: string
+  repo: string
+  title: string
+  body?: string
+  relationship_type: TaskRelationshipType
+  priority: TaskPriority
+}
+
+export interface ListTasksResponse {
+  tasks?: TaskResponse[]
+}
+
+// --- Linked SEVs --------------------------------------------------------
+
+export type SEVRelationshipType = 'related' | 'caused-by' | 'duplicate' | 'recurrence-of'
+
+export const SEV_RELATIONSHIP_LABELS: Record<SEVRelationshipType, string> = {
+  related: 'Related',
+  'caused-by': 'Caused By',
+  duplicate: 'Duplicate',
+  'recurrence-of': 'Recurrence Of',
+}
+
+export interface SEVLinkResponse {
+  id: string
+  source_sev_id: string
+  target_sev_id: string
+  relationship_type: SEVRelationshipType
+  created_at: string
+  created_by?: string
+}
+
+export interface LinkSEVsRequest {
+  target_sev_id: string
+  relationship_type: SEVRelationshipType
+}
+
+export interface ListLinkedSEVsResponse {
+  links?: SEVLinkResponse[]
+}
+
+// --- Services (read-only picker use in this milestone; full CRUD is M14d) -
+
+export interface ServiceResponse {
+  id: string
+  name: string
+  description?: string
+  owning_team?: string
+  pagerduty_service_id?: string
+  tags?: Record<string, string>
+  active?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ListServicesResponse {
+  services?: ServiceResponse[]
+}
+
+// --- WebSocket event envelope (internal/api/ws/hub.go's Event) ----------
+
+export interface WSEvent {
+  type: string
+  sev_id: string
+  payload: unknown
 }

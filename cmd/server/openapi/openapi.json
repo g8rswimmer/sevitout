@@ -289,6 +289,15 @@
         "monitoringTool": {
           "type": "string"
         },
+        "alertUrl": {
+          "type": "string"
+        },
+        "metricLink": {
+          "type": "string"
+        },
+        "snapshotUrl": {
+          "type": "string"
+        },
         "rightPeoplePresent": {
           "type": "boolean"
         },
@@ -384,6 +393,15 @@
         "monitoringTool": {
           "type": "string"
         },
+        "alertUrl": {
+          "type": "string"
+        },
+        "metricLink": {
+          "type": "string"
+        },
+        "snapshotUrl": {
+          "type": "string"
+        },
         "tags": {
           "type": "object",
           "additionalProperties": {
@@ -458,6 +476,15 @@
           "type": "string"
         },
         "monitoringTool": {
+          "type": "string"
+        },
+        "alertUrl": {
+          "type": "string"
+        },
+        "metricLink": {
+          "type": "string"
+        },
+        "snapshotUrl": {
           "type": "string"
         },
         "rightPeoplePresent": {

@@ -173,6 +173,53 @@ func TestCreateSEV_SeverityLevelZero(t *testing.T) {
 	}
 }
 
+func TestCreateSEV_DetectionMetadataAndLinks(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:           "Checkout errors",
+		SeverityLevel:   2,
+		DetectionMethod: string(store.DetectionMethodMonitoringDashboard),
+		MonitoringTool:  "datadog",
+		AlertUrl:        "https://pagerduty.example.com/incidents/1",
+		MetricLink:      "https://app.datadoghq.com/dashboard/abc",
+		SnapshotUrl:     "https://img.example.com/snapshot.png",
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+	if got, want := resp.GetDetectionMethod(), string(store.DetectionMethodMonitoringDashboard); got != want {
+		t.Errorf("DetectionMethod = %q, want %q", got, want)
+	}
+	if got, want := resp.GetAlertUrl(), "https://pagerduty.example.com/incidents/1"; got != want {
+		t.Errorf("AlertUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetMetricLink(), "https://app.datadoghq.com/dashboard/abc"; got != want {
+		t.Errorf("MetricLink = %q, want %q", got, want)
+	}
+	if got, want := resp.GetSnapshotUrl(), "https://img.example.com/snapshot.png"; got != want {
+		t.Errorf("SnapshotUrl = %q, want %q", got, want)
+	}
+}
+
+func TestCreateSEV_UnknownDetectionMethod(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	_, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:           "Test SEV",
+		SeverityLevel:   1,
+		DetectionMethod: "carrier-pigeon",
+	})
+	if err == nil {
+		t.Fatal("CreateSEV: want error for unknown detection_method, got nil")
+	}
+	if code := grpcCode(err); code != codes.InvalidArgument {
+		t.Errorf("error code = %v, want InvalidArgument", code)
+	}
+}
+
 // ── GetSEV ────────────────────────────────────────────────────────────────────
 
 func TestGetSEV_AfterCreate(t *testing.T) {
@@ -241,6 +288,56 @@ func TestUpdateSEV_Title(t *testing.T) {
 	}
 	if got.GetTitle() != "Updated title" {
 		t.Errorf("persisted Title = %q, want %q", got.GetTitle(), "Updated title")
+	}
+}
+
+func TestUpdateSEV_DetectionMetadataAndLinks(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	resp, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
+		Id:              sevID,
+		DetectionMethod: string(store.DetectionMethodSlackEscalation),
+		MonitoringTool:  "Custom in-house tool",
+		AlertUrl:        "https://alerts.example.com/1",
+		MetricLink:      "https://metrics.example.com/q/1",
+		SnapshotUrl:     "https://img.example.com/2.png",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSEV: %v", err)
+	}
+	if got, want := resp.GetDetectionMethod(), string(store.DetectionMethodSlackEscalation); got != want {
+		t.Errorf("DetectionMethod = %q, want %q", got, want)
+	}
+	if got, want := resp.GetMonitoringTool(), "Custom in-house tool"; got != want {
+		t.Errorf("MonitoringTool = %q, want %q", got, want)
+	}
+	if got, want := resp.GetAlertUrl(), "https://alerts.example.com/1"; got != want {
+		t.Errorf("AlertUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetMetricLink(), "https://metrics.example.com/q/1"; got != want {
+		t.Errorf("MetricLink = %q, want %q", got, want)
+	}
+	if got, want := resp.GetSnapshotUrl(), "https://img.example.com/2.png"; got != want {
+		t.Errorf("SnapshotUrl = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateSEV_UnknownDetectionMethod(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	_, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
+		Id:              sevID,
+		DetectionMethod: "smoke-signal",
+	})
+	if err == nil {
+		t.Fatal("UpdateSEV: want error for unknown detection_method, got nil")
+	}
+	if code := grpcCode(err); code != codes.InvalidArgument {
+		t.Errorf("error code = %v, want InvalidArgument", code)
 	}
 }
 
