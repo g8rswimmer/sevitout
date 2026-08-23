@@ -305,10 +305,10 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 - `internal/integrations/slack/` package: channel create, invite users, post message, fetch channel history
 - Slash commands: `/sev open`, `/sev update <id>`, `/sev resolve <id>` — calls API server over gRPC
 - Bot notifications: on SEV open/status change/resolve → post to configured default channel
-- Auto-create incident channel on SEV-1 or SEV-2 open: channel name follows convention from `integration_config` (e.g., `#inc-{level}-{id}`); invite IC and on-call; post SEV link
+- Auto-create incident channel on every SEV open, any severity: channel name follows convention from `integration_config` (e.g., `#inc-{id}-{title}`); invite IC, on-call, and the `/sev open` caller; post SEV link
 - Announcement push: announcements with audience `external` or `status-page` are pushed to Slack after creation
 - Chat capture: `/sev capture <id>` pulls last N messages from current channel into SEV chat log
-- Slack bot authenticates to API server using a service-account JWT (issued at startup from `SLACKBOT_SERVICE_TOKEN`)
+- Slack bot authenticates to the API server by logging itself in (`POST /auth/login`) with a durable `SLACKBOT_SERVICE_EMAIL`/`SLACKBOT_SERVICE_PASSWORD` credential pair, refreshing the resulting JWT itself rather than relying on a manually pre-issued, manually rotated token
 - Docker Compose: `slackbot` service added
 - `demo/M11-slack-bot.md`
 
@@ -451,7 +451,8 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 | `SLACK_APP_TOKEN` | slackbot | Slack Socket Mode app token |
 | `SLACK_BOT_TOKEN` | slackbot | Slack bot OAuth token |
 | `API_GRPC_ADDR` | slackbot | gRPC address of api service (e.g., `api:8080`) |
-| `SLACKBOT_SERVICE_TOKEN` | slackbot | Pre-issued JWT for bot→api auth |
+| `SLACKBOT_SERVICE_EMAIL` | slackbot | Email of the bot's service-account user, for self-login |
+| `SLACKBOT_SERVICE_PASSWORD` | slackbot | Password of the bot's service-account user, for self-login |
 | `VITE_API_BASE_URL` | web | Base URL for REST API calls |
 
 ---

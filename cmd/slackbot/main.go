@@ -30,18 +30,6 @@ var (
 	slackSettingsRetryDelay    = 2 * time.Second
 )
 
-// staticToken attaches a fixed bearer token to every outgoing gRPC call, so
-// the bot authenticates to the API server the same way any HTTP client would
-// (docs/architecture.md §7) using its pre-issued service-account JWT
-// (SLACKBOT_SERVICE_TOKEN — see docs/project-plan.md's env var reference).
-type staticToken string
-
-func (t staticToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
-	return map[string]string{"authorization": "Bearer " + string(t)}, nil
-}
-
-func (staticToken) RequireTransportSecurity() bool { return false }
-
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -55,8 +43,9 @@ func main() {
 	appToken, ok1 := optionalEnv(log, "SLACK_APP_TOKEN")
 	botToken, ok2 := optionalEnv(log, "SLACK_BOT_TOKEN")
 	apiAddr, ok3 := optionalEnv(log, "API_GRPC_ADDR")
-	serviceToken, ok4 := optionalEnv(log, "SLACKBOT_SERVICE_TOKEN")
-	if !ok1 || !ok2 || !ok3 || !ok4 {
+	serviceEmail, ok4 := optionalEnv(log, "SLACKBOT_SERVICE_EMAIL")
+	servicePassword, ok5 := optionalEnv(log, "SLACKBOT_SERVICE_PASSWORD")
+	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
 		log.Warn("slackbot disabled: one or more required environment variables are not set")
 		return
 	}
@@ -64,9 +53,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// tokenSource logs the bot in itself (POST /auth/login, same host:port
+	// as the gRPC dial — the API server multiplexes both on one port) and
+	// keeps its token fresh for as long as the bot runs, replacing a
+	// manually pre-issued, manually rotated SLACKBOT_SERVICE_TOKEN.
+	tokens := newTokenSource(apiAddr, serviceEmail, servicePassword, log)
+
 	conn, err := grpc.NewClient(apiAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(staticToken(serviceToken)),
+		grpc.WithPerRPCCredentials(tokens),
+		grpc.WithChainUnaryInterceptor(tokens.retryOnUnauthenticated),
 	)
 	if err != nil {
 		log.Error("dial api server", "addr", apiAddr, "err", err)
@@ -90,8 +86,9 @@ func main() {
 	b := newBot(sevitoutslack.NewClient(botToken), api, log, defaultChannel, namingConvention)
 
 	wsURL := (&url.URL{Scheme: "ws", Host: apiAddr, Path: "/ws", RawQuery: "sev_id=" + url.QueryEscape(ws.BroadcastRoom)}).String()
-	go b.runEventListener(ctx, wsURL, serviceToken)
+	go b.runEventListener(ctx, wsURL, tokens)
 	go b.runSettingsRefresher(ctx, api.config)
+	go tokens.runTokenRefresher(ctx)
 
 	go runSocketMode(ctx, log, b, smClient)
 

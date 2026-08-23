@@ -4,8 +4,10 @@
 
 `cmd/slackbot`, a separate binary (per `docs/architecture.md` §7) that connects to
 Slack over **Socket Mode** (no public ingress required) and to the API server over
-**gRPC**, using a pre-issued service-account JWT for every call
-(`SLACKBOT_SERVICE_TOKEN`).
+**gRPC**. It authenticates as its own service-account user, logging itself in
+(`POST /auth/login`, using `SLACKBOT_SERVICE_EMAIL`/`SLACKBOT_SERVICE_PASSWORD`) and
+keeping its token fresh for as long as it runs (`cmd/slackbot/auth.go`) — no pre-issued
+token to generate or manually rotate.
 
 - **Slash commands** (`docs/requirements.md` §13.1):
   - `/sev open [severity 1-4] <title>` — creates a SEV (`SEVService.CreateSEV`);
@@ -57,11 +59,11 @@ Slack over **Socket Mode** (no public ingress required) and to the API server ov
   `Ping` used by M10's `GET /admin/integrations/health` for an optional
   admin-configured Slack health check, independent of the bot's own token).
 
-If any of `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`, `API_GRPC_ADDR`, or
-`SLACKBOT_SERVICE_TOKEN` is unset, the bot logs a warning and exits **cleanly (code
-0)** instead of crash-looping — every earlier milestone's demo runs `make up` without
-Slack configured, and `docker-compose.yml` has no restart policy, so this keeps those
-demos quiet.
+If any of `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`, `API_GRPC_ADDR`,
+`SLACKBOT_SERVICE_EMAIL`, or `SLACKBOT_SERVICE_PASSWORD` is unset, the bot logs a
+warning and exits **cleanly (code 0)** instead of crash-looping — every earlier
+milestone's demo runs `make up` without Slack configured, and `docker-compose.yml` has
+no restart policy, so this keeps those demos quiet.
 
 ---
 
@@ -137,12 +139,16 @@ In Slack, create or pick a channel for default notifications (e.g. `#incidents`)
 run `/invite @sevbot` in it. Note the channel name — you'll set it as `default_channel`
 in step 6.
 
-## Generating `SLACKBOT_SERVICE_TOKEN`
+## Provisioning the slackbot service account
 
-The bot authenticates to the API server with a pre-issued JWT, the same way any HTTP
-client would (`docs/architecture.md` §7) — there's no separate bot-account mechanism to
-build; it's an ordinary Sevitout user promoted to Admin (Admin is required for
-`ConfigService.GetIntegrationConfig`, which the bot calls at startup).
+The bot authenticates to the API server as an ordinary Sevitout user promoted to Admin
+(Admin is required for `ConfigService.GetIntegrationConfig`, which the bot calls at
+startup) — there's no separate bot-account mechanism to build. Unlike a human user,
+though, the bot logs itself in: it calls `POST /auth/login` with
+`SLACKBOT_SERVICE_EMAIL`/`SLACKBOT_SERVICE_PASSWORD` at startup, then keeps its own JWT
+fresh for as long as it runs (`cmd/slackbot/auth.go`) — proactively on a fixed interval
+and reactively on any call the server rejects as unauthenticated. There's no token to
+generate or rotate by hand.
 
 ```bash
 export API=http://localhost:8080
@@ -163,15 +169,11 @@ BOT_USER_ID=$(curl -s "$API/v1/config/users" -H "Authorization: Bearer $ADMIN_TO
 
 curl -s -X PATCH "$API/v1/config/users/$BOT_USER_ID/role" -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' -d '{"org_role":"admin"}' | jq .
-
-# Log in as the service account — this JWT is SLACKBOT_SERVICE_TOKEN.
-curl -s -X POST $API/auth/login -d '{"email":"slackbot@sevitout.local","password":"a-strong-password"}' \
-  -H 'Content-Type: application/json' | jq -r .token
 ```
 
-Put that token in `.env` as `SLACKBOT_SERVICE_TOKEN`. It's a normal `JWT_TTL_HOURS`-lived
-token (24h by default) — in a real deployment, re-issue and rotate it the same way
-before it expires; there's no refresh mechanism in v1.
+Put that same email/password straight into `.env` as `SLACKBOT_SERVICE_EMAIL` and
+`SLACKBOT_SERVICE_PASSWORD` — that's the whole setup. No `curl .../auth/login | jq -r
+.token` step, and nothing to re-run when a token would otherwise have expired.
 
 ## Configuring the `slack` integration (optional)
 
@@ -205,7 +207,7 @@ want to wait).
 ## Start the stack
 
 ```bash
-cp .env.example .env   # fill in JWT_SECRET, ENCRYPTION_KEY, and the SLACK_* / SLACKBOT_SERVICE_TOKEN values above
+cp .env.example .env   # fill in JWT_SECRET, ENCRYPTION_KEY, and the SLACK_* / SLACKBOT_SERVICE_* values above
 make up
 ```
 
@@ -214,7 +216,8 @@ Or run both binaries locally without Docker (two terminals):
 ```bash
 JWT_SECRET=changeme go run ./cmd/server
 SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... API_GRPC_ADDR=localhost:8080 \
-  SLACKBOT_SERVICE_TOKEN=eyJ... go run ./cmd/slackbot
+  SLACKBOT_SERVICE_EMAIL=slackbot@sevitout.local SLACKBOT_SERVICE_PASSWORD=a-strong-password \
+  go run ./cmd/slackbot
 ```
 
 Check the bot's logs for `"connected to slack"` and `"connected to event stream"` —
@@ -341,3 +344,9 @@ pattern as `internal/integrations/pagerduty` and `.../tasktracker/github`.
   validate that channel is the SEV's own incident channel, so it's possible (if
   unlikely in practice) to capture an unrelated channel's history into a SEV by
   running the command from the wrong place.
+- The bot's `POST /auth/login` call and every gRPC call both go out over plain
+  HTTP/gRPC (`insecure.NewCredentials()` — matching this repo's existing internal-only
+  posture, not a regression introduced here), so `SLACKBOT_SERVICE_PASSWORD` and every
+  minted token cross the network unencrypted. Fine for a trusted internal network (e.g.
+  same-host Docker Compose); a real deployment across an untrusted network should put
+  TLS in front of the API server before relying on this.

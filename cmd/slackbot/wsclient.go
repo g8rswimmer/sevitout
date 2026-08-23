@@ -22,9 +22,13 @@ const wsReconnectDelay = 5 * time.Second
 // open) and dispatches each event to b.handleEvent. It reconnects on any
 // error until ctx is canceled — this is the bot's only source of the
 // event-driven triggers M11 depends on M09 for (docs/project-plan.md).
-func (b *bot) runEventListener(ctx context.Context, wsURL, token string) {
+//
+// tokens supplies a fresh bearer token for each connection attempt (rather
+// than one fixed at startup) since a long-running bot will outlive any
+// single token's expiry; see tokenSource.
+func (b *bot) runEventListener(ctx context.Context, wsURL string, tokens *tokenSource) {
 	for ctx.Err() == nil {
-		if err := b.connectAndListen(ctx, wsURL, token); err != nil && ctx.Err() == nil {
+		if err := b.connectAndListen(ctx, wsURL, tokens); err != nil && ctx.Err() == nil {
 			b.log.ErrorContext(ctx, "event stream connection lost, reconnecting", "err", err, "retry_in", wsReconnectDelay)
 		}
 		select {
@@ -37,7 +41,11 @@ func (b *bot) runEventListener(ctx context.Context, wsURL, token string) {
 
 // connectAndListen opens one WebSocket connection and reads from it until
 // the connection errors or ctx is canceled.
-func (b *bot) connectAndListen(ctx context.Context, wsURL, token string) error {
+func (b *bot) connectAndListen(ctx context.Context, wsURL string, tokens *tokenSource) error {
+	token, err := tokens.Token(ctx)
+	if err != nil {
+		return fmt.Errorf("get token: %w", err)
+	}
 	header := http.Header{"Authorization": {"Bearer " + token}}
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, header)
 	if err != nil {
