@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,12 @@ func TestParseCaptureArgs(t *testing.T) {
 	}
 	if _, _, err := parseCaptureArgs([]string{"SEV-1", "0"}); err == nil {
 		t.Error("expected error for non-positive limit")
+	}
+	if _, _, err := parseCaptureArgs([]string{"SEV-1", strconv.Itoa(maxCaptureLimit + 1)}); err == nil {
+		t.Error("expected error for a limit above maxCaptureLimit")
+	}
+	if _, _, err := parseCaptureArgs([]string{"SEV-1", strconv.Itoa(maxCaptureLimit)}); err != nil {
+		t.Errorf("expected maxCaptureLimit itself to be allowed, got %v", err)
 	}
 }
 
@@ -257,6 +264,51 @@ func TestHandleTransition_MovesToRequestedStatus(t *testing.T) {
 	}
 	if !strings.Contains(reply, "investigating") {
 		t.Errorf("reply = %q", reply)
+	}
+}
+
+func TestHandleTransition_SetsMitigatedAtWhenTransitioningToMitigated(t *testing.T) {
+	sevs := &fakeSevAPI{transResp: &pb.SEVResponse{Id: "SEV-1", Title: "checkout down", Status: "mitigated"}}
+	b := newTestBot(nil, sevs, nil, nil, nil, "", "")
+
+	before := time.Now()
+	b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "transition SEV-1 mitigated"})
+	after := time.Now()
+
+	got := sevs.lastTransReq.GetMitigatedAt()
+	if got == nil {
+		t.Fatal("expected MitigatedAt to be set")
+	}
+	if got.AsTime().Before(before) || got.AsTime().After(after) {
+		t.Errorf("MitigatedAt = %v, want between %v and %v", got.AsTime(), before, after)
+	}
+	if sevs.lastTransReq.GetResolvedAt() != nil {
+		t.Error("expected ResolvedAt to be unset when transitioning to mitigated")
+	}
+}
+
+func TestHandleTransition_SetsResolvedAtWhenTransitioningToResolved(t *testing.T) {
+	sevs := &fakeSevAPI{transResp: &pb.SEVResponse{Id: "SEV-1", Title: "checkout down", Status: "resolved"}}
+	b := newTestBot(nil, sevs, nil, nil, nil, "", "")
+
+	b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "transition SEV-1 resolved"})
+
+	if sevs.lastTransReq.GetResolvedAt() == nil {
+		t.Error("expected ResolvedAt to be set")
+	}
+	if sevs.lastTransReq.GetMitigatedAt() != nil {
+		t.Error("expected MitigatedAt to be unset when transitioning to resolved")
+	}
+}
+
+func TestHandleTransition_OtherStatusesSetNoTimestamps(t *testing.T) {
+	sevs := &fakeSevAPI{transResp: &pb.SEVResponse{Id: "SEV-1", Title: "checkout down", Status: "investigating"}}
+	b := newTestBot(nil, sevs, nil, nil, nil, "", "")
+
+	b.handleSlashCommand(context.Background(), slack.SlashCommand{Text: "transition SEV-1 investigating"})
+
+	if sevs.lastTransReq.GetMitigatedAt() != nil || sevs.lastTransReq.GetResolvedAt() != nil {
+		t.Errorf("expected no timestamps set, got MitigatedAt=%v ResolvedAt=%v", sevs.lastTransReq.GetMitigatedAt(), sevs.lastTransReq.GetResolvedAt())
 	}
 }
 

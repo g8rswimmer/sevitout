@@ -24,6 +24,13 @@ const defaultChannelNamingConvention = "inc-{id}-{title}"
 // pulls in when the caller doesn't specify a count.
 const defaultCaptureLimit = 20
 
+// maxCaptureLimit bounds how many messages `/sev capture` will ever pull in
+// one invocation. Each captured message costs one blocking AddChatEntry gRPC
+// call in the same command goroutine (see handleCapture) with no batching or
+// concurrency, so an unbounded caller-supplied limit would let one Slack
+// command trigger an arbitrarily large, slow sequence of calls.
+const maxCaptureLimit = 200
+
 // slackClient is the subset of internal/integrations/slack.Client this bot
 // calls, declared here (the consumer) so unit tests can substitute a fake
 // instead of hitting Slack's real API.

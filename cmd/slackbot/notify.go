@@ -36,6 +36,22 @@ func shouldPushAnnouncement(audience string) bool {
 	return audience == string(store.AudienceExternal) || audience == string(store.AudienceStatusPage)
 }
 
+// postToNotifyChannel posts text to sevID's notification channel (its own
+// incident channel if one exists, else the configured default — see
+// notifyChannel), logging and returning early rather than erroring when
+// there's nowhere to send it or the post itself fails. eventName identifies
+// the WebSocket event this post is for, purely for the log lines.
+func (b *bot) postToNotifyChannel(ctx context.Context, sevID, eventName, text string) {
+	channel := b.notifyChannel(sevID)
+	if channel == "" {
+		b.log.WarnContext(ctx, eventName+" notification dropped: no incident channel and no default_channel configured", "sev_id", sevID)
+		return
+	}
+	if err := b.slack.PostMessage(ctx, channel, text); err != nil {
+		b.log.ErrorContext(ctx, "post "+eventName+" notification failed", "sev_id", sevID, "err", err)
+	}
+}
+
 // handleEvent dispatches one WebSocket event to the appropriate notifier.
 // Unrecognized event types (anything this bot doesn't act on, e.g.
 // task.updated) are silently ignored — this bot only reacts to a subset of
@@ -69,15 +85,8 @@ func (b *bot) handleSEVCreated(ctx context.Context, payload json.RawMessage) {
 		b.createIncidentChannel(ctx, sev.ID, sev.Title, sev.SeverityLevel)
 	}
 
-	channel := b.notifyChannel(sev.ID)
-	if channel == "" {
-		b.log.WarnContext(ctx, "sev.created notification dropped: no incident channel and no default_channel configured", "sev_id", sev.ID)
-		return
-	}
 	text := fmt.Sprintf(":rotating_light: SEV-%d opened: *%s* (%s)", sev.SeverityLevel, sev.Title, sev.ID)
-	if err := b.slack.PostMessage(ctx, channel, text); err != nil {
-		b.log.ErrorContext(ctx, "post sev.created notification failed", "sev_id", sev.ID, "err", err)
-	}
+	b.postToNotifyChannel(ctx, sev.ID, "sev.created", text)
 }
 
 // handleSEVStatusChanged posts a bot notification for every status
@@ -89,15 +98,8 @@ func (b *bot) handleSEVStatusChanged(ctx context.Context, payload json.RawMessag
 		return
 	}
 
-	channel := b.notifyChannel(sev.ID)
-	if channel == "" {
-		b.log.WarnContext(ctx, "sev.status_changed notification dropped: no incident channel and no default_channel configured", "sev_id", sev.ID)
-		return
-	}
 	text := fmt.Sprintf("%s *%s* is now *%s*", statusEmoji(sev.Status), sev.Title, sev.Status)
-	if err := b.slack.PostMessage(ctx, channel, text); err != nil {
-		b.log.ErrorContext(ctx, "post sev.status_changed notification failed", "sev_id", sev.ID, "err", err)
-	}
+	b.postToNotifyChannel(ctx, sev.ID, "sev.status_changed", text)
 }
 
 // handleAnnouncementCreated pushes external/status-page announcements to
@@ -113,15 +115,8 @@ func (b *bot) handleAnnouncementCreated(ctx context.Context, payload json.RawMes
 		return
 	}
 
-	channel := b.notifyChannel(a.SevID)
-	if channel == "" {
-		b.log.WarnContext(ctx, "announcement.created push dropped: no incident channel and no default_channel configured", "sev_id", a.SevID)
-		return
-	}
 	text := fmt.Sprintf(":mega: *%s* update: %s", a.SevID, a.Message)
-	if err := b.slack.PostMessage(ctx, channel, text); err != nil {
-		b.log.ErrorContext(ctx, "post announcement.created notification failed", "sev_id", a.SevID, "err", err)
-	}
+	b.postToNotifyChannel(ctx, a.SevID, "announcement.created", text)
 }
 
 // statusEmoji returns a short visual marker for a SEV status, purely to make

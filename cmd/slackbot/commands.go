@@ -98,6 +98,9 @@ func parseCaptureArgs(args []string) (id string, limit int, err error) {
 	if convErr != nil || n <= 0 {
 		return "", 0, fmt.Errorf("limit must be a positive number, got %q", args[1])
 	}
+	if n > maxCaptureLimit {
+		return "", 0, fmt.Errorf("limit must be at most %d, got %d", maxCaptureLimit, n)
+	}
 	return args[0], n, nil
 }
 
@@ -210,15 +213,30 @@ func (b *bot) handleUpdate(ctx context.Context, cmd slack.SlashCommand, args []s
 // which from→to moves are legal; this command doesn't second-guess it, it
 // just gives Slack users a way to drive any of them without dropping to the
 // REST API.
+//
+// Sets MitigatedAt/ResolvedAt when the target status is "mitigated" or
+// "resolved" — the server (internal/api/grpc's TransitionStatus) only
+// records those timestamps when the request carries them, and
+// internal/sev.ComputeMetrics only derives MTTM/MTTR from a non-nil
+// timestamp. Without this, a SEV closed out entirely via `/sev transition`
+// (rather than `/sev resolve`, which already sets ResolvedAt) would
+// silently end up with no MTTM/MTTR recorded.
 func (b *bot) handleTransition(ctx context.Context, cmd slack.SlashCommand, args []string) string {
 	id, toStatus, err := parseTransitionArgs(args)
 	if err != nil {
 		return err.Error()
 	}
-	resp, err := b.api.sevs.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+	req := &pb.TransitionStatusRequest{
 		Id:       id,
 		ToStatus: toStatus,
-	})
+	}
+	switch store.SEVStatus(toStatus) {
+	case store.SEVStatusMitigated:
+		req.MitigatedAt = timestamppb.Now()
+	case store.SEVStatusResolved:
+		req.ResolvedAt = timestamppb.Now()
+	}
+	resp, err := b.api.sevs.TransitionStatus(ctx, req)
 	if err != nil {
 		return fmt.Sprintf("failed to transition %s to %q: %v\nvalid statuses: %s", id, toStatus, err, validStatusNames)
 	}
