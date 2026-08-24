@@ -84,3 +84,32 @@ func (q *Queries) ListAnnouncementsBySEVID(ctx context.Context, sevID string) ([
 	}
 	return items, nil
 }
+
+const searchAnnouncementSEVIDs = `-- name: SearchAnnouncementSEVIDs :many
+SELECT DISTINCT sev_id FROM sev_announcements
+WHERE search_vector @@ plainto_tsquery('english', $1::text)
+`
+
+// search_vector is a tsvector populated by the tsvector_update_announcements
+// trigger (migration 000002); plainto_tsquery tokenizes free-form input
+// (implicit AND between words) the same way buildSEVFilterWhere's own
+// search-vector query does, so it can't produce a malformed query.
+func (q *Queries) SearchAnnouncementSEVIDs(ctx context.Context, dollar_1 string) ([]string, error) {
+	rows, err := q.db.Query(ctx, searchAnnouncementSEVIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var sev_id string
+		if err := rows.Scan(&sev_id); err != nil {
+			return nil, err
+		}
+		items = append(items, sev_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

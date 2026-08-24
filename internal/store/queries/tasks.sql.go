@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countOverdueTasks = `-- name: CountOverdueTasks :one
+SELECT COUNT(*) FROM sev_linked_tasks
+WHERE due_date IS NOT NULL AND due_date < $1::date
+`
+
+// due_date is a DATE (no time-of-day), so "due before today" is the closest
+// available match to the in-memory store's due_date.Before(now) semantics.
+func (q *Queries) CountOverdueTasks(ctx context.Context, dollar_1 pgtype.Date) (int64, error) {
+	row := q.db.QueryRow(ctx, countOverdueTasks, dollar_1)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteLinkedTask = `-- name: DeleteLinkedTask :exec
 DELETE FROM sev_linked_tasks WHERE id = $1
 `
@@ -131,6 +145,24 @@ func (q *Queries) ListLinkedTasksBySEVID(ctx context.Context, sevID string) ([]S
 		return nil, err
 	}
 	return items, nil
+}
+
+const setTaskDueDateIfUnset = `-- name: SetTaskDueDateIfUnset :execrows
+UPDATE sev_linked_tasks SET due_date = $2
+WHERE id = $1 AND due_date IS NULL
+`
+
+type SetTaskDueDateIfUnsetParams struct {
+	ID      int64       `json:"id"`
+	DueDate pgtype.Date `json:"due_date"`
+}
+
+func (q *Queries) SetTaskDueDateIfUnset(ctx context.Context, arg SetTaskDueDateIfUnsetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setTaskDueDateIfUnset, arg.ID, arg.DueDate)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateLinkedTask = `-- name: UpdateLinkedTask :exec

@@ -337,7 +337,6 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
-	log.Warn("announcement, chat, sev-link, task, ai-output, and share stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
 	return postgres.NewSEVStore(pool),
 		postgres.NewAuditStore(pool),
 		postgres.NewStatusHistoryStore(pool),
@@ -345,16 +344,16 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		postgres.NewRoleStore(pool),
 		postgres.NewServiceStore(pool),
 		postgres.NewPostmortemStore(pool),
-		memory.NewAnnouncementStore(),
-		memory.NewChatStore(),
-		memory.NewSEVLinkStore(),
-		memory.NewTaskStore(),
+		postgres.NewAnnouncementStore(pool),
+		postgres.NewChatStore(pool),
+		postgres.NewSEVLinkStore(pool),
+		postgres.NewTaskStore(pool),
 		postgres.NewOnCallStore(pool),
 		postgres.NewIntegrationConfigStore(pool),
 		postgres.NewRetentionConfigStore(pool),
 		postgres.NewAIPluginStore(pool),
-		memory.NewAIOutputStore(),
-		memory.NewShareStore()
+		postgres.NewAIOutputStore(pool),
+		postgres.NewShareStore(pool)
 }
 
 // githubIssueClient adapts *github.Client to grpchandler.IssueClient,

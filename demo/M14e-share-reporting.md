@@ -220,10 +220,10 @@ cached shell — this exact scenario is what was broken before.
   backend's own audit log (`sev.share_link_created`/`sev.share_link_revoked`
   entries) or direct database access. This is a backend API gap, not something
   fixable from the frontend alone.
-- **`ShareStore` is in-memory only** even when `DATABASE_URL` is set (M13's own
+- ~~**`ShareStore` is in-memory only** even when `DATABASE_URL` is set (M13's own
   known limitation, unchanged) — a share link, like an integration credential or AI
   plugin (M14d), does not survive an API restart, even though the SEV it points at
-  does.
+  does.~~ **Fixed**: see `demo/M14f-remaining-store-persistence.md`.
 - **The Accept-header content negotiation on `/s/{token}` is a heuristic, not a
   guarantee** — any HTTP client that happens to send `Accept: text/html` (unusual
   for a script, but not impossible) gets the SPA shell instead of JSON. This matches
