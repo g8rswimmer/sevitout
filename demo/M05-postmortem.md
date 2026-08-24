@@ -186,5 +186,5 @@ All tests should pass with no lint errors.
 ## Known limitations
 
 - The unlock token is a short-lived JWT (15-minute TTL). Within that window the same token can be used for multiple writes; a nonce/revocation store is deferred to a future milestone.
-- The `PostmortemStore` backed by PostgreSQL is not yet wired up; the in-memory store is used at runtime. A postgres implementation is planned for a future milestone alongside the Config API.
+- ~~The `PostmortemStore` backed by PostgreSQL is not yet wired up; the in-memory store is used at runtime.~~ **Fixed during M14c**: a postmortem created while `DATABASE_URL` is set now survives an API server restart — `internal/store/postgres/postmortem.go` was added and wired into `cmd/server/main.go`'s `buildStores`, using SQL/generated code that had existed unused since M01. Diagnosed from a real bug report: a postmortem edited through the M14c UI reverted to "not found" after the API process restarted, because only the SEV itself (Postgres-backed) survived — its postmortem (in-memory-only) didn't.
 - Only `UpdatePostmortem` and `UpdateSEV`/`TransitionStatus` enforce lock checks. Role assignment, announcements, and chat entries do not yet check the lock; this is deferred to M06+.

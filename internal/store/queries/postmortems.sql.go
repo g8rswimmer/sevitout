@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countPostmortemsByStatus = `-- name: CountPostmortemsByStatus :many
+SELECT status, COUNT(*) AS count
+FROM postmortems
+GROUP BY status
+`
+
+type CountPostmortemsByStatusRow struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
+func (q *Queries) CountPostmortemsByStatus(ctx context.Context) ([]CountPostmortemsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countPostmortemsByStatus)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountPostmortemsByStatusRow
+	for rows.Next() {
+		var i CountPostmortemsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPostmortemBySEVID = `-- name: GetPostmortemBySEVID :one
 SELECT id, sev_id, status, content, created_at, updated_at, updated_by
 FROM postmortems

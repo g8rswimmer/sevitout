@@ -101,6 +101,26 @@ func TestCreateSEV_ValidRequest(t *testing.T) {
 	}
 }
 
+// TestCreateSEV_StartedAtNotDefaulted guards against reintroducing the
+// previous "default started_at to now when omitted" behavior — the caller
+// must set it explicitly (docs/requirements.md §2.1: "may be estimated", not
+// assumed to be the moment the record was opened).
+func TestCreateSEV_StartedAtNotDefaulted(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:         "Test SEV",
+		SeverityLevel: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+	if resp.GetStartedAt() != nil {
+		t.Errorf("StartedAt = %v, want nil (unset) when omitted from the request", resp.GetStartedAt())
+	}
+}
+
 func TestCreateSEV_PublishesSEVCreated(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
@@ -167,6 +187,53 @@ func TestCreateSEV_SeverityLevelZero(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("CreateSEV: want error for severity_level 0, got nil")
+	}
+	if code := grpcCode(err); code != codes.InvalidArgument {
+		t.Errorf("error code = %v, want InvalidArgument", code)
+	}
+}
+
+func TestCreateSEV_DetectionMetadataAndLinks(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	resp, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:           "Checkout errors",
+		SeverityLevel:   2,
+		DetectionMethod: string(store.DetectionMethodMonitoringDashboard),
+		MonitoringTool:  "datadog",
+		AlertUrl:        "https://pagerduty.example.com/incidents/1",
+		MetricLink:      "https://app.datadoghq.com/dashboard/abc",
+		SnapshotUrl:     "https://img.example.com/snapshot.png",
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+	if got, want := resp.GetDetectionMethod(), string(store.DetectionMethodMonitoringDashboard); got != want {
+		t.Errorf("DetectionMethod = %q, want %q", got, want)
+	}
+	if got, want := resp.GetAlertUrl(), "https://pagerduty.example.com/incidents/1"; got != want {
+		t.Errorf("AlertUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetMetricLink(), "https://app.datadoghq.com/dashboard/abc"; got != want {
+		t.Errorf("MetricLink = %q, want %q", got, want)
+	}
+	if got, want := resp.GetSnapshotUrl(), "https://img.example.com/snapshot.png"; got != want {
+		t.Errorf("SnapshotUrl = %q, want %q", got, want)
+	}
+}
+
+func TestCreateSEV_UnknownDetectionMethod(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	_, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:           "Test SEV",
+		SeverityLevel:   1,
+		DetectionMethod: "carrier-pigeon",
+	})
+	if err == nil {
+		t.Fatal("CreateSEV: want error for unknown detection_method, got nil")
 	}
 	if code := grpcCode(err); code != codes.InvalidArgument {
 		t.Errorf("error code = %v, want InvalidArgument", code)
@@ -241,6 +308,88 @@ func TestUpdateSEV_Title(t *testing.T) {
 	}
 	if got.GetTitle() != "Updated title" {
 		t.Errorf("persisted Title = %q, want %q", got.GetTitle(), "Updated title")
+	}
+}
+
+func TestUpdateSEV_DetectionMetadataAndLinks(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	resp, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
+		Id:              sevID,
+		DetectionMethod: string(store.DetectionMethodSlackEscalation),
+		MonitoringTool:  "Custom in-house tool",
+		AlertUrl:        "https://alerts.example.com/1",
+		MetricLink:      "https://metrics.example.com/q/1",
+		SnapshotUrl:     "https://img.example.com/2.png",
+		GithubRepo:      "acme-corp/checkout-service",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSEV: %v", err)
+	}
+	if got, want := resp.GetDetectionMethod(), string(store.DetectionMethodSlackEscalation); got != want {
+		t.Errorf("DetectionMethod = %q, want %q", got, want)
+	}
+	if got, want := resp.GetMonitoringTool(), "Custom in-house tool"; got != want {
+		t.Errorf("MonitoringTool = %q, want %q", got, want)
+	}
+	if got, want := resp.GetAlertUrl(), "https://alerts.example.com/1"; got != want {
+		t.Errorf("AlertUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetMetricLink(), "https://metrics.example.com/q/1"; got != want {
+		t.Errorf("MetricLink = %q, want %q", got, want)
+	}
+	if got, want := resp.GetSnapshotUrl(), "https://img.example.com/2.png"; got != want {
+		t.Errorf("SnapshotUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetGithubRepo(), "acme-corp/checkout-service"; got != want {
+		t.Errorf("GithubRepo = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateSEV_RootCauseReferenceURL(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	resp, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
+		Id:                    sevID,
+		RootCauseCategory:     "deployment",
+		RootCauseDescription:  "A bad rollout introduced a nil pointer.",
+		RootCauseReferenceUrl: "https://github.com/acme-corp/checkout-service/pull/123",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSEV: %v", err)
+	}
+	if got, want := resp.GetRootCauseReferenceUrl(), "https://github.com/acme-corp/checkout-service/pull/123"; got != want {
+		t.Errorf("RootCauseReferenceUrl = %q, want %q", got, want)
+	}
+
+	// Verify the change is persisted — read it back through the handler.
+	got, err := ts.server.GetSEV(ctx, &pb.GetSEVRequest{Id: sevID})
+	if err != nil {
+		t.Fatalf("GetSEV after update: %v", err)
+	}
+	if want := "https://github.com/acme-corp/checkout-service/pull/123"; got.GetRootCauseReferenceUrl() != want {
+		t.Errorf("persisted RootCauseReferenceUrl = %q, want %q", got.GetRootCauseReferenceUrl(), want)
+	}
+}
+
+func TestUpdateSEV_UnknownDetectionMethod(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	_, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
+		Id:              sevID,
+		DetectionMethod: "smoke-signal",
+	})
+	if err == nil {
+		t.Fatal("UpdateSEV: want error for unknown detection_method, got nil")
+	}
+	if code := grpcCode(err); code != codes.InvalidArgument {
+		t.Errorf("error code = %v, want InvalidArgument", code)
 	}
 }
 

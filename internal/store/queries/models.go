@@ -146,6 +146,11 @@ type Sev struct {
 	CreatedBy             string             `json:"created_by"`
 	SearchVector          interface{}        `json:"search_vector"`
 	AiDisabled            bool               `json:"ai_disabled"`
+	AlertUrl              *string            `json:"alert_url"`
+	MetricLink            *string            `json:"metric_link"`
+	SnapshotUrl           *string            `json:"snapshot_url"`
+	GithubRepo            *string            `json:"github_repo"`
+	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 }
 
 type SevAnnouncement struct {

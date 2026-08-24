@@ -232,11 +232,14 @@ Key coverage:
 
 ## Known limitations
 
-- `UpsertIntegrationConfig` and `GetRetentionConfig`/`UpdateRetentionConfig` are
-  in-memory only even when `DATABASE_URL` is set — a PostgreSQL-backed
-  `IntegrationConfigStore`/`RetentionConfigStore` is deferred, matching the same
-  "in-memory for now" treatment M01–M09 already gave `ServiceStore`, `OnCallStore`,
-  `PostmortemStore`, `AnnouncementStore`, `ChatStore`, `SEVLinkStore`, and `TaskStore`.
+- ~~`UpsertIntegrationConfig` and `GetRetentionConfig`/`UpdateRetentionConfig` are
+  in-memory only even when `DATABASE_URL` is set...~~ **Fixed during M14d**:
+  `ServiceStore`, `OnCallStore`, `IntegrationConfigStore`, `RetentionConfigStore`,
+  and `AIPluginStore` all gained PostgreSQL implementations — see
+  `demo/M14d-admin-pages.md`'s "Bug fix" section. Diagnosed from a real bug report:
+  a service created through the admin UI disappeared after an API restart, because
+  only the in-memory store had ever been wired up, exactly like M05's
+  `PostmortemStore` gap found and fixed the milestone before.
 - The integration health check only ships built-in checkers for `pagerduty` and
   `github`; other integration types (`slack`, `datadog`, `prometheus`, `cloudwatch`)
   report `"status":"unknown"` until M11/M12 register checkers for them.

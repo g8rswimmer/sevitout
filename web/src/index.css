@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.556 0.15 260);
+  --primary: oklch(0.42 0.15 260);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.2 0 0);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.96 0 0);
+  --accent-foreground: oklch(0.2 0 0);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  /* SEV severity accent colors, used consistently across the app */
+  --sev-1: oklch(0.55 0.22 25);
+  --sev-2: oklch(0.65 0.19 45);
+  --sev-3: oklch(0.75 0.15 90);
+  --sev-4: oklch(0.6 0.1 240);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.98 0 0);
+    --card: oklch(0.19 0 0);
+    --card-foreground: oklch(0.98 0 0);
+    --border: oklch(0.3 0 0);
+    --input: oklch(0.3 0 0);
+    --ring: oklch(0.6 0.15 260);
+    --primary: oklch(0.7 0.15 260);
+    --primary-foreground: oklch(0.145 0 0);
+    --secondary: oklch(0.25 0 0);
+    --secondary-foreground: oklch(0.98 0 0);
+    --muted: oklch(0.25 0 0);
+    --muted-foreground: oklch(0.65 0 0);
+    --accent: oklch(0.25 0 0);
+    --accent-foreground: oklch(0.98 0 0);
+    --destructive: oklch(0.65 0.2 25);
+    --destructive-foreground: oklch(0.98 0 0);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-sev-1: var(--sev-1);
+  --color-sev-2: var(--sev-2);
+  --color-sev-3: var(--sev-3);
+  --color-sev-4: var(--sev-4);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Minimal rendering for the postmortem TipTap editor's content (M14c) — a
+ * hand-rolled stand-in for @tailwindcss/typography, which this project
+ * doesn't otherwise need, for one editor's worth of headings/lists/quotes. */
+.tiptap-content {
+  @apply text-sm leading-relaxed;
+}
+.tiptap-content :is(h1, h2, h3) {
+  @apply mt-4 mb-2 font-semibold first:mt-0;
+}
+.tiptap-content h1 {
+  @apply text-xl;
+}
+.tiptap-content h2 {
+  @apply text-lg;
+}
+.tiptap-content h3 {
+  @apply text-base;
+}
+.tiptap-content p {
+  @apply mb-3;
+}
+.tiptap-content :is(ul, ol) {
+  @apply mb-3 pl-5;
+}
+.tiptap-content ul {
+  @apply list-disc;
+}
+.tiptap-content ol {
+  @apply list-decimal;
+}
+.tiptap-content blockquote {
+  @apply mb-3 border-l-2 border-border pl-3 text-muted-foreground;
+}
+.tiptap-content code {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-xs;
+}
+.tiptap-content pre {
+  @apply mb-3 overflow-x-auto rounded-md bg-muted p-3;
+}
+.tiptap-content pre code {
+  @apply bg-transparent p-0;
+}
+.tiptap-content table {
+  @apply mb-3 w-full table-fixed border-collapse overflow-hidden;
+}
+.tiptap-content :is(th, td) {
+  @apply border border-border px-2 py-1 text-left align-top;
+}
+.tiptap-content th {
+  @apply bg-muted font-medium;
+}
+.tiptap-content:focus-visible {
+  @apply outline-none;
+}
+
+/* "Download PDF" on the postmortem page (PostmortemPage.tsx) triggers
+ * window.print() rather than pulling in a PDF-generation dependency; this is
+ * the standard cross-browser "print just this element" technique — hide
+ * everything, then re-reveal only the marked subtree and pull it out of
+ * normal flow (so the still-layout-occupying, now-hidden chrome around it
+ * doesn't leave a blank gap on the printed page). Plain CSS, not a Tailwind
+ * utility, because "hide every other element in the document" isn't
+ * expressible as a class on the one element we actually want to keep. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .printable-postmortem,
+  .printable-postmortem * {
+    visibility: visible;
+  }
+  .printable-postmortem {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

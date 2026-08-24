@@ -76,13 +76,14 @@ SEVs use the SEV-1 through SEV-4 taxonomy:
 
 ### 4.2 Incident Details
 
-- **Root cause**: root cause category (e.g., deployment, configuration, hardware, dependency) + free-form description
+- **Root cause**: root cause category (e.g., deployment, configuration, hardware, dependency) + free-form description + an optional reference link to the concrete change that caused it (a PR/commit diff, a config-management change, etc.)
 - **Mitigation**: what actions stopped or reduced the impact
 - **Prevention / Action Items**: what will be done to prevent recurrence (narrative, distinct from linked tasks)
 - **Business impact**: customer-facing description; quantified impact where possible (e.g., % error rate, requests affected, revenue, SLA breach)
 - **Affected services**: list of impacted services/systems (linked to a service registry or free-form)
-- **Detection method**: how the issue was discovered — alert, monitoring dashboard, customer report, synthetic test, manual discovery, Slack escalation
-- **Alert name / monitoring tool**: the specific alert or tool that fired (Datadog, Prometheus, CloudWatch, PagerDuty, etc.)
+- **Detection method**: how the issue was discovered — a fixed, enforced choice of alert, monitoring dashboard, customer report, synthetic test, manual discovery, or Slack escalation (not free text — the web UI presents this as a dropdown, and the API rejects any other value)
+- **Alert name / monitoring tool**: the specific alert or tool that fired (Datadog, Prometheus, CloudWatch, or another named tool; "none" when no monitoring metric is behind the SEV)
+- **Detection links**: optional supporting links captured alongside the above — a link to the alert itself, a link to the monitoring metric/dashboard/saved query, and a link to a snapshot image of it at detection time (an already-hosted image URL, rendered as an inline preview — not a file upload)
 - **Were the right people in the room?**: boolean flag + notes
 - **Tags / labels**: arbitrary key-value tags for custom filtering
 

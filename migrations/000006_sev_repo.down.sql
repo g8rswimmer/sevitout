@@ -1,0 +1,1 @@
+ALTER TABLE sevs DROP COLUMN IF EXISTS github_repo;
