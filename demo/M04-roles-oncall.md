@@ -166,6 +166,9 @@ golangci-lint run
 
 ## Known limitations
 
-- The service registry (for PagerDuty on-call lookup) uses in-memory storage in this milestone. Services are not persisted across restarts. The full Config API with persistent service registry is M10.
-- The postgres `ServiceStore` is not yet implemented; the server always uses the in-memory service store regardless of `DATABASE_URL`. This means PagerDuty auto-population requires the service to be seeded in memory each run, which is not yet exposed as an API endpoint.
-- `RoleStore` is backed by postgres when `DATABASE_URL` is set, but service lookups are always in-memory.
+- ~~The service registry (for PagerDuty on-call lookup) uses in-memory storage in
+  this milestone. Services are not persisted across restarts.~~ **Fixed during
+  M14d**: `internal/store/postgres/service.go` now backs `ServiceStore` when
+  `DATABASE_URL` is set — see `demo/M14d-admin-pages.md`'s "Bug fix" section.
+- `RoleStore` is backed by postgres when `DATABASE_URL` is set (as is `ServiceStore`,
+  as of the fix above).

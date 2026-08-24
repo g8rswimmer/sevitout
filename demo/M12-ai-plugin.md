@@ -312,10 +312,13 @@ Key coverage:
   which it doesn't today — on plain Linux Docker, run the server via
   `go run ./cmd/server` for this demo instead, or run the mock endpoint as its own
   container on the compose network and point `http_endpoint` at its service name.
-- `AIPluginStore`/`AIOutputStore` are in-memory only even when `DATABASE_URL` is set —
-  same "postgres implementation deferred" treatment M10 gave `IntegrationConfigStore`
-  and `RetentionConfigStore` (the `ai_plugins`/`ai_outputs` tables themselves have
-  existed since M01's migration).
+- ~~`AIPluginStore`/`AIOutputStore` are in-memory only even when `DATABASE_URL` is
+  set...~~ **`AIPluginStore` fixed during M14d** (`internal/store/postgres/
+  aiplugin.go` — see `demo/M14d-admin-pages.md`'s "Bug fix" section).
+  `AIOutputStore` is still in-memory only — it wasn't part of that fix (AI outputs
+  aren't managed from an admin page; they're the actual generated
+  summaries/drafts/etc. shown inline on a SEV, M12's `ai_outputs` table has existed
+  unused the same way since M01).
 - `StreamAction` doesn't do real token-level streaming from Anthropic's API — both
   built-in providers run the action to completion and then re-emit the result as a
   handful of word-chunked pieces. Wiring true SSE streaming end-to-end (provider →

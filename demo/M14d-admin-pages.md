@@ -187,6 +187,42 @@ dropped as if it were "unchanged."
 
 ---
 
+## Bug fix: five of the six admin tabs lost everything on restart
+
+Reported after this milestone shipped: a service created through **Admin →
+Services** disappeared after the API restarted. Asked to check whether the other
+tabs had the same problem — they did, for everything except **Users**.
+`cmd/server/main.go`'s `buildStores` wired `ServiceStore`, `OnCallStore`,
+`IntegrationConfigStore`, `RetentionConfigStore`, and `AIPluginStore` to their
+in-memory implementations even when `DATABASE_URL` was set and a real Postgres
+connection existed — the exact same class of bug M14c's postmortem-persistence fix
+found and fixed for `PostmortemStore`, and the server even said so out loud on
+every startup: `"...oncall, integration-config, retention-config, ai-plugin...
+stores are in-memory — data will not persist across restarts (postgres
+implementations deferred)"` (this repo's own M10 "Known limitations" had flagged
+exactly this, unaddressed since M01). `UserStore` was never affected — it already
+had a Postgres implementation, which is why role changes/deactivation in **Admin →
+Users** were never in question.
+
+Fixed by adding `internal/store/postgres/{service,oncall,integrationconfig,
+retentionconfig,aiplugin}.go`. As with the postmortem fix, none of this needed new
+SQL: `internal/store/sql/{services,oncall,integrationconfig,retentionconfig,
+aiplugins}.sql` and their sqlc-generated `internal/store/queries/*.sql.go` code had
+existed unused since M01 — only the `store.XStore` wrapper implementing each
+interface against that generated code was missing. No migration was needed either;
+all five tables (including `retention_config`'s pre-seeded severity 1-4 rows) have
+existed since M01's schema.
+
+Verified directly against the real Docker Compose stack: created a service, an
+on-call rotation, a PagerDuty integration, an AI plugin, and a retention policy
+change, ran `docker restart sevitout-api-1`, and confirmed every one of them was
+still there afterward (this exact sequence returned an empty list for each before
+the fix) — then exercised update and delete on each through the running API to
+confirm the full CRUD path, not just create, round-trips through Postgres
+correctly.
+
+---
+
 ## Known limitations
 
 - **No confirmation dialogs** on Delete (services, on-call rotations, AI plugins)
@@ -194,13 +230,6 @@ dropped as if it were "unchanged."
   rest of the app's existing Remove/Unlink convention (M14b), not a gap unique to
   this milestone, but it's worth calling out here given how much more consequential
   deleting a service or deactivating a user is than unlinking one task.
-- **Integration/AI-plugin credentials and retention/integration config are
-  in-memory only**, even when `DATABASE_URL` is set — M10's own "Known
-  limitations" already documented this for `IntegrationConfigStore` and
-  `RetentionConfigStore`; nothing in this milestone changed it. A service, user, or
-  on-call rotation created here does survive an API restart (those stores do have
-  Postgres implementations), but a saved integration credential, AI plugin, or
-  retention policy change does not.
 - **The integration health check only has built-in checkers for PagerDuty, GitHub,
   and Slack** (`cmd/server/main.go`'s `healthCheckers` map) — any other
   `integration_type` (Datadog, Prometheus, CloudWatch, or a typo) always reports
