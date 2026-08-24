@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Lock } from 'lucide-react'
+import { ArrowLeft, FileDown, Lock, Printer } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/auth/useAuth'
 import { useSevSocket } from '@/lib/ws'
 import { buildPostmortemTemplate } from '@/lib/postmortemTemplate'
+import { downloadTextFile } from '@/lib/download'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,6 +16,26 @@ import { PostmortemStatusControl } from '@/components/postmortem/PostmortemStatu
 import { UnlockDialog } from '@/components/postmortem/UnlockDialog'
 import { AIDraftPanel } from '@/components/postmortem/AIDraftPanel'
 import { hasRole, POSTMORTEM_STATUS_BADGE_CLASS, POSTMORTEM_STATUS_LABELS } from '@/types/api'
+
+/** "Download PDF" is window.print() scoped to just the `.printable-postmortem`
+ * element (index.css's @media print rules) rather than a PDF-generation
+ * dependency — see demo/M14c-postmortem-editor.md. Setting document.title
+ * first makes most browsers suggest it as the "Save as PDF" filename;
+ * restoring it on the afterprint event (rather than immediately after
+ * window.print(), which returns before the dialog closes) avoids leaving the
+ * tab title wrong for the rest of the session. */
+function printPostmortem(sevId: string) {
+  const originalTitle = document.title
+  document.title = `${sevId}-postmortem`
+  window.addEventListener(
+    'afterprint',
+    () => {
+      document.title = originalTitle
+    },
+    { once: true },
+  )
+  window.print()
+}
 
 export function PostmortemPage() {
   const { id } = useParams<{ id: string }>()
@@ -164,6 +185,18 @@ export function PostmortemPage() {
         title="Document"
         action={
           <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                downloadTextFile(`${sevId}-postmortem.md`, editing ? draftContent : (postmortem.content ?? ''), 'text/markdown')
+              }
+            >
+              <FileDown className="h-3.5 w-3.5" /> Download .md
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => printPostmortem(sevId)}>
+              <Printer className="h-3.5 w-3.5" /> Download PDF
+            </Button>
             {showEditButton && (
               <Button size="sm" variant="ghost" onClick={handleEditClick}>
                 Edit
@@ -192,11 +225,22 @@ export function PostmortemPage() {
             {saveError}
           </p>
         )}
-        <PostmortemEditor
-          content={editing ? draftContent : (postmortem.content ?? '')}
-          editable={editing}
-          onChange={editing ? setDraftContent : undefined}
-        />
+        <div className="printable-postmortem">
+          {/* Duplicates the page's real <h1> (which sits outside this
+              printable region and so is hidden along with the rest of the
+              app chrome by index.css's @media print rules) purely so the
+              printed page has some context for which SEV this is.
+              aria-hidden keeps it out of the accessibility tree on-screen —
+              screen reader users already have the real heading. */}
+          <h1 aria-hidden="true" className="mb-4 hidden text-xl font-semibold print:block">
+            Postmortem: {record.title} ({sevId})
+          </h1>
+          <PostmortemEditor
+            content={editing ? draftContent : (postmortem.content ?? '')}
+            editable={editing}
+            onChange={editing ? setDraftContent : undefined}
+          />
+        </div>
       </Section>
 
       <UnlockDialog

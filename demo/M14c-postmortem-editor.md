@@ -44,6 +44,22 @@ M12 `AIService` backends — no backend changes were needed for this milestone.
   which loads the draft into the editor (entering edit/unlock flow first if needed)
   for review and further editing — it never saves by itself.
 - A **Postmortem** button on the SEV detail page header links to the new route.
+- **Download as Markdown / PDF** — two buttons in the Document card's header,
+  available to anyone who can view the page (not gated to Responder+ like
+  Edit/Unlock), and always acting on whatever content is currently on screen —
+  the saved version normally, or the in-progress draft while editing:
+  - **Download .md** (`lib/download.ts`'s `downloadTextFile`, a generic Blob +
+    object-URL + anchor-click helper — the first file-download affordance in this
+    app, deliberately written non-postmortem-specific so `docs/project-plan.md`'s
+    M14e CSV-export button can reuse it later) saves the raw Markdown as
+    `{sevId}-postmortem.md`.
+  - **Download PDF** calls `window.print()` scoped to just the document via a
+    `.printable-postmortem` class and `@media print` rules in `index.css` (the
+    standard cross-browser "hide everything else, then un-hide and reposition just
+    this element" technique) — no PDF-generation dependency was added. Setting
+    `document.title` to `{sevId}-postmortem` before printing (restored on the
+    browser's `afterprint` event) makes most browsers suggest that as the "Save as
+    PDF" filename.
 - **Auto-seeded starter template** (`lib/postmortemTemplate.ts`) — the first time
   anyone opens a blank postmortem for editing, the editor is pre-filled from the
   SEV's own recorded facts instead of a blank page: **Summary** (the SEV's
@@ -138,6 +154,13 @@ Open **http://localhost:3000** (Option A) or **http://localhost:5173** (Option B
      AI-generated), then **Apply to editor** — the draft loads into the editor
      (prompting for an unlock reason first if the SEV is locked) for you to review
      and edit before **Save**.
+8. **Download the document.** Click **Download .md** — a `{sevId}-postmortem.md`
+   file downloads with the exact Markdown currently shown (try it both read-only
+   and mid-edit with unsaved changes — it always reflects what's on screen). Click
+   **Download PDF** — your browser's print dialog opens showing only the postmortem
+   title and content (no nav bar, no buttons, no status badges); choose "Save as
+   PDF" as the destination to get an actual PDF file, with the Lifecycle table
+   rendering correctly.
 
 ---
 
@@ -154,9 +177,9 @@ The Go side is untouched by this sub-milestone (confirmed by re-running its full
 suite unchanged): `go build ./...`, `go vet ./...`, `gofmt -l .`, `go test ./...`,
 `go test -race ./...`, and `golangci-lint run ./...` all still pass.
 
-61 Vitest/RTL tests (15 new since the initial M14c build: 9 from the original
+88 Vitest/RTL tests (19 new since the initial M14c build: 9 from the original
 editor/lock/AI-draft work, 5 for the auto-seeded template, 1 for the table-
-rendering fix below):
+rendering fix, 4 for the download-as-Markdown/PDF buttons below):
 
 - `components/postmortem/PostmortemEditor.tsx` — parses Markdown into formatted
   output, toggles its `contenteditable` DOM attribute correctly for
@@ -168,6 +191,9 @@ rendering fix below):
   (including correct lifecycle-table deltas), falls back to explanatory
   placeholders when nothing is recorded, and shows an "Other" free-text root-cause
   category as-is rather than mangling it.
+- `lib/download.ts` — `downloadTextFile` creates a Blob of the given content/type,
+  downloads it via a temporary anchor with the correct `download` filename, and
+  revokes the object URL afterward.
 - `pages/PostmortemPage.tsx` — renders fully read-only for a Viewer with no
   Edit/Unlock/transition controls; a Responder can edit and save an unlocked
   postmortem; opening a *blank* postmortem seeds the auto-template from the SEV's
@@ -175,7 +201,10 @@ rendering fix below):
   sees no Unlock option at all on a locked SEV; an Incident Commander can unlock
   (reason modal → token → save, confirmed in the request body), and sees the
   correct valid-next-status transition buttons; an existing AI draft renders
-  clearly marked and Apply loads it into the editor.
+  clearly marked and Apply loads it into the editor; **Download .md** downloads
+  the saved content normally and the unsaved draft while editing (not the stale
+  saved value); **Download PDF** calls `window.print()` and sets/restores
+  `document.title` around it.
 
 Manually verified end-to-end against a live server before writing any frontend
 code: `GetPostmortem`/`UpdatePostmortem`/`TransitionPostmortemStatus` (including the

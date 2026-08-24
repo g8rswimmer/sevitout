@@ -139,3 +139,27 @@
 .tiptap-content:focus-visible {
   @apply outline-none;
 }
+
+/* "Download PDF" on the postmortem page (PostmortemPage.tsx) triggers
+ * window.print() rather than pulling in a PDF-generation dependency; this is
+ * the standard cross-browser "print just this element" technique — hide
+ * everything, then re-reveal only the marked subtree and pull it out of
+ * normal flow (so the still-layout-occupying, now-hidden chrome around it
+ * doesn't leave a blank gap on the printed page). Plain CSS, not a Tailwind
+ * utility, because "hide every other element in the document" isn't
+ * expressible as a class on the one element we actually want to keep. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .printable-postmortem,
+  .printable-postmortem * {
+    visibility: visible;
+  }
+  .printable-postmortem {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

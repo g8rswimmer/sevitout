@@ -259,4 +259,78 @@ describe('PostmortemPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('AI drafted summary text').length).toBeGreaterThanOrEqual(2))
   })
+
+  it('downloads the current content as Markdown, including unsaved edits while editing', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor({
+      sev: makeSev(),
+      pm: makePostmortem({ content: 'Saved content.' }),
+      whoAmI: me('responder'),
+      aiOutputs: [
+        {
+          id: '1',
+          sev_id: SEV_ID,
+          action: 'AI_ACTION_DRAFT_POSTMORTEM',
+          content: 'Unsaved draft content.',
+          created_at: '2026-08-23T20:05:00Z',
+        },
+      ],
+    })
+    renderPage()
+    await screen.findByRole('heading', { name: /postmortem/i })
+
+    let anchor: HTMLAnchorElement | undefined
+    const createElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const el = createElement(tag)
+      if (tag === 'a') anchor = el as HTMLAnchorElement
+      return el
+    })
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:mock-url')
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL: vi.fn() })
+    const originalClick = HTMLAnchorElement.prototype.click
+    const click = vi.fn<() => void>()
+    HTMLAnchorElement.prototype.click = click
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /download \.md/i }))
+
+    expect(anchor?.download).toBe(`${SEV_ID}-postmortem.md`)
+    const savedBlob = createObjectURL.mock.calls[0][0] as Blob
+    expect(await savedBlob.text()).toBe('Saved content.')
+    expect(click).toHaveBeenCalledTimes(1)
+
+    // Apply the AI draft (enters edit mode with unsaved content — see
+    // handleApplyDraft) and download again — should reflect the draft, not
+    // the last-saved content. This avoids simulating real keystrokes into
+    // the ProseMirror contenteditable, which jsdom can't fully support.
+    await screen.findByText(/ai-generated/i)
+    await user.click(screen.getByRole('button', { name: /apply to editor/i }))
+    await user.click(screen.getByRole('button', { name: /download \.md/i }))
+
+    const draftBlob = createObjectURL.mock.calls[1][0] as Blob
+    expect(await draftBlob.text()).toContain('Unsaved draft content.')
+
+    HTMLAnchorElement.prototype.click = originalClick
+  })
+
+  it('prints the current document for "Download PDF", suggesting a filename via document.title', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor({ sev: makeSev(), pm: makePostmortem(), whoAmI: me('responder') })
+    renderPage()
+    await screen.findByRole('heading', { name: /postmortem/i })
+
+    const originalTitle = document.title
+    const print = vi.fn()
+    vi.stubGlobal('print', print)
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /download pdf/i }))
+
+    expect(print).toHaveBeenCalledTimes(1)
+    expect(document.title).toBe(`${SEV_ID}-postmortem`)
+
+    window.dispatchEvent(new Event('afterprint'))
+    expect(document.title).toBe(originalTitle)
+  })
 })
