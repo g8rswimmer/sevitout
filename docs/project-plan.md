@@ -390,7 +390,7 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 
 #### M14a — Shell, Auth & Dashboard
 - Vite + React 18 + TypeScript + Tailwind + shadcn/ui setup
-- Login page (Google/GitHub OAuth redirect)
+- Login/register pages (email + password, per M03 — no external OAuth provider)
 - Auth state (JWT from `httpOnly` cookie, `WhoAmI` call on load)
 - Dashboard page (`/`): active SEVs list, MTTR trend chart, overdue task count
 - Shared layout: nav, breadcrumbs, user menu
@@ -443,10 +443,12 @@ M00 ──► M01 ──► M02 ──► M03 ──► M04 ──► M05 (Postm
 
 | Variable | Used in | Description |
 |---|---|---|
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | postgres, migrate | Database name/user/password |
 | `DATABASE_URL` | api, migrate | PostgreSQL connection string |
 | `JWT_SECRET` | api | JWT signing key (min 32 chars) |
 | `JWT_TTL_HOURS` | api | Token lifetime (default: 24) |
 | `ENCRYPTION_KEY` | api | AES-256 key, base64-encoded 32 bytes |
+| `LOG_LEVEL` | api | `debug`/`info`/`warn`/`error`, default `info` |
 | `PAGERDUTY_API_KEY` | api | PagerDuty REST API key (optional) |
 | `GITHUB_TOKEN` | api | GitHub PAT for Issues API (optional) |
 | `SLACK_APP_TOKEN` | slackbot | Slack Socket Mode app token |
