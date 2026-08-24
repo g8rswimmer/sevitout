@@ -30,3 +30,13 @@ SELECT id, sev_id, external_system, task_id, url, title, description,
 FROM sev_linked_tasks
 WHERE sev_id = $1
 ORDER BY created_at;
+
+-- name: SetTaskDueDateIfUnset :execrows
+UPDATE sev_linked_tasks SET due_date = $2
+WHERE id = $1 AND due_date IS NULL;
+
+-- name: CountOverdueTasks :one
+-- due_date is a DATE (no time-of-day), so "due before today" is the closest
+-- available match to the in-memory store's due_date.Before(now) semantics.
+SELECT COUNT(*) FROM sev_linked_tasks
+WHERE due_date IS NOT NULL AND due_date < $1::date;

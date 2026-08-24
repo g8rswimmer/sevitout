@@ -177,5 +177,8 @@ golangci-lint run
 ## Known limitations
 
 - Announcement `search_vector` (`tsvector`) is populated by a PostgreSQL trigger (defined in M01 migrations). The in-memory store used for local dev does not replicate this — full-text search across announcements is only available when `DATABASE_URL` is set.
-- PostgreSQL store implementations for `AnnouncementStore`, `ChatStore`, and `SEVLinkStore` are deferred to a later milestone; the server currently falls back to in-memory for these stores even when `DATABASE_URL` is set.
+- ~~PostgreSQL store implementations for `AnnouncementStore`, `ChatStore`, and `SEVLinkStore` are deferred to a later milestone; the server currently falls back to in-memory for these stores even when `DATABASE_URL` is set.~~ **Fixed**:
+  see `demo/M14f-remaining-store-persistence.md` — all three now have PostgreSQL
+  implementations, including `AnnouncementStore.SearchSEVIDs` using the
+  `search_vector` trigger above.
 - No pagination yet on list endpoints — all entries are returned in a single response.

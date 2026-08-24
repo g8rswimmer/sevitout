@@ -212,9 +212,8 @@ Key coverage:
 
 ## Known limitations
 
-- `ShareStore` is in-memory only even when `DATABASE_URL` is set — same "postgres
-  implementation deferred" treatment M10/M12 gave several other stores (the
-  `shareable_links` table itself has existed since M01's migration).
+- ~~`ShareStore` is in-memory only even when `DATABASE_URL` is set...~~ **Fixed**:
+  see `demo/M14f-remaining-store-persistence.md` — `internal/store/postgres/share.go`.
 - `GetDashboardMetrics`/`GetSEVTrends`/`ExportSEVs` fetch the full SEV set into Go
   memory to aggregate (bounded at 10,000 records, failing loudly rather than silently
   truncating past that) instead of pushing the aggregation into SQL — acceptable at
