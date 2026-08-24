@@ -1,8 +1,8 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ListChecks, LogOut, Siren } from 'lucide-react'
+import { LayoutDashboard, ListChecks, LogOut, Settings, Siren } from 'lucide-react'
 import { useAuth } from '@/auth/useAuth'
 import { Button } from '@/components/ui/button'
-import { ORG_ROLE_LABELS } from '@/types/api'
+import { hasRole, ORG_ROLE_LABELS } from '@/types/api'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -47,6 +47,20 @@ export function AppLayout() {
                   </Link>
                 )
               })}
+              {hasRole(user?.org_role, 'admin') && (
+                <Link
+                  to="/admin"
+                  aria-current={isActive(location.pathname, '/admin') ? 'page' : undefined}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive(location.pathname, '/admin')
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  }`}
+                >
+                  <Settings className="h-4 w-4" aria-hidden />
+                  Admin
+                </Link>
+              )}
             </nav>
           </div>
 

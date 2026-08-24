@@ -1,40 +1,61 @@
 import type {
+  AIPluginResponse,
   AnnouncementResponse,
   AssignRoleRequest,
   AuthResponse,
   ChatEntryResponse,
   CreateAnnouncementRequest,
+  CreateAIPluginRequest,
   CreateGitHubIssueRequest,
+  CreateOnCallRotationRequest,
   CreateSEVRequest,
+  CreateServiceRequest,
   DashboardMetricsResponse,
   AddChatEntryRequest,
   AIOutputResponse,
+  IntegrationConfigResponse,
+  IntegrationsHealthResponse,
   LinkSEVsRequest,
   LinkTaskRequest,
   ListAIOutputsResponse,
+  ListAIPluginsResponse,
   ListAnnouncementsResponse,
   ListChatEntriesResponse,
+  ListIntegrationConfigsResponse,
   ListLinkedSEVsResponse,
+  ListOnCallRotationsResponse,
   ListPluginsResponse,
+  ListRetentionConfigResponse,
   ListRolesResponse,
   ListSEVsParams,
   ListSEVsResponse,
   ListServicesResponse,
   ListTasksResponse,
+  ListUsersResponse,
+  OnCallRotationResponse,
   PostmortemResponse,
+  RetentionConfigResponse,
   SEVLinkResponse,
   SEVResponse,
   SEVRoleResponse,
   SearchSEVsParams,
   SearchSEVsResponse,
+  ServiceResponse,
   TaskResponse,
   TransitionPostmortemStatusRequest,
   TransitionStatusRequest,
   TriggerActionRequest,
   UnlockSEVRequest,
   UnlockSEVResponse,
+  UpdateAIPluginRequest,
+  UpdateOnCallRotationRequest,
   UpdatePostmortemRequest,
+  UpdateRetentionConfigRequest,
   UpdateSEVRequest,
+  UpdateServiceRequest,
+  UpdateUserRoleRequest,
+  UpsertIntegrationConfigRequest,
+  UserResponse,
   WhoAmIResponse,
 } from '@/types/api'
 
@@ -250,6 +271,11 @@ export const api = {
   },
   services: {
     list: () => request<ListServicesResponse>('/v1/config/services'),
+    create: (req: CreateServiceRequest) =>
+      request<ServiceResponse>('/v1/config/services', { method: 'POST', body: JSON.stringify(req) }),
+    update: (id: string, req: UpdateServiceRequest) =>
+      request<ServiceResponse>(`/v1/config/services/${id}`, { method: 'PATCH', body: JSON.stringify(req) }),
+    delete: (id: string) => request<void>(`/v1/config/services/${id}`, { method: 'DELETE' }),
   },
   postmortems: {
     get: (sevId: string) => request<PostmortemResponse>(`/v1/sevs/${sevId}/postmortem`),
@@ -271,5 +297,54 @@ export const api = {
       request<AIOutputResponse>(`/v1/sevs/${sevId}/ai/actions`, { method: 'POST', body: JSON.stringify(req) }),
     listOutputs: (sevId: string) => request<ListAIOutputsResponse>(`/v1/sevs/${sevId}/ai/outputs`),
     listPlugins: () => request<ListPluginsResponse>('/v1/ai/plugins'),
+  },
+  // Admin-only configuration surface (ConfigService) — see App.tsx's /admin/*
+  // routes, all gated to the Admin org role.
+  config: {
+    users: {
+      list: (query?: string) => request<ListUsersResponse>(`/v1/config/users${buildQuery({ query })}`),
+      updateRole: (id: string, req: UpdateUserRoleRequest) =>
+        request<UserResponse>(`/v1/config/users/${id}/role`, { method: 'PATCH', body: JSON.stringify(req) }),
+      deactivate: (id: string) =>
+        request<UserResponse>(`/v1/config/users/${id}/deactivate`, { method: 'POST', body: '{}' }),
+      reactivate: (id: string) =>
+        request<UserResponse>(`/v1/config/users/${id}/reactivate`, { method: 'POST', body: '{}' }),
+    },
+    oncall: {
+      list: () => request<ListOnCallRotationsResponse>('/v1/config/oncall'),
+      create: (req: CreateOnCallRotationRequest) =>
+        request<OnCallRotationResponse>('/v1/config/oncall', { method: 'POST', body: JSON.stringify(req) }),
+      update: (id: string, req: UpdateOnCallRotationRequest) =>
+        request<OnCallRotationResponse>(`/v1/config/oncall/${id}`, { method: 'PATCH', body: JSON.stringify(req) }),
+      delete: (id: string) => request<void>(`/v1/config/oncall/${id}`, { method: 'DELETE' }),
+    },
+    integrations: {
+      list: () => request<ListIntegrationConfigsResponse>('/v1/config/integrations'),
+      upsert: (integrationType: string, req: UpsertIntegrationConfigRequest) =>
+        request<IntegrationConfigResponse>(`/v1/config/integrations/${integrationType}`, {
+          method: 'PUT',
+          body: JSON.stringify(req),
+        }),
+      // Not part of ConfigService's proto — a plain HTTP handler (see
+      // internal/api/grpc/integrations_health.go) — hence the /admin/ path
+      // instead of /v1/config/.
+      health: () => request<IntegrationsHealthResponse>('/admin/integrations/health'),
+    },
+    retention: {
+      list: () => request<ListRetentionConfigResponse>('/v1/config/retention'),
+      update: (severityLevel: number, req: UpdateRetentionConfigRequest) =>
+        request<RetentionConfigResponse>(`/v1/config/retention/${severityLevel}`, {
+          method: 'PUT',
+          body: JSON.stringify(req),
+        }),
+    },
+    aiPlugins: {
+      list: () => request<ListAIPluginsResponse>('/v1/config/ai-plugins'),
+      create: (req: CreateAIPluginRequest) =>
+        request<AIPluginResponse>('/v1/config/ai-plugins', { method: 'POST', body: JSON.stringify(req) }),
+      update: (id: string, req: UpdateAIPluginRequest) =>
+        request<AIPluginResponse>(`/v1/config/ai-plugins/${id}`, { method: 'PATCH', body: JSON.stringify(req) }),
+      delete: (id: string) => request<void>(`/v1/config/ai-plugins/${id}`, { method: 'DELETE' }),
+    },
   },
 }

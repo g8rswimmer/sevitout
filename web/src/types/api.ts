@@ -525,7 +525,8 @@ export interface ListLinkedSEVsResponse {
   links?: SEVLinkResponse[]
 }
 
-// --- Services (read-only picker use in this milestone; full CRUD is M14d) -
+// --- Services (Viewer+ read for the affected-services picker; full CRUD is
+// Admin-only, see "Admin configuration" below) --------------------------
 
 export interface ServiceResponse {
   id: string
@@ -647,4 +648,225 @@ export interface AvailablePlugin {
 
 export interface ListPluginsResponse {
   plugins?: AvailablePlugin[]
+}
+
+// --- Admin configuration (ConfigService, §18) -----------------------------
+// Every RPC here is Admin-only except ListServices/ListOnCallRotations
+// (Viewer+, used elsewhere in the app for pickers/on-call display) — see
+// internal/auth/rbac.go's ConfigService entries.
+
+export interface CreateServiceRequest {
+  // id is a caller-supplied slug (e.g. "checkout"); it is the stable
+  // identifier referenced elsewhere (affected services, SLIs, on-call) and
+  // cannot be changed after creation.
+  id: string
+  name: string
+  description?: string
+  owning_team?: string
+  pagerduty_service_id?: string
+  tags?: Record<string, string>
+}
+
+export interface UpdateServiceRequest {
+  name?: string
+  description?: string
+  owning_team?: string
+  pagerduty_service_id?: string
+  tags?: Record<string, string>
+  active?: boolean
+}
+
+export interface UserResponse {
+  id: string
+  email: string
+  name: string
+  avatar_url?: string
+  org_role: OrgRole
+  active?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ListUsersResponse {
+  users?: UserResponse[]
+}
+
+export interface UpdateUserRoleRequest {
+  org_role: OrgRole
+}
+
+export interface OnCallRotationResponse {
+  id: string
+  name: string
+  service_id?: string
+  pagerduty_schedule_id?: string
+  // manual_user_id/manual_display_name plus an override_start/override_end
+  // window define a manual override for a planned change; a normal
+  // PagerDuty-backed rotation has none of the four set.
+  manual_user_id?: string
+  manual_display_name?: string
+  override_start?: string
+  override_end?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ListOnCallRotationsResponse {
+  rotations?: OnCallRotationResponse[]
+}
+
+export interface CreateOnCallRotationRequest {
+  name: string
+  service_id?: string
+  pagerduty_schedule_id?: string
+  manual_user_id?: string
+  manual_display_name?: string
+  override_start?: string
+  override_end?: string
+}
+
+export interface UpdateOnCallRotationRequest {
+  name?: string
+  service_id?: string
+  pagerduty_schedule_id?: string
+  manual_user_id?: string
+  manual_display_name?: string
+  override_start?: string
+  override_end?: string
+}
+
+export interface IntegrationConfigResponse {
+  integration_type: string
+  // credentials_configured is true when a non-empty credentials blob has
+  // been stored; the decrypted value itself is never returned by any RPC.
+  credentials_configured?: boolean
+  settings?: Record<string, string>
+  created_at: string
+  updated_at: string
+}
+
+export interface ListIntegrationConfigsResponse {
+  configs?: IntegrationConfigResponse[]
+}
+
+export interface UpsertIntegrationConfigRequest {
+  integration_type: string
+  // credentials is write-only. Omit (leave undefined) to keep the existing
+  // stored credentials unchanged while updating settings.
+  credentials?: Record<string, string>
+  settings?: Record<string, string>
+}
+
+export type IntegrationHealthStatus = 'connected' | 'error' | 'not_configured' | 'unknown'
+
+/** One entry from GET /admin/integrations/health — a plain HTTP handler, not
+ * part of ConfigService's proto/gRPC-gateway surface (see
+ * internal/api/grpc/integrations_health.go), so its JSON shape is hand-rolled
+ * rather than protojson-generated: fields are still snake_case, but there's
+ * no int64-as-string quirk to account for since it has no int64 fields. */
+export interface IntegrationHealth {
+  integration_type: string
+  status: IntegrationHealthStatus
+  error?: string
+}
+
+export interface IntegrationsHealthResponse {
+  integrations?: IntegrationHealth[]
+}
+
+export interface RetentionConfigResponse {
+  severity_level: number
+  // retention_days == 0 (the proto3 zero value) means retain forever — and,
+  // per this file's header comment, protojson omits it from the wire
+  // entirely rather than sending an explicit 0, confirmed live: a severity
+  // level that has never been explicitly configured returns a config row
+  // (from ListRetentionConfig's defaults) with no retention_days key at all.
+  retention_days?: number
+  // hard_delete controls what happens on expiry: false archives
+  // (soft-delete), true purges permanently.
+  hard_delete?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ListRetentionConfigResponse {
+  configs?: RetentionConfigResponse[]
+}
+
+export interface UpdateRetentionConfigRequest {
+  severity_level: number
+  retention_days: number
+  hard_delete: boolean
+}
+
+export type AIHandlerType = 'builtin' | 'http'
+
+export interface AIPluginResponse {
+  id: string
+  name: string
+  version?: string
+  description?: string
+  handler_type: AIHandlerType
+  http_endpoint?: string
+  provider?: string
+  model?: string
+  // api_key_configured is true when an encrypted API key has been stored;
+  // the decrypted value itself is never returned by any RPC.
+  api_key_configured?: boolean
+  enabled?: boolean
+  trigger_on_open?: boolean
+  trigger_on_mitigated?: boolean
+  trigger_on_resolved?: boolean
+  trigger_on_postmortem_review?: boolean
+  // rate_limit_per_minute caps AI actions per minute for this plugin; 0 (or
+  // absent, since protojson omits the zero value) means unlimited.
+  rate_limit_per_minute?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ListAIPluginsResponse {
+  plugins?: AIPluginResponse[]
+}
+
+export interface CreateAIPluginRequest {
+  name: string
+  version?: string
+  description?: string
+  handler_type: AIHandlerType
+  http_endpoint?: string
+  provider?: string
+  model?: string
+  // api_key is write-only: encrypted before storage, never returned.
+  api_key?: string
+  enabled?: boolean
+  trigger_on_open?: boolean
+  trigger_on_mitigated?: boolean
+  trigger_on_resolved?: boolean
+  trigger_on_postmortem_review?: boolean
+  rate_limit_per_minute?: number
+}
+
+export interface UpdateAIPluginRequest {
+  name?: string
+  version?: string
+  description?: string
+  handler_type?: AIHandlerType
+  http_endpoint?: string
+  provider?: string
+  model?: string
+  // api_key, when non-empty, replaces the stored key; omit to keep the
+  // existing one unchanged.
+  api_key?: string
+  // These four booleans and rate_limit_per_minute are backed by
+  // google.protobuf.*Value wrappers server-side specifically so an explicit
+  // false/0 is distinguishable from "not supplied" — always send the whole
+  // current form state on every save (not just changed fields) so an
+  // intentional false/0 is never silently dropped as falsy.
+  enabled?: boolean
+  trigger_on_open?: boolean
+  trigger_on_mitigated?: boolean
+  trigger_on_resolved?: boolean
+  trigger_on_postmortem_review?: boolean
+  rate_limit_per_minute?: number
 }

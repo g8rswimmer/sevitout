@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { InfoTooltip } from '@/components/ui/tooltip'
 import { Section } from '@/components/sev/Section'
 import { DateTimeField } from '@/components/sev/DateTimeField'
-import { formatDateTime, formatDurationSeconds } from '@/lib/format'
+import { formatDateTime, formatDurationSeconds, toDateTimeLocalValue } from '@/lib/format'
 import { SEV_LIFECYCLE_STAGES, SEV_STATUS_LABELS, type SEVResponse } from '@/types/api'
 
 /** Definitions shown in each metric's info tooltip — docs/requirements.md
@@ -17,15 +17,6 @@ const METRIC_DEFINITIONS = {
   MTTR: 'Mean Time to Resolve — resolved_at − started_at',
   DTTM: 'Detection to Mitigation — mitigated_at − detected_at',
 } as const
-
-/** yyyy-MM-ddThh:mm for an <input type="datetime-local">, in local time. */
-function toLocalInputValue(iso: string | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 export function LifecyclePanel({ sev, canEdit }: { sev: SEVResponse; canEdit: boolean }) {
   const queryClient = useQueryClient()
@@ -48,8 +39,8 @@ export function LifecyclePanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bo
   })
 
   function startEditing() {
-    setStartedAt(toLocalInputValue(sev.started_at))
-    setDetectedAt(toLocalInputValue(sev.detected_at))
+    setStartedAt(toDateTimeLocalValue(sev.started_at))
+    setDetectedAt(toDateTimeLocalValue(sev.detected_at))
     setError(null)
     setEditing(true)
   }

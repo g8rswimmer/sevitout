@@ -15,6 +15,11 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 // one route keeps everyone who never opens a postmortem from downloading it.
 const PostmortemPage = lazy(() => import('@/pages/PostmortemPage').then((m) => ({ default: m.PostmortemPage })))
 
+// Lazy-loaded: the whole six-page /admin/* subtree (M14d) is only ever
+// visited by Admins, so everyone else shouldn't pay for it in the main
+// bundle — same reasoning as PostmortemPage above.
+const AdminRoutes = lazy(() => import('@/pages/admin/AdminRoutes').then((m) => ({ default: m.AdminRoutes })))
+
 export function App() {
   return (
     <Routes>
@@ -45,6 +50,17 @@ export function App() {
             <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading…</div>}>
               <PostmortemPage />
             </Suspense>
+          }
+        />
+
+        <Route
+          path="/admin/*"
+          element={
+            <ProtectedRoute minRole="admin">
+              <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading…</div>}>
+                <AdminRoutes />
+              </Suspense>
+            </ProtectedRoute>
           }
         />
       </Route>
