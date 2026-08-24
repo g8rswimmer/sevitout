@@ -409,7 +409,7 @@ func buildSEVFilterWhere(filter store.SEVFilter) (string, []any) {
 		// so arbitrary search text can't produce a malformed query.
 		conds = append(conds, fmt.Sprintf("search_vector @@ plainto_tsquery('english', $%d)", n))
 		args = append(args, filter.Search)
-		n++ //nolint:ineffassign
+		n++ //nolint:ineffassign,staticcheck // final increment's value is never read; kept for symmetry with the append pattern above
 	}
 
 	if len(conds) == 0 {

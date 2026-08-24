@@ -77,10 +77,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          # Pinned to match the v1 config schema in .golangci.yml.
-          version: v1.64.8
+          # v9+ of the action is required to run golangci-lint v2 (and uses
+          # the Node 24 runtime GitHub now requires). golangci-lint itself
+          # needs to be v2.4+ for go1.25 support — see .golangci.yml, which
+          # is a v2-schema config.
+          version: v2.13
 
   integration-test:
     name: Integration tests (Postgres)

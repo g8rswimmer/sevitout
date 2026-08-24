@@ -98,7 +98,10 @@ func main() {
 	go runSocketMode(ctx, log, b, smClient)
 
 	log.Info("slackbot starting", "api_addr", apiAddr)
-	if err := smClient.RunContext(ctx); err != nil && ctx.Err() == nil {
+	// RunContext only ever returns via its err != nil path (an infinite loop
+	// otherwise), so that comparison is always true — check ctx.Err() alone
+	// to distinguish a real failure from a requested shutdown.
+	if err := smClient.RunContext(ctx); ctx.Err() == nil {
 		log.Error("socket mode run failed", "err", err)
 		os.Exit(1)
 	}
