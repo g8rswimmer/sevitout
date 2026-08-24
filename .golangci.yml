@@ -1,11 +1,32 @@
+# v2 config (migrated from the original v1 file via `golangci-lint migrate`).
+# `linters` has no explicit `enable:`/`default:` here, so it falls back to
+# golangci-lint v2's implicit `default: standard` set: errcheck, govet,
+# ineffassign, staticcheck, unused — a superset of the original v1 file's
+# explicit list (errcheck, govet, staticcheck).
+version: "2"
 linters:
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
   enable:
-    - errcheck
-    - govet
-    - staticcheck
     - gofmt
     - goimports
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/g8rswimmer/sevitout
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/g8rswimmer/sevitout
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

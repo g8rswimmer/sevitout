@@ -1,0 +1,122 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "proto/**"
+      - "migrations/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".golangci.yml"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "proto/**"
+      - "migrations/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".golangci.yml"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, vet & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check gofmt
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: Test
+        run: go test ./...
+
+      - name: Test (race detector)
+        run: go test -race ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          # v9+ of the action is required to run golangci-lint v2 (and uses
+          # the Node 24 runtime GitHub now requires). golangci-lint itself
+          # needs to be v2.4+ for go1.25 support — see .golangci.yml, which
+          # is a v2-schema config.
+          version: v2.13
+
+  integration-test:
+    name: Integration tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sevitout
+          POSTGRES_USER: sevitout
+          POSTGRES_PASSWORD: sevitout
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sevitout -d sevitout"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://sevitout:sevitout@localhost:5432/sevitout?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install golang-migrate CLI
+        run: go install -tags "postgres" github.com/golang-migrate/migrate/v4/cmd/migrate@v4.17.0
+
+      - name: Run migrations
+        run: migrate -path=./migrations -database "$DATABASE_URL" up
+
+      - name: Run integration tests
+        run: go test -tags integration -v ./internal/store/...
