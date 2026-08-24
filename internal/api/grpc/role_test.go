@@ -28,7 +28,7 @@ func newTestRoleServer() *testRoleServer {
 	audit := memory.NewAuditStore()
 	pub := &fakePublisher{}
 	return &testRoleServer{
-		server: grpchandler.NewRoleServer(roles, sevs, audit, pub),
+		server: grpchandler.NewRoleServer(grpchandler.RoleServerParams{Roles: roles, SEVs: sevs, Audit: audit, Publisher: pub}),
 		roles:  roles,
 		sevs:   sevs,
 		audit:  audit,
@@ -343,7 +343,10 @@ func TestCreateSEV_AutoPopulatesOnCallRole(t *testing.T) {
 	}
 
 	oc := &staticOnCaller{displayName: "Alice <alice@example.com>"}
-	server := grpchandler.NewSEVServer(sevs, audit, history, roles, services, memory.NewPostmortemStore(), memory.NewSEVLinkStore(), oc, nil, nil, nil)
+	server := grpchandler.NewSEVServer(grpchandler.SEVServerParams{
+		SEVs: sevs, Audit: audit, History: history, Roles: roles, Services: services,
+		Postmortems: memory.NewPostmortemStore(), Links: memory.NewSEVLinkStore(), OnCaller: oc,
+	})
 
 	resp, err := server.CreateSEV(context.Background(), &pb.CreateSEVRequest{
 		Title:            "API outage",
@@ -377,8 +380,11 @@ func TestCreateSEV_NoOnCallWhenIntegrationDisabled(t *testing.T) {
 	history := memory.NewStatusHistoryStore()
 	services := memory.NewServiceStore()
 
-	// onCaller is nil — integration not configured
-	server := grpchandler.NewSEVServer(sevs, audit, history, roles, services, memory.NewPostmortemStore(), memory.NewSEVLinkStore(), nil, nil, nil, nil)
+	// OnCaller is nil — integration not configured
+	server := grpchandler.NewSEVServer(grpchandler.SEVServerParams{
+		SEVs: sevs, Audit: audit, History: history, Roles: roles, Services: services,
+		Postmortems: memory.NewPostmortemStore(), Links: memory.NewSEVLinkStore(),
+	})
 
 	resp, err := server.CreateSEV(context.Background(), &pb.CreateSEVRequest{
 		Title:            "API outage",

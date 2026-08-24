@@ -50,28 +50,31 @@ type ConfigServer struct {
 	rateLimits   RateLimitEvictor // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
 }
 
-// NewConfigServer returns a ConfigServer. crypto may be nil; in that case
-// UpsertIntegrationConfig and CreateAIPlugin/UpdateAIPlugin reject any
-// request that supplies credentials/an API key. rateLimits may also be nil.
-func NewConfigServer(
-	services store.ServiceStore,
-	users store.UserStore,
-	oncall store.OnCallStore,
-	integrations store.IntegrationConfigStore,
-	retention store.RetentionConfigStore,
-	aiPlugins store.AIPluginStore,
-	crypto Encryptor,
-	rateLimits RateLimitEvictor,
-) *ConfigServer {
+// ConfigServerParams groups NewConfigServer's dependencies. Crypto may be
+// nil, in which case UpsertIntegrationConfig and CreateAIPlugin/
+// UpdateAIPlugin reject any request that supplies credentials/an API key.
+// RateLimits may also be nil.
+type ConfigServerParams struct {
+	Services     store.ServiceStore
+	Users        store.UserStore
+	OnCall       store.OnCallStore
+	Integrations store.IntegrationConfigStore
+	Retention    store.RetentionConfigStore
+	AIPlugins    store.AIPluginStore
+	Crypto       Encryptor
+	RateLimits   RateLimitEvictor
+}
+
+func NewConfigServer(p ConfigServerParams) *ConfigServer {
 	return &ConfigServer{
-		services:     services,
-		users:        users,
-		oncall:       oncall,
-		integrations: integrations,
-		retention:    retention,
-		aiPlugins:    aiPlugins,
-		crypto:       crypto,
-		rateLimits:   rateLimits,
+		services:     p.Services,
+		users:        p.Users,
+		oncall:       p.OnCall,
+		integrations: p.Integrations,
+		retention:    p.Retention,
+		aiPlugins:    p.AIPlugins,
+		crypto:       p.Crypto,
+		rateLimits:   p.RateLimits,
 	}
 }
 

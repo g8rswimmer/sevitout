@@ -52,10 +52,20 @@ type TaskServer struct {
 	publisher Publisher   // nil when WebSocket support is not wired up
 }
 
-// NewTaskServer returns a TaskServer. github may be nil; in that case
-// CreateGitHubIssue returns Unavailable.
-func NewTaskServer(tasks store.TaskStore, sevs store.SEVStore, audit store.AuditStore, github IssueClient, publisher Publisher) *TaskServer {
-	return &TaskServer{tasks: tasks, sevs: sevs, audit: audit, github: github, publisher: publisher}
+// TaskServerParams groups NewTaskServer's dependencies. GitHub may be nil
+// (GITHUB_TOKEN is optional at deploy time); in that case CreateGitHubIssue
+// returns Unavailable. Publisher may also be nil.
+type TaskServerParams struct {
+	Tasks     store.TaskStore
+	SEVs      store.SEVStore
+	Audit     store.AuditStore
+	GitHub    IssueClient
+	Publisher Publisher
+}
+
+// NewTaskServer returns a TaskServer backed by p.
+func NewTaskServer(p TaskServerParams) *TaskServer {
+	return &TaskServer{tasks: p.Tasks, sevs: p.SEVs, audit: p.Audit, github: p.GitHub, publisher: p.Publisher}
 }
 
 func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb.TaskResponse, error) {

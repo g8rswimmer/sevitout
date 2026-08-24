@@ -69,7 +69,7 @@ func newLoginServer(t *testing.T, initialToken string) *loginServer {
 // newTokenSource's "http://"+addr URL construction so the httptest.Server's
 // own URL (including its random port) is used directly.
 func newTestTokenSource(ls *loginServer) *tokenSource {
-	ts := newTokenSource("unused", "svc@example.com", "hunter2", nil)
+	ts := newTokenSource(tokenSourceParams{APIAddr: "unused", Email: "svc@example.com", Password: "hunter2"})
 	ts.loginURL = ls.URL + "/auth/login"
 	return ts
 }

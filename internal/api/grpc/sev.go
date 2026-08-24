@@ -48,31 +48,37 @@ type SEVServer struct {
 	aiDispatch  AIDispatcher // nil when no AI plugin is configured
 }
 
-func NewSEVServer(
-	sevs store.SEVStore,
-	audit store.AuditStore,
-	history store.StatusHistoryStore,
-	roles store.RoleStore,
-	services store.ServiceStore,
-	postmortems store.PostmortemStore,
-	links store.SEVLinkStore,
-	onCaller OnCaller,
-	unlock Unlocker,
-	publisher Publisher,
-	aiDispatch AIDispatcher,
-) *SEVServer {
+// SEVServerParams groups NewSEVServer's dependencies. OnCaller, Publisher,
+// and AIDispatch may all be nil (PagerDuty/WebSocket/AI plugin support,
+// respectively, are each optional at deploy time) — every other field is
+// required.
+type SEVServerParams struct {
+	SEVs        store.SEVStore
+	Audit       store.AuditStore
+	History     store.StatusHistoryStore
+	Roles       store.RoleStore
+	Services    store.ServiceStore
+	Postmortems store.PostmortemStore
+	Links       store.SEVLinkStore
+	OnCaller    OnCaller
+	Unlock      Unlocker
+	Publisher   Publisher
+	AIDispatch  AIDispatcher
+}
+
+func NewSEVServer(p SEVServerParams) *SEVServer {
 	return &SEVServer{
-		sevs:        sevs,
-		audit:       audit,
-		history:     history,
-		roles:       roles,
-		services:    services,
-		postmortems: postmortems,
-		links:       links,
-		onCaller:    onCaller,
-		unlock:      unlock,
-		publisher:   publisher,
-		aiDispatch:  aiDispatch,
+		sevs:        p.SEVs,
+		audit:       p.Audit,
+		history:     p.History,
+		roles:       p.Roles,
+		services:    p.Services,
+		postmortems: p.Postmortems,
+		links:       p.Links,
+		onCaller:    p.OnCaller,
+		unlock:      p.Unlock,
+		publisher:   p.Publisher,
+		aiDispatch:  p.AIDispatch,
 	}
 }
 

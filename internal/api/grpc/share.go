@@ -37,9 +37,17 @@ type ShareServer struct {
 	signer ShareSigner
 }
 
-// NewShareServer returns a ShareServer backed by the given stores and signer.
-func NewShareServer(shares store.ShareStore, sevs store.SEVStore, audit store.AuditStore, signer ShareSigner) *ShareServer {
-	return &ShareServer{shares: shares, sevs: sevs, audit: audit, signer: signer}
+// ShareServerParams groups NewShareServer's dependencies.
+type ShareServerParams struct {
+	Shares store.ShareStore
+	SEVs   store.SEVStore
+	Audit  store.AuditStore
+	Signer ShareSigner
+}
+
+// NewShareServer returns a ShareServer backed by p.
+func NewShareServer(p ShareServerParams) *ShareServer {
+	return &ShareServer{shares: p.Shares, sevs: p.SEVs, audit: p.Audit, signer: p.Signer}
 }
 
 func (s *ShareServer) CreateShareLink(ctx context.Context, req *pb.CreateShareLinkRequest) (*pb.ShareLinkResponse, error) {

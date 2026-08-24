@@ -68,19 +68,29 @@ type tokenSource struct {
 	expiresAt time.Time
 }
 
-// newTokenSource constructs a tokenSource. apiAddr is the same host:port the
-// bot dials for gRPC — the API server multiplexes gRPC and HTTP on one port
-// (cmd/server/main.go's cmux setup), so POST /auth/login is already reachable
-// there without any separate address configuration.
-func newTokenSource(apiAddr, email, password string, log *slog.Logger) *tokenSource {
+// tokenSourceParams groups newTokenSource's dependencies.
+type tokenSourceParams struct {
+	// APIAddr is the same host:port the bot dials for gRPC — the API server
+	// multiplexes gRPC and HTTP on one port (cmd/server/main.go's cmux
+	// setup), so POST /auth/login is already reachable there without any
+	// separate address configuration.
+	APIAddr  string
+	Email    string
+	Password string
+	Log      *slog.Logger // nil defaults to slog.Default()
+}
+
+// newTokenSource constructs a tokenSource.
+func newTokenSource(p tokenSourceParams) *tokenSource {
+	log := p.Log
 	if log == nil {
 		log = slog.Default()
 	}
 	return &tokenSource{
 		httpClient: &http.Client{Timeout: 10 * time.Second},
-		loginURL:   "http://" + apiAddr + "/auth/login",
-		email:      email,
-		password:   password,
+		loginURL:   "http://" + p.APIAddr + "/auth/login",
+		email:      p.Email,
+		password:   p.Password,
 		log:        log,
 	}
 }

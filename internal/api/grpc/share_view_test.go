@@ -28,7 +28,9 @@ func newTestShareView(t *testing.T) *testShareView {
 	sevs := memory.NewSEVStore()
 	anns := memory.NewAnnouncementStore()
 	signer := share.NewSigner("test-secret")
-	handler := grpchandler.NewShareViewHandler(shares, sevs, anns, signer)
+	handler := grpchandler.NewShareViewHandler(grpchandler.ShareViewHandlerParams{
+		Shares: shares, SEVs: sevs, Announcements: anns, Validator: signer,
+	})
 
 	mux := http.NewServeMux()
 	mux.Handle("/s/{token}", handler)

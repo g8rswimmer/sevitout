@@ -50,7 +50,9 @@ func newTestHealthHandler(enc grpchandler.Encryptor, checkers map[string]grpchan
 	users := memory.NewUserStore()
 	configs := memory.NewIntegrationConfigStore()
 	return &testHealthHandler{
-		handler: grpchandler.NewIntegrationsHealthHandler(configs, enc, checkers, signer, users),
+		handler: grpchandler.NewIntegrationsHealthHandler(grpchandler.IntegrationsHealthHandlerParams{
+			Integrations: configs, Crypto: enc, Checkers: checkers, Signer: signer, Users: users,
+		}),
 		signer:  signer,
 		users:   users,
 		configs: configs,

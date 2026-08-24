@@ -36,7 +36,10 @@ func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	retention := memory.NewRetentionConfigStore()
 	aiPlugins := memory.NewAIPluginStore()
 	return &testConfigServer{
-		server:       grpchandler.NewConfigServer(services, users, oncall, integrations, retention, aiPlugins, enc, nil),
+		server: grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+			Services: services, Users: users, OnCall: oncall, Integrations: integrations,
+			Retention: retention, AIPlugins: aiPlugins, Crypto: enc,
+		}),
 		services:     services,
 		users:        users,
 		oncall:       oncall,
