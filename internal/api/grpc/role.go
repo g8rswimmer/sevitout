@@ -24,9 +24,18 @@ type RoleServer struct {
 	publisher Publisher // nil when WebSocket support is not wired up
 }
 
-// NewRoleServer returns a RoleServer backed by the given stores.
-func NewRoleServer(roles store.RoleStore, sevs store.SEVStore, audit store.AuditStore, publisher Publisher) *RoleServer {
-	return &RoleServer{roles: roles, sevs: sevs, audit: audit, publisher: publisher}
+// RoleServerParams groups NewRoleServer's dependencies. Publisher may be nil
+// (WebSocket support is optional at deploy time).
+type RoleServerParams struct {
+	Roles     store.RoleStore
+	SEVs      store.SEVStore
+	Audit     store.AuditStore
+	Publisher Publisher
+}
+
+// NewRoleServer returns a RoleServer backed by p.
+func NewRoleServer(p RoleServerParams) *RoleServer {
+	return &RoleServer{roles: p.Roles, sevs: p.SEVs, audit: p.Audit, publisher: p.Publisher}
 }
 
 func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) (*pb.SEVRoleResponse, error) {

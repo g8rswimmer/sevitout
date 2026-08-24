@@ -34,22 +34,27 @@ type PostmortemServer struct {
 	aiDispatch  AIDispatcher // nil when no AI plugin is configured
 }
 
+// PostmortemServerParams groups NewPostmortemServer's dependencies.
+// Publisher and AIDispatch may both be nil (WebSocket/AI plugin support are
+// each optional at deploy time).
+type PostmortemServerParams struct {
+	Postmortems store.PostmortemStore
+	SEVs        store.SEVStore
+	Audit       store.AuditStore
+	Unlock      Unlocker
+	Publisher   Publisher
+	AIDispatch  AIDispatcher
+}
+
 // NewPostmortemServer returns a PostmortemServer backed by the given stores.
-func NewPostmortemServer(
-	postmortems store.PostmortemStore,
-	sevs store.SEVStore,
-	audit store.AuditStore,
-	unlock Unlocker,
-	publisher Publisher,
-	aiDispatch AIDispatcher,
-) *PostmortemServer {
+func NewPostmortemServer(p PostmortemServerParams) *PostmortemServer {
 	return &PostmortemServer{
-		postmortems: postmortems,
-		sevs:        sevs,
-		audit:       audit,
-		unlock:      unlock,
-		publisher:   publisher,
-		aiDispatch:  aiDispatch,
+		postmortems: p.Postmortems,
+		sevs:        p.SEVs,
+		audit:       p.Audit,
+		unlock:      p.Unlock,
+		publisher:   p.Publisher,
+		aiDispatch:  p.AIDispatch,
 	}
 }
 

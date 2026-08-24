@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -45,6 +46,7 @@ func NewClientWithBaseURL(apiKey, baseURL string) *Client {
 // by the Configuration API's integration health check (docs/project-plan.md
 // M10) to report "connected" vs. "error" for a configured PagerDuty integration.
 func (c *Client) Ping(ctx context.Context) error {
+	slog.DebugContext(ctx, "pagerduty api call", "op", "Ping")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/abilities", nil)
 	if err != nil {
 		return fmt.Errorf("pagerduty: build request: %w", err)
@@ -54,11 +56,13 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		slog.WarnContext(ctx, "pagerduty api call failed", "op", "Ping", "err", err)
 		return fmt.Errorf("pagerduty: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		slog.WarnContext(ctx, "pagerduty api call returned non-200", "op", "Ping", "status", resp.StatusCode)
 		return fmt.Errorf("pagerduty: unexpected status %d", resp.StatusCode)
 	}
 	return nil
@@ -68,6 +72,7 @@ func (c *Client) Ping(ctx context.Context) error {
 // the given PagerDuty service ID. Returns ("", nil) when no one is currently
 // on-call for that service.
 func (c *Client) OnCallLookup(ctx context.Context, serviceID string) (string, error) {
+	slog.DebugContext(ctx, "pagerduty api call", "op", "OnCallLookup", "service_id", serviceID)
 	u, _ := url.Parse(c.baseURL + "/oncalls")
 	q := u.Query()
 	q.Set("time_zone", "UTC")
@@ -84,11 +89,13 @@ func (c *Client) OnCallLookup(ctx context.Context, serviceID string) (string, er
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		slog.WarnContext(ctx, "pagerduty api call failed", "op", "OnCallLookup", "service_id", serviceID, "err", err)
 		return "", fmt.Errorf("pagerduty: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		slog.WarnContext(ctx, "pagerduty api call returned non-200", "op", "OnCallLookup", "service_id", serviceID, "status", resp.StatusCode)
 		return "", fmt.Errorf("pagerduty: unexpected status %d", resp.StatusCode)
 	}
 

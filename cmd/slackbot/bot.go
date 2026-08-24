@@ -81,19 +81,30 @@ type bot struct {
 	pendingOpeners map[string]string
 }
 
-// newBot constructs a bot. defaultChannel and channelNamingConvention come
-// from the "slack" integration config (see loadSlackSettings); both may be
-// empty, in which case sensible defaults apply.
-func newBot(slack slackClient, api apiClients, log *slog.Logger, defaultChannel, channelNamingConvention string) *bot {
+// botParams groups newBot's dependencies. DefaultChannel and
+// ChannelNamingConvention come from the "slack" integration config (see
+// loadSlackSettings); both may be empty, in which case sensible defaults
+// apply.
+type botParams struct {
+	Slack                   slackClient
+	API                     apiClients
+	Log                     *slog.Logger // nil defaults to slog.Default()
+	DefaultChannel          string
+	ChannelNamingConvention string
+}
+
+// newBot constructs a bot.
+func newBot(p botParams) *bot {
+	log := p.Log
 	if log == nil {
 		log = slog.Default()
 	}
 	return &bot{
-		slack:                   slack,
-		api:                     api,
+		slack:                   p.Slack,
+		api:                     p.API,
 		log:                     log,
-		defaultChannel:          defaultChannel,
-		channelNamingConvention: channelNamingConvention,
+		defaultChannel:          p.DefaultChannel,
+		channelNamingConvention: p.ChannelNamingConvention,
 		channels:                make(map[string]string),
 		pendingOpeners:          make(map[string]string),
 	}

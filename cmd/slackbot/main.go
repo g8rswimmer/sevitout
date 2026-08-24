@@ -57,7 +57,9 @@ func main() {
 	// as the gRPC dial — the API server multiplexes both on one port) and
 	// keeps its token fresh for as long as the bot runs, replacing a
 	// manually pre-issued, manually rotated SLACKBOT_SERVICE_TOKEN.
-	tokens := newTokenSource(apiAddr, serviceEmail, servicePassword, log)
+	tokens := newTokenSource(tokenSourceParams{
+		APIAddr: apiAddr, Email: serviceEmail, Password: servicePassword, Log: log,
+	})
 
 	conn, err := grpc.NewClient(apiAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -83,7 +85,10 @@ func main() {
 	slackAPI := slack.New(botToken, slack.OptionAppLevelToken(appToken))
 	smClient := socketmode.New(slackAPI)
 
-	b := newBot(sevitoutslack.NewClient(botToken), api, log, defaultChannel, namingConvention)
+	b := newBot(botParams{
+		Slack: sevitoutslack.NewClient(botToken), API: api, Log: log,
+		DefaultChannel: defaultChannel, ChannelNamingConvention: namingConvention,
+	})
 
 	wsURL := (&url.URL{Scheme: "ws", Host: apiAddr, Path: "/ws", RawQuery: "sev_id=" + url.QueryEscape(ws.BroadcastRoom)}).String()
 	go b.runEventListener(ctx, wsURL, tokens)

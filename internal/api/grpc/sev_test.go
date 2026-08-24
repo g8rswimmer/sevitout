@@ -35,7 +35,11 @@ func newTestSEVServer() *testSEVServer {
 	pub := &fakePublisher{}
 	aiDispatch := &fakeAIDispatcher{}
 	return &testSEVServer{
-		server:  grpchandler.NewSEVServer(sevs, audit, history, memory.NewRoleStore(), memory.NewServiceStore(), memory.NewPostmortemStore(), links, nil, nil, pub, aiDispatch),
+		server: grpchandler.NewSEVServer(grpchandler.SEVServerParams{
+			SEVs: sevs, Audit: audit, History: history, Roles: memory.NewRoleStore(),
+			Services: memory.NewServiceStore(), Postmortems: memory.NewPostmortemStore(),
+			Links: links, Publisher: pub, AIDispatch: aiDispatch,
+		}),
 		sevs:    sevs,
 		audit:   audit,
 		history: history,

@@ -64,22 +64,26 @@ type IntegrationsHealthHandler struct {
 	users        store.UserStore
 }
 
+// IntegrationsHealthHandlerParams groups NewIntegrationsHealthHandler's
+// dependencies.
+type IntegrationsHealthHandlerParams struct {
+	Integrations store.IntegrationConfigStore
+	Crypto       Encryptor
+	Checkers     map[string]HealthChecker
+	Signer       tokenValidator
+	Users        store.UserStore
+}
+
 // NewIntegrationsHealthHandler returns a handler that authenticates each
 // request the same way the gRPC interceptor does (JWT + active user + RBAC),
 // then runs the registered checker (if any) for every configured integration.
-func NewIntegrationsHealthHandler(
-	integrations store.IntegrationConfigStore,
-	crypto Encryptor,
-	checkers map[string]HealthChecker,
-	signer tokenValidator,
-	users store.UserStore,
-) *IntegrationsHealthHandler {
+func NewIntegrationsHealthHandler(p IntegrationsHealthHandlerParams) *IntegrationsHealthHandler {
 	return &IntegrationsHealthHandler{
-		integrations: integrations,
-		crypto:       crypto,
-		checkers:     checkers,
-		signer:       signer,
-		users:        users,
+		integrations: p.Integrations,
+		crypto:       p.Crypto,
+		checkers:     p.Checkers,
+		signer:       p.Signer,
+		users:        p.Users,
 	}
 }
 

@@ -28,7 +28,7 @@ func newTestShareServer() *testShareServer {
 	audit := memory.NewAuditStore()
 	signer := share.NewSigner("test-secret")
 	return &testShareServer{
-		server: grpchandler.NewShareServer(shares, sevs, audit, signer),
+		server: grpchandler.NewShareServer(grpchandler.ShareServerParams{Shares: shares, SEVs: sevs, Audit: audit, Signer: signer}),
 		shares: shares,
 		sevs:   sevs,
 		audit:  audit,

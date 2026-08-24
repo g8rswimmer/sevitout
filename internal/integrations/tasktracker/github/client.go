@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -84,6 +85,7 @@ func NewClientWithBaseURL(token, baseURL string) *Client {
 
 // GetIssue fetches a single GitHub Issue by owner, repo, and issue number.
 func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	slog.DebugContext(ctx, "github api call", "op", "GetIssue", "owner", owner, "repo", repo, "number", number)
 	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d", c.baseURL, url.PathEscape(owner), url.PathEscape(repo), number)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -93,12 +95,15 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		slog.WarnContext(ctx, "github api call failed", "op", "GetIssue", "err", err)
 		return nil, fmt.Errorf("github: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, newAPIError(resp)
+		apiErr := newAPIError(resp)
+		slog.WarnContext(ctx, "github api call returned error", "op", "GetIssue", "status", resp.StatusCode, "message", apiErr.Message)
+		return nil, apiErr
 	}
 	return decodeIssue(resp.Body)
 }
@@ -108,6 +113,7 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 // Configuration API's integration health check (docs/project-plan.md M10) to
 // report "connected" vs. "error" for a configured GitHub integration.
 func (c *Client) Ping(ctx context.Context) error {
+	slog.DebugContext(ctx, "github api call", "op", "Ping")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/rate_limit", nil)
 	if err != nil {
 		return fmt.Errorf("github: build request: %w", err)
@@ -116,12 +122,15 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		slog.WarnContext(ctx, "github api call failed", "op", "Ping", "err", err)
 		return fmt.Errorf("github: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return newAPIError(resp)
+		apiErr := newAPIError(resp)
+		slog.WarnContext(ctx, "github api call returned error", "op", "Ping", "status", resp.StatusCode, "message", apiErr.Message)
+		return apiErr
 	}
 	return nil
 }
@@ -130,6 +139,7 @@ func (c *Client) Ping(ctx context.Context) error {
 // the resulting issue. Labels (if any) are set atomically as part of the
 // same creation request.
 func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issue, error) {
+	slog.DebugContext(ctx, "github api call", "op", "CreateIssue", "owner", req.Owner, "repo", req.Repo)
 	payload := map[string]any{
 		"title": req.Title,
 		"body":  req.Body,
@@ -153,14 +163,21 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
+		slog.WarnContext(ctx, "github api call failed", "op", "CreateIssue", "err", err)
 		return nil, fmt.Errorf("github: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		return nil, newAPIError(resp)
+		apiErr := newAPIError(resp)
+		slog.WarnContext(ctx, "github api call returned error", "op", "CreateIssue", "status", resp.StatusCode, "message", apiErr.Message)
+		return nil, apiErr
 	}
-	return decodeIssue(resp.Body)
+	issue, err := decodeIssue(resp.Body)
+	if err == nil {
+		slog.InfoContext(ctx, "github issue created", "owner", req.Owner, "repo", req.Repo, "number", issue.Number, "url", issue.HTMLURL)
+	}
+	return issue, err
 }
 
 func (c *Client) setHeaders(req *http.Request) {

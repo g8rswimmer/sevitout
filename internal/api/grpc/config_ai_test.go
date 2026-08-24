@@ -234,7 +234,10 @@ func TestDeleteAIPlugin_EvictsRateLimit(t *testing.T) {
 	retention := memory.NewRetentionConfigStore()
 	aiPlugins := memory.NewAIPluginStore()
 	evictor := &fakeRateLimitEvictor{}
-	server := grpchandler.NewConfigServer(services, users, oncall, integrations, retention, aiPlugins, testEncryptor(t), evictor)
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Services: services, Users: users, OnCall: oncall, Integrations: integrations,
+		Retention: retention, AIPlugins: aiPlugins, Crypto: testEncryptor(t), RateLimits: evictor,
+	})
 
 	created, err := server.CreateAIPlugin(ctx, &pb.CreateAIPluginRequest{Name: "p", HandlerType: "builtin"})
 	if err != nil {

@@ -58,9 +58,17 @@ type ShareViewHandler struct {
 	validator     ShareTokenValidator
 }
 
-// NewShareViewHandler returns a ShareViewHandler backed by the given stores.
-func NewShareViewHandler(shares store.ShareStore, sevs store.SEVStore, announcements store.AnnouncementStore, validator ShareTokenValidator) *ShareViewHandler {
-	return &ShareViewHandler{shares: shares, sevs: sevs, announcements: announcements, validator: validator}
+// ShareViewHandlerParams groups NewShareViewHandler's dependencies.
+type ShareViewHandlerParams struct {
+	Shares        store.ShareStore
+	SEVs          store.SEVStore
+	Announcements store.AnnouncementStore
+	Validator     ShareTokenValidator
+}
+
+// NewShareViewHandler returns a ShareViewHandler backed by p.
+func NewShareViewHandler(p ShareViewHandlerParams) *ShareViewHandler {
+	return &ShareViewHandler{shares: p.Shares, sevs: p.SEVs, announcements: p.Announcements, validator: p.Validator}
 }
 
 func (h *ShareViewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

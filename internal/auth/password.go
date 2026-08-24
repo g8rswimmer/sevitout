@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -81,12 +82,14 @@ func (h *PasswordHandler) register(w http.ResponseWriter, r *http.Request) {
 
 	role, err := h.bootstrapRole(r.Context())
 	if err != nil {
+		slog.ErrorContext(r.Context(), "register: count users failed", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "register: hash password failed", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -104,13 +107,16 @@ func (h *PasswordHandler) register(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.users.Create(r.Context(), user); err != nil {
 		if errors.Is(err, store.ErrConflict) {
+			slog.WarnContext(r.Context(), "register: email already registered", "email", req.Email)
 			http.Error(w, "email already registered", http.StatusConflict)
 			return
 		}
+		slog.ErrorContext(r.Context(), "register: create user failed", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
+	slog.InfoContext(r.Context(), "user registered", "user_id", user.ID, "email", user.Email, "org_role", string(role))
 	h.respondWithToken(w, user)
 }
 
@@ -135,29 +141,35 @@ func (h *PasswordHandler) login(w http.ResponseWriter, r *http.Request) {
 	user, err := h.users.GetByEmail(r.Context(), req.Email)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			slog.WarnContext(r.Context(), "login failed: unknown email", "email", req.Email)
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
+		slog.ErrorContext(r.Context(), "login: look up user failed", "email", req.Email, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	if !user.Active {
+		slog.WarnContext(r.Context(), "login failed: user deactivated", "user_id", user.ID, "email", req.Email)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		slog.WarnContext(r.Context(), "login failed: wrong password", "user_id", user.ID, "email", req.Email)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
+	slog.InfoContext(r.Context(), "user logged in", "user_id", user.ID, "email", user.Email)
 	h.respondWithToken(w, user)
 }
 
 func (h *PasswordHandler) respondWithToken(w http.ResponseWriter, user *store.User) {
 	token, err := h.signer.Sign(user.ID, user.Email, string(user.OrgRole))
 	if err != nil {
+		slog.Error("sign token failed", "user_id", user.ID, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -172,6 +184,7 @@ func (h *PasswordHandler) respondWithToken(w http.ResponseWriter, user *store.Us
 		},
 	})
 	if err != nil {
+		slog.Error("marshal auth response failed", "user_id", user.ID, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

@@ -7,6 +7,7 @@ package slack
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/slack-go/slack"
 )
@@ -43,6 +44,7 @@ func NewClientWithBaseURL(botToken, baseURL string) *Client {
 // CreateChannel creates a new public channel named name and returns its
 // Slack channel ID.
 func (c *Client) CreateChannel(ctx context.Context, name string) (string, error) {
+	slog.DebugContext(ctx, "slack api call", "op", "CreateChannel", "channel_name", name)
 	ch, err := c.api.CreateConversationContext(ctx, slack.CreateConversationParams{ChannelName: name})
 	if err != nil {
 		return "", fmt.Errorf("slack: create channel %q: %w", name, err)
@@ -57,6 +59,7 @@ func (c *Client) InviteUsers(ctx context.Context, channelID string, userIDs []st
 	if len(userIDs) == 0 {
 		return nil
 	}
+	slog.DebugContext(ctx, "slack api call", "op", "InviteUsers", "channel_id", channelID, "count", len(userIDs))
 	if _, err := c.api.InviteUsersToConversationContext(ctx, channelID, userIDs...); err != nil {
 		return fmt.Errorf("slack: invite users to %s: %w", channelID, err)
 	}
@@ -65,6 +68,7 @@ func (c *Client) InviteUsers(ctx context.Context, channelID string, userIDs []st
 
 // PostMessage posts a plain-text message to channelID.
 func (c *Client) PostMessage(ctx context.Context, channelID, text string) error {
+	slog.DebugContext(ctx, "slack api call", "op", "PostMessage", "channel_id", channelID)
 	if _, _, err := c.api.PostMessageContext(ctx, channelID, slack.MsgOptionText(text, false)); err != nil {
 		return fmt.Errorf("slack: post message to %s: %w", channelID, err)
 	}
@@ -76,6 +80,7 @@ func (c *Client) PostMessage(ctx context.Context, channelID, text string) error 
 // newest-first, which callers appending to a SEV's chat log would otherwise
 // have to reverse themselves.
 func (c *Client) FetchHistory(ctx context.Context, channelID string, limit int) ([]Message, error) {
+	slog.DebugContext(ctx, "slack api call", "op", "FetchHistory", "channel_id", channelID, "limit", limit)
 	resp, err := c.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: channelID,
 		Limit:     limit,
@@ -95,9 +100,11 @@ func (c *Client) FetchHistory(ctx context.Context, channelID string, limit int) 
 // ("", nil) rather than an error when no Slack account matches, since that's
 // an expected case, not a failure.
 func (c *Client) LookupUserIDByEmail(ctx context.Context, email string) (string, error) {
+	slog.DebugContext(ctx, "slack api call", "op", "LookupUserIDByEmail", "email", email)
 	u, err := c.api.GetUserByEmailContext(ctx, email)
 	if err != nil {
 		if err.Error() == errUserNotFound {
+			slog.DebugContext(ctx, "slack: no account for email", "email", email)
 			return "", nil
 		}
 		return "", fmt.Errorf("slack: lookup user by email %s: %w", email, err)
@@ -108,6 +115,7 @@ func (c *Client) LookupUserIDByEmail(ctx context.Context, email string) (string,
 // Ping verifies the bot token is accepted by Slack. Used by the Configuration
 // API's integration health check (docs/project-plan.md M10).
 func (c *Client) Ping(ctx context.Context) error {
+	slog.DebugContext(ctx, "slack api call", "op", "Ping")
 	if _, err := c.api.AuthTestContext(ctx); err != nil {
 		return fmt.Errorf("slack: auth test: %w", err)
 	}

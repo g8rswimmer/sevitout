@@ -34,7 +34,9 @@ func newTestPostmortemServer() *testPostmortemServer {
 	pub := &fakePublisher{}
 	aiDispatch := &fakeAIDispatcher{}
 	return &testPostmortemServer{
-		server:      grpchandler.NewPostmortemServer(pms, sevs, audit, signer, pub, aiDispatch),
+		server: grpchandler.NewPostmortemServer(grpchandler.PostmortemServerParams{
+			Postmortems: pms, SEVs: sevs, Audit: audit, Unlock: signer, Publisher: pub, AIDispatch: aiDispatch,
+		}),
 		postmortems: pms,
 		sevs:        sevs,
 		audit:       audit,

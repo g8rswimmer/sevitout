@@ -208,5 +208,10 @@ func newTestBot(slackC *fakeSlack, sevs *fakeSevAPI, roles *fakeRoleAPI, ann *fa
 	if chats == nil {
 		chats = &fakeChatAPI{}
 	}
-	return newBot(slackC, apiClients{sevs: sevs, roles: roles, announcements: ann, chats: chats}, nil, defaultChannel, naming)
+	return newBot(botParams{
+		Slack:                   slackC,
+		API:                     apiClients{sevs: sevs, roles: roles, announcements: ann, chats: chats},
+		DefaultChannel:          defaultChannel,
+		ChannelNamingConvention: naming,
+	})
 }

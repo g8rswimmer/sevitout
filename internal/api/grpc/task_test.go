@@ -67,11 +67,13 @@ func newTestTaskServer(gh grpchandler.IssueClient) *testTaskServer {
 	audit := memory.NewAuditStore()
 	pub := &fakePublisher{}
 	return &testTaskServer{
-		server: grpchandler.NewTaskServer(tasks, sevs, audit, gh, pub),
-		tasks:  tasks,
-		sevs:   sevs,
-		audit:  audit,
-		pub:    pub,
+		server: grpchandler.NewTaskServer(grpchandler.TaskServerParams{
+			Tasks: tasks, SEVs: sevs, Audit: audit, GitHub: gh, Publisher: pub,
+		}),
+		tasks: tasks,
+		sevs:  sevs,
+		audit: audit,
+		pub:   pub,
 	}
 }
 
