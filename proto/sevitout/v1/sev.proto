@@ -89,6 +89,11 @@ message SEVResponse {
   // "acme-corp/checkout-service"); pre-fills TaskService.CreateGitHubIssue's
   // owner/repo fields in the web UI. Set via UpdateSEV, not at creation.
   string github_repo = 36;
+  // root_cause_reference_url links to the concrete change that caused the
+  // incident — e.g. a PR/commit diff or a config-management change —
+  // alongside root_cause_category/root_cause_description's classification
+  // and narrative. Set via UpdateSEV, not at creation.
+  string root_cause_reference_url = 37;
 }
 
 message CreateSEVRequest {
@@ -142,6 +147,7 @@ message UpdateSEVRequest {
   string metric_link = 24;
   string snapshot_url = 25;
   string github_repo = 26;
+  string root_cause_reference_url = 27;
 }
 
 message ListSEVsRequest {

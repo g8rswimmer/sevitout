@@ -134,7 +134,12 @@ type SEV struct {
 	// "acme-corp/checkout-service") — shown as a link in the Details panel,
 	// and used to pre-fill TaskService.CreateGitHubIssue's owner/repo fields
 	// so a Responder doesn't have to retype it.
-	GitHubRepo            *string
+	GitHubRepo *string
+	// RootCauseReferenceURL links to the concrete change that caused the
+	// incident — e.g. a PR/commit diff or a config-management change —
+	// alongside RootCauseCategory/RootCauseDescription's classification and
+	// narrative.
+	RootCauseReferenceURL *string
 	RightPeoplePresent    *bool
 	RightPeopleNotes      *string
 	Tags                  map[string]string

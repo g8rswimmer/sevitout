@@ -15,3 +15,8 @@ UPDATE postmortems SET
     updated_at = $4,
     updated_by = $5
 WHERE sev_id = $1;
+
+-- name: CountPostmortemsByStatus :many
+SELECT status, COUNT(*) AS count
+FROM postmortems
+GROUP BY status;

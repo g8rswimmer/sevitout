@@ -184,6 +184,11 @@ export interface SEVResponse {
   // github_repo is the "owner/repo" this SEV's code lives in — see
   // internal/store.SEV.GitHubRepo. Set via UpdateSEV, not at creation.
   github_repo?: string
+  // root_cause_reference_url links to the concrete change that caused the
+  // incident (a PR/commit diff, a config-management change, etc.) — see
+  // internal/store.SEV.RootCauseReferenceURL. Set via UpdateSEV, not at
+  // creation.
+  root_cause_reference_url?: string
   right_people_present?: boolean
   right_people_notes?: string
   tags?: Record<string, string>
@@ -280,6 +285,7 @@ export interface UpdateSEVRequest {
   metric_link?: string
   snapshot_url?: string
   github_repo?: string
+  root_cause_reference_url?: string
   right_people_present?: boolean
   right_people_notes?: string
   tags?: Record<string, string>

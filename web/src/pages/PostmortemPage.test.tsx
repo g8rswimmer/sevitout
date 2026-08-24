@@ -130,6 +130,48 @@ describe('PostmortemPage', () => {
     })
   })
 
+  it('seeds a blank postmortem with a template built from the SEV facts on first edit', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor({
+      sev: makeSev({ description: 'Checkout was unavailable.', business_impact: 'Lost revenue.' }),
+      pm: makePostmortem({ content: '' }),
+      whoAmI: me('responder'),
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: /postmortem/i })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /^edit$/i }))
+
+    await waitFor(() => expect(document.querySelector('.ProseMirror')).toHaveAttribute('contenteditable', 'true'))
+    expect(screen.getByText('Checkout was unavailable.')).toBeInTheDocument()
+    expect(screen.getByText('Lost revenue.')).toBeInTheDocument()
+    expect(screen.getByText('Summary')).toBeInTheDocument()
+    expect(screen.getByText('Lifecycle')).toBeInTheDocument()
+    expect(screen.getByText('Root Cause')).toBeInTheDocument()
+    expect(screen.getByText('Business Impact')).toBeInTheDocument()
+    expect(screen.getByText('Services Affected')).toBeInTheDocument()
+    expect(screen.getByText('Mitigation')).toBeInTheDocument()
+  })
+
+  it('does not overwrite existing postmortem content with the template on edit', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor({
+      sev: makeSev({ description: 'Checkout was unavailable.' }),
+      pm: makePostmortem({ content: 'Already written by a human.' }),
+      whoAmI: me('responder'),
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: /postmortem/i })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /^edit$/i }))
+
+    await waitFor(() => expect(document.querySelector('.ProseMirror')).toHaveAttribute('contenteditable', 'true'))
+    expect(screen.getByText('Already written by a human.')).toBeInTheDocument()
+    expect(screen.queryByText('Checkout was unavailable.')).not.toBeInTheDocument()
+  })
+
   it('does not offer Unlock to a Responder on a locked SEV (Incident-Commander-only)', async () => {
     tokenStorage.set('tok')
     mockFetchFor({ sev: makeSev({ locked: true, status: 'postmortem_complete' }), pm: makePostmortem({ status: 'approved' }), whoAmI: me('responder') })

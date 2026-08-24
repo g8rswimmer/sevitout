@@ -16,6 +16,7 @@ SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
        monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
+       root_cause_reference_url,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
@@ -43,6 +44,7 @@ type GetSEVRow struct {
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
 	GithubRepo            *string            `json:"github_repo"`
+	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -85,6 +87,7 @@ func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
 		&i.MetricLink,
 		&i.SnapshotUrl,
 		&i.GithubRepo,
+		&i.RootCauseReferenceUrl,
 		&i.RightPeoplePresent,
 		&i.RightPeopleNotes,
 		&i.Tags,
@@ -113,6 +116,7 @@ INSERT INTO sevs (
     root_cause_category, root_cause_description, mitigation, prevention,
     business_impact, affected_services, detection_method, alert_name,
     monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
+    root_cause_reference_url,
     right_people_present, right_people_notes, tags,
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
@@ -122,10 +126,11 @@ INSERT INTO sevs (
     $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16, $17, $18,
-    $19, $20, $21,
-    $22, $23, $24, $25, $26,
-    $27, $28, $29, $30,
-    $31, $32, $33, $34, $35, $36
+    $19,
+    $20, $21, $22,
+    $23, $24, $25, $26, $27,
+    $28, $29, $30, $31,
+    $32, $33, $34, $35, $36, $37
 )
 `
 
@@ -148,6 +153,7 @@ type InsertSEVParams struct {
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
 	GithubRepo            *string            `json:"github_repo"`
+	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -188,6 +194,7 @@ func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
 		arg.MetricLink,
 		arg.SnapshotUrl,
 		arg.GithubRepo,
+		arg.RootCauseReferenceUrl,
 		arg.RightPeoplePresent,
 		arg.RightPeopleNotes,
 		arg.Tags,
@@ -215,6 +222,7 @@ SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
        monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
+       root_cause_reference_url,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
@@ -248,6 +256,7 @@ type ListSEVsRow struct {
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
 	GithubRepo            *string            `json:"github_repo"`
+	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -296,6 +305,7 @@ func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsR
 			&i.MetricLink,
 			&i.SnapshotUrl,
 			&i.GithubRepo,
+			&i.RootCauseReferenceUrl,
 			&i.RightPeoplePresent,
 			&i.RightPeopleNotes,
 			&i.Tags,
@@ -355,22 +365,23 @@ UPDATE sevs SET
     metric_link            = $16,
     snapshot_url           = $17,
     github_repo            = $18,
-    right_people_present   = $19,
-    right_people_notes     = $20,
-    tags                   = $21,
-    started_at             = $22,
-    detected_at            = $23,
-    mitigated_at           = $24,
-    resolved_at            = $25,
-    postmortem_completed_at = $26,
-    mttd_seconds           = $27,
-    mttm_seconds           = $28,
-    mttr_seconds           = $29,
-    dttm_seconds           = $30,
-    locked                 = $31,
-    sensitive              = $32,
-    ai_disabled            = $33,
-    updated_at             = $34
+    root_cause_reference_url = $19,
+    right_people_present   = $20,
+    right_people_notes     = $21,
+    tags                   = $22,
+    started_at             = $23,
+    detected_at            = $24,
+    mitigated_at           = $25,
+    resolved_at            = $26,
+    postmortem_completed_at = $27,
+    mttd_seconds           = $28,
+    mttm_seconds           = $29,
+    mttr_seconds           = $30,
+    dttm_seconds           = $31,
+    locked                 = $32,
+    sensitive              = $33,
+    ai_disabled            = $34,
+    updated_at             = $35
 WHERE id = $1
 `
 
@@ -393,6 +404,7 @@ type UpdateSEVParams struct {
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
 	GithubRepo            *string            `json:"github_repo"`
+	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 	RightPeoplePresent    *bool              `json:"right_people_present"`
 	RightPeopleNotes      *string            `json:"right_people_notes"`
 	Tags                  []byte             `json:"tags"`
@@ -431,6 +443,7 @@ func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
 		arg.MetricLink,
 		arg.SnapshotUrl,
 		arg.GithubRepo,
+		arg.RootCauseReferenceUrl,
 		arg.RightPeoplePresent,
 		arg.RightPeopleNotes,
 		arg.Tags,

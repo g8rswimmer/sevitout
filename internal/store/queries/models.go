@@ -150,6 +150,7 @@ type Sev struct {
 	MetricLink            *string            `json:"metric_link"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
 	GithubRepo            *string            `json:"github_repo"`
+	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 }
 
 type SevAnnouncement struct {

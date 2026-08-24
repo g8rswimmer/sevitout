@@ -127,6 +127,15 @@
 .tiptap-content pre code {
   @apply bg-transparent p-0;
 }
+.tiptap-content table {
+  @apply mb-3 w-full table-fixed border-collapse overflow-hidden;
+}
+.tiptap-content :is(th, td) {
+  @apply border border-border px-2 py-1 text-left align-top;
+}
+.tiptap-content th {
+  @apply bg-muted font-medium;
+}
 .tiptap-content:focus-visible {
   @apply outline-none;
 }

@@ -337,14 +337,14 @@ func buildStores(ctx context.Context, log *slog.Logger) (
 		os.Exit(1)
 	}
 	log.Info("using postgres store")
-	log.Warn("service, postmortem, announcement, chat, sev-link, task, oncall, integration-config, retention-config, ai-plugin, ai-output, and share stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
+	log.Warn("service, announcement, chat, sev-link, task, oncall, integration-config, retention-config, ai-plugin, ai-output, and share stores are in-memory — data will not persist across restarts (postgres implementations deferred)")
 	return postgres.NewSEVStore(pool),
 		postgres.NewAuditStore(pool),
 		postgres.NewStatusHistoryStore(pool),
 		postgres.NewUserStore(pool),
 		postgres.NewRoleStore(pool),
 		memory.NewServiceStore(),
-		memory.NewPostmortemStore(),
+		postgres.NewPostmortemStore(pool),
 		memory.NewAnnouncementStore(),
 		memory.NewChatStore(),
 		memory.NewSEVLinkStore(),

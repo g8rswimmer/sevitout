@@ -68,6 +68,7 @@ func (s *SEVStore) Create(ctx context.Context, sv *store.SEV) error {
 		MetricLink:            sv.MetricLink,
 		SnapshotUrl:           sv.SnapshotURL,
 		GithubRepo:            sv.GitHubRepo,
+		RootCauseReferenceUrl: sv.RootCauseReferenceURL,
 		RightPeoplePresent:    sv.RightPeoplePresent,
 		RightPeopleNotes:      sv.RightPeopleNotes,
 		Tags:                  tags,
@@ -144,6 +145,7 @@ func (s *SEVStore) Update(ctx context.Context, sv *store.SEV) error {
 		MetricLink:            sv.MetricLink,
 		SnapshotUrl:           sv.SnapshotURL,
 		GithubRepo:            sv.GitHubRepo,
+		RootCauseReferenceUrl: sv.RootCauseReferenceURL,
 		RightPeoplePresent:    sv.RightPeoplePresent,
 		RightPeopleNotes:      sv.RightPeopleNotes,
 		Tags:                  tags,
@@ -332,6 +334,7 @@ const sevSelectCols = `SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
        monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
+       root_cause_reference_url,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
@@ -450,6 +453,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		detMethod, alertName, monTool         *string
 		alertURL, metricLink, snapshotURL     *string
 		githubRepo                            *string
+		rootCauseReferenceURL                 *string
 		rightPeopleNotes                      *string
 		rightPeoplePresent                    *bool
 		severityLevel                         int16
@@ -468,6 +472,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		&rootCateg, &rootDesc, &mitigation, &prevention,
 		&bizImpact, &affectedServices, &detMethod, &alertName,
 		&monTool, &alertURL, &metricLink, &snapshotURL, &githubRepo,
+		&rootCauseReferenceURL,
 		&rightPeoplePresent, &rightPeopleNotes, &tags,
 		&startedAt, &detectedAt, &mitigatedAt, &resolvedAt, &postmortemCompletedAt,
 		&mttdSeconds, &mttmSeconds, &mttrSeconds, &dttmSeconds,
@@ -498,6 +503,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		MetricLink:            metricLink,
 		SnapshotURL:           snapshotURL,
 		GitHubRepo:            githubRepo,
+		RootCauseReferenceURL: rootCauseReferenceURL,
 		RightPeoplePresent:    rightPeoplePresent,
 		RightPeopleNotes:      rightPeopleNotes,
 		Tags:                  tagMap,
@@ -543,6 +549,7 @@ func mapGetSEVRow(r queries.GetSEVRow) (*store.SEV, error) {
 		MetricLink:            r.MetricLink,
 		SnapshotURL:           r.SnapshotUrl,
 		GitHubRepo:            r.GithubRepo,
+		RootCauseReferenceURL: r.RootCauseReferenceUrl,
 		RightPeoplePresent:    r.RightPeoplePresent,
 		RightPeopleNotes:      r.RightPeopleNotes,
 		Tags:                  tags,

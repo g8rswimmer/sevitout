@@ -348,6 +348,34 @@ func TestUpdateSEV_DetectionMetadataAndLinks(t *testing.T) {
 	}
 }
 
+func TestUpdateSEV_RootCauseReferenceURL(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	resp, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
+		Id:                    sevID,
+		RootCauseCategory:     "deployment",
+		RootCauseDescription:  "A bad rollout introduced a nil pointer.",
+		RootCauseReferenceUrl: "https://github.com/acme-corp/checkout-service/pull/123",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSEV: %v", err)
+	}
+	if got, want := resp.GetRootCauseReferenceUrl(), "https://github.com/acme-corp/checkout-service/pull/123"; got != want {
+		t.Errorf("RootCauseReferenceUrl = %q, want %q", got, want)
+	}
+
+	// Verify the change is persisted — read it back through the handler.
+	got, err := ts.server.GetSEV(ctx, &pb.GetSEVRequest{Id: sevID})
+	if err != nil {
+		t.Fatalf("GetSEV after update: %v", err)
+	}
+	if want := "https://github.com/acme-corp/checkout-service/pull/123"; got.GetRootCauseReferenceUrl() != want {
+		t.Errorf("persisted RootCauseReferenceUrl = %q, want %q", got.GetRootCauseReferenceUrl(), want)
+	}
+}
+
 func TestUpdateSEV_UnknownDetectionMethod(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()

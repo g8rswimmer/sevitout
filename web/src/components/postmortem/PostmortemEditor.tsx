@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import type { Editor } from '@tiptap/react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import { TableKit } from '@tiptap/extension-table'
 import { Markdown, type MarkdownStorage } from 'tiptap-markdown'
 import { cn } from '@/lib/utils'
 
@@ -30,7 +31,14 @@ export function PostmortemEditor({
   className?: string
 }) {
   const editor = useEditor({
-    extensions: [StarterKit, Markdown.configure({ html: false, transformPastedText: true })],
+    // TableKit registers the table/tableRow/tableHeader/tableCell node types
+    // that the auto-seeded postmortem template's Lifecycle section (see
+    // lib/postmortemTemplate.ts) renders as a Markdown table — without it
+    // those node types don't exist in the schema, so markdown-it's parsed
+    // table rows collapse into a single run-together paragraph instead of a
+    // table. tiptap-markdown (imported below) supplies the actual Markdown
+    // parse/serialize behavior for the "table" node name TableKit defines.
+    extensions: [StarterKit, TableKit, Markdown.configure({ html: false, transformPastedText: true })],
     content,
     editable,
     onUpdate: ({ editor }) => {

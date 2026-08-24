@@ -28,6 +28,7 @@ interface FormState {
   description: string
   rootCauseCategory: string
   rootCauseDescription: string
+  rootCauseReferenceUrl: string
   mitigation: string
   prevention: string
   businessImpact: string
@@ -46,6 +47,7 @@ function toFormState(sev: SEVResponse): FormState {
     description: sev.description ?? '',
     rootCauseCategory: sev.root_cause_category ?? '',
     rootCauseDescription: sev.root_cause_description ?? '',
+    rootCauseReferenceUrl: sev.root_cause_reference_url ?? '',
     mitigation: sev.mitigation ?? '',
     prevention: sev.prevention ?? '',
     businessImpact: sev.business_impact ?? '',
@@ -95,6 +97,7 @@ export function DetailsPanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bool
         description: form.description,
         root_cause_category: form.rootCauseCategory,
         root_cause_description: form.rootCauseDescription,
+        root_cause_reference_url: form.rootCauseReferenceUrl,
         mitigation: form.mitigation,
         prevention: form.prevention,
         business_impact: form.businessImpact,
@@ -188,6 +191,18 @@ export function DetailsPanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bool
               onChange={(e) => setForm((f) => ({ ...f, rootCauseDescription: e.target.value }))}
             />
           </Field>
+          <Field label="Root cause reference link" htmlFor="dp-root-cause-reference-url">
+            <Input
+              id="dp-root-cause-reference-url"
+              type="url"
+              placeholder="https://github.com/acme-corp/checkout-service/pull/123"
+              value={form.rootCauseReferenceUrl}
+              onChange={(e) => setForm((f) => ({ ...f, rootCauseReferenceUrl: e.target.value }))}
+            />
+            <p className="text-xs text-muted-foreground">
+              Link to the change that caused it — a PR/commit diff, a config change, etc.
+            </p>
+          </Field>
           <Field label="Mitigation" htmlFor="dp-mitigation">
             <Textarea
               id="dp-mitigation"
@@ -272,6 +287,7 @@ export function DetailsPanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bool
           />
           <ReadField label="Business impact" value={sev.business_impact} />
           <ReadField label="Root cause description" value={sev.root_cause_description} />
+          <ReadLinkField label="Root cause reference link" href={sev.root_cause_reference_url} />
           <ReadField label="Mitigation" value={sev.mitigation} />
           <ReadField label="Prevention / action items" value={sev.prevention} />
           <div>

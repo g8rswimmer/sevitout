@@ -316,6 +316,10 @@
         "githubRepo": {
           "type": "string",
           "description": "github_repo is the \"owner/repo\" this SEV's code lives in (e.g.\n\"acme-corp/checkout-service\"); pre-fills TaskService.CreateGitHubIssue's\nowner/repo fields in the web UI. Set via UpdateSEV, not at creation."
+        },
+        "rootCauseReferenceUrl": {
+          "type": "string",
+          "description": "root_cause_reference_url links to the concrete change that caused the\nincident — e.g. a PR/commit diff or a config-management change —\nalongside root_cause_category/root_cause_description's classification\nand narrative. Set via UpdateSEV, not at creation."
         }
       }
     },

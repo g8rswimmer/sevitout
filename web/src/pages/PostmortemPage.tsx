@@ -5,6 +5,7 @@ import { ArrowLeft, Lock } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/auth/useAuth'
 import { useSevSocket } from '@/lib/ws'
+import { buildPostmortemTemplate } from '@/lib/postmortemTemplate'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -44,7 +45,7 @@ export function PostmortemPage() {
       setUnlockToken(res.unlock_token)
       setUnlockDialogOpen(false)
       setUnlockError(null)
-      enterEditMode(pendingContent ?? pm.data?.content ?? '')
+      enterEditMode(pendingContent ?? currentOrTemplateContent())
       setPendingContent(null)
     },
     onError: (err) => setUnlockError(err instanceof ApiError ? err.message : 'Failed to unlock'),
@@ -72,13 +73,25 @@ export function PostmortemPage() {
     setEditing(true)
   }
 
+  // The first time anyone opens this postmortem for editing and it's still
+  // blank, seed it with a template built from the SEV's own recorded facts
+  // (summary, lifecycle timestamps/deltas, root cause, business impact,
+  // services, mitigation) instead of a blank page — see
+  // lib/postmortemTemplate.ts. Once real content exists, it's used as-is;
+  // this never overwrites anything a human has written.
+  function currentOrTemplateContent(): string {
+    const content = pm.data?.content
+    if (content && content.trim() !== '') return content
+    return sev.data ? buildPostmortemTemplate(sev.data) : ''
+  }
+
   function handleEditClick() {
     if (sev.data?.locked) {
       setPendingContent(null)
       setUnlockError(null)
       setUnlockDialogOpen(true)
     } else {
-      enterEditMode(pm.data?.content ?? '')
+      enterEditMode(currentOrTemplateContent())
     }
   }
 

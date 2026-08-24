@@ -76,7 +76,7 @@ SEVs use the SEV-1 through SEV-4 taxonomy:
 
 ### 4.2 Incident Details
 
-- **Root cause**: root cause category (e.g., deployment, configuration, hardware, dependency) + free-form description
+- **Root cause**: root cause category (e.g., deployment, configuration, hardware, dependency) + free-form description + an optional reference link to the concrete change that caused it (a PR/commit diff, a config-management change, etc.)
 - **Mitigation**: what actions stopped or reduced the impact
 - **Prevention / Action Items**: what will be done to prevent recurrence (narrative, distinct from linked tasks)
 - **Business impact**: customer-facing description; quantified impact where possible (e.g., % error rate, requests affected, revenue, SLA breach)

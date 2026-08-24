@@ -276,6 +276,19 @@ New shared components: `web/src/components/sev/DetectionFields.tsx` and
 
 ---
 
+## Root cause reference link (third follow-up)
+
+**Details** gained a **Root cause reference link** field (`root_cause_reference_url`,
+migration `000007`) right below root cause description — a URL to the concrete
+change that caused the incident (a PR/commit diff, a config-management change,
+etc.), rendered in read mode as an external link the same way the repository field
+and the three detection links already are. Set via `UpdateSEV` only, same as
+`root_cause_category`/`root_cause_description`/`github_repo` — root cause isn't
+known at creation time. This field also feeds the postmortem's auto-seeded
+"Root Cause" section (see `demo/M14c-postmortem-editor.md`).
+
+---
+
 ## Known limitations
 
 - **No SLI panel.** `docs/requirements.md` §4.3 and this milestone's plan both call

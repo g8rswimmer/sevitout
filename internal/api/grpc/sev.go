@@ -379,6 +379,9 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	if v := req.GetGithubRepo(); v != "" {
 		record.GitHubRepo = &v
 	}
+	if v := req.GetRootCauseReferenceUrl(); v != "" {
+		record.RootCauseReferenceURL = &v
+	}
 	if req.GetRightPeoplePresent() != nil {
 		b := req.GetRightPeoplePresent().GetValue()
 		record.RightPeoplePresent = &b
@@ -659,6 +662,9 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 	}
 	if s.GitHubRepo != nil {
 		resp.GithubRepo = *s.GitHubRepo
+	}
+	if s.RootCauseReferenceURL != nil {
+		resp.RootCauseReferenceUrl = *s.RootCauseReferenceURL
 	}
 	if s.RightPeoplePresent != nil {
 		resp.RightPeoplePresent = wrapperspb.Bool(*s.RightPeoplePresent)
