@@ -218,11 +218,14 @@ func (d *Dispatcher) runTrigger(ctx context.Context, event TriggerEvent, sevID s
 		return
 	}
 	if err := aiEligible(sv); err != nil {
+		d.log.DebugContext(ctx, "ai dispatch: skipped, SEV not eligible", "sev_id", sevID, "event", event, "reason", err)
 		return
 	}
 	// SEV opened only proactively triggers AI for SEV-1/SEV-2 (§11.1); the
 	// other three trigger events apply at any severity.
 	if event == TriggerSEVOpened && sv.SeverityLevel > 2 {
+		d.log.DebugContext(ctx, "ai dispatch: skipped, severity too low for sev.opened trigger",
+			"sev_id", sevID, "severity_level", sv.SeverityLevel)
 		return
 	}
 
@@ -334,7 +337,12 @@ func (d *Dispatcher) StreamOne(ctx context.Context, sevID string, action Action,
 // provider, rate-limit, call the action, persist, and publish. Both the
 // async worker (runTrigger) and the synchronous Run path funnel through it.
 func (d *Dispatcher) run(ctx context.Context, sv *store.SEV, event TriggerEvent, action Action, plugin *store.AIPlugin) (*store.AIOutput, error) {
+	d.log.InfoContext(ctx, "ai dispatch: running action",
+		"sev_id", sv.ID, "event", event, "action", action, "plugin_id", plugin.ID)
+
 	if !d.limiter.Allow(plugin.ID, plugin.RateLimitPerMinute) {
+		d.log.WarnContext(ctx, "ai dispatch: rate limited",
+			"sev_id", sv.ID, "action", action, "plugin_id", plugin.ID)
 		return nil, ErrRateLimited
 	}
 
@@ -365,6 +373,8 @@ func (d *Dispatcher) run(ctx context.Context, sv *store.SEV, event TriggerEvent,
 		return nil, fmt.Errorf("store output: %w", err)
 	}
 
+	d.log.InfoContext(ctx, "ai dispatch: action succeeded",
+		"sev_id", sv.ID, "action", action, "plugin_id", plugin.ID, "output_id", out.ID, "content_len", len(content))
 	d.publish(sv.ID, out)
 	return out, nil
 }

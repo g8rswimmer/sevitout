@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/soheilhy/cmux"
@@ -39,7 +41,17 @@ var openAPISpec []byte
 
 func main() {
 	ctx := context.Background()
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     parseLogLevel(os.Getenv("LOG_LEVEL")),
+	}))
+	// Package-level slog.InfoContext/WarnContext/ErrorContext calls scattered
+	// across internal/api/grpc and internal/auth (rather than a threaded
+	// *slog.Logger field) rely on this to end up in the same structured JSON
+	// stream as everything logged through log itself — without it they'd
+	// fall back to slog's plain-text-to-stderr default and never carry
+	// LOG_LEVEL or AddSource.
+	slog.SetDefault(log)
 
 	sevStore, auditStore, historyStore, userStore, roleStore, serviceStore, postmortemStore,
 		announcementStore, chatStore, sevLinkStore, taskStore, onCallStore, integrationConfigStore,
@@ -127,8 +139,15 @@ func main() {
 	aiServer := grpchandler.NewAIServer(aiDispatcher, aiOutputStore, aiPluginStore)
 
 	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore)),
-		grpc.StreamInterceptor(auth.StreamInterceptor(jwtSigner, userStore)),
+		// auth runs outermost (not logging): it attaches *auth.UserContext to
+		// ctx via a new context.Context value, which only propagates to
+		// interceptors/handlers further in — an interceptor can't see a
+		// context value added by something it calls. Logging needs to run
+		// after auth for its user_id attribution to work, so it's innermost
+		// here; auth.authenticate itself logs its own rejections (Warn) so a
+		// call that never reaches this logging interceptor is still visible.
+		grpc.ChainUnaryInterceptor(auth.UnaryInterceptor(jwtSigner, userStore), grpchandler.LoggingUnaryInterceptor(log)),
+		grpc.ChainStreamInterceptor(auth.StreamInterceptor(jwtSigner, userStore), grpchandler.LoggingStreamInterceptor(log)),
 	)
 	pb.RegisterSEVServiceServer(grpcSrv, sevServer)
 	pb.RegisterAuditServiceServer(grpcSrv, auditServer)
@@ -250,13 +269,21 @@ func main() {
 
 	// --- HTTP mux ---
 	httpMux := http.NewServeMux()
-	passwordHandler.RegisterRoutes(httpMux)                           // POST /auth/register, POST /auth/login
-	httpMux.Handle("/ws", ws.NewHandler(wsHub, jwtSigner, userStore)) // WebSocket subscriptions
-	httpMux.Handle("/admin/integrations/health", integrationsHealthHandler)
+	// passwordHandler, gwMux (the gRPC-gateway) and the WebSocket upgrade all
+	// have their own request-scoped logging already: passwordHandler logs
+	// login/register outcomes directly (internal/auth/password.go), and
+	// every gwMux-proxied call is a real loopback gRPC call that passes
+	// through grpchandler.LoggingUnaryInterceptor above. The three plain
+	// http.Handlers below have neither, so they're wrapped individually
+	// rather than logging the whole mux (which would double-log every
+	// gateway request).
+	passwordHandler.RegisterRoutes(httpMux)                                                         // POST /auth/register, POST /auth/login
+	httpMux.Handle("/ws", loggingMiddleware(log, "ws", ws.NewHandler(wsHub, jwtSigner, userStore))) // WebSocket subscriptions
+	httpMux.Handle("/admin/integrations/health", loggingMiddleware(log, "integrations-health", integrationsHealthHandler))
 	// GET /s/{token}: public shareable-link view (§14.1) — no auth, so it
 	// can't be a gRPC/grpc-gateway route (see share.proto's doc comment).
 	// Go's ServeMux prefers this more specific pattern over "/" below.
-	httpMux.Handle("/s/{token}", grpchandler.NewShareViewHandler(shareStore, sevStore, announcementStore, shareSigner))
+	httpMux.Handle("/s/{token}", loggingMiddleware(log, "share-view", grpchandler.NewShareViewHandler(shareStore, sevStore, announcementStore, shareSigner)))
 	httpMux.Handle("/", gwMux) // gRPC-gateway routes
 	httpMux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -422,4 +449,51 @@ func (slackHealthChecker) Check(ctx context.Context, credentials map[string]stri
 		return fmt.Errorf("slack: no bot_token configured")
 	}
 	return slack.NewClient(token).Ping(ctx)
+}
+
+// parseLogLevel maps LOG_LEVEL's value ("debug", "info", "warn"/"warning",
+// "error", case-insensitive) to a slog.Level, defaulting to Info for an
+// empty or unrecognized value so a typo degrades gracefully instead of
+// silencing every log line.
+func parseLogLevel(v string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// loggingMiddleware wraps next with a request-level access log — method,
+// path, resulting status code, and duration — tagged with name so the three
+// plain http.Handlers that sit outside the gRPC server (WebSocket upgrades,
+// the integration health check, and the public share view) get the same
+// visibility grpchandler.LoggingUnaryInterceptor gives every gRPC/REST call.
+func loggingMiddleware(log *slog.Logger, name string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		log.InfoContext(r.Context(), "http request",
+			"handler", name, "method", r.Method, "path", r.URL.Path,
+			"status", sw.status, "duration_ms", time.Since(start).Milliseconds())
+	})
+}
+
+// statusWriter captures the status code passed to WriteHeader so
+// loggingMiddleware can log it — http.ResponseWriter doesn't expose it
+// directly, and a handler that never calls WriteHeader explicitly (the
+// common case for a 200) gets the http.StatusOK default set above.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
 }

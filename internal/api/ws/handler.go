@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -83,30 +84,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := h.signer.Validate(token)
 	if err != nil {
+		slog.WarnContext(r.Context(), "websocket connection rejected: invalid token", "err", err)
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 	user, err := h.users.Get(r.Context(), claims.Subject)
 	if err != nil || !user.Active {
+		slog.WarnContext(r.Context(), "websocket connection rejected: unknown or inactive user", "user_id", claims.Subject)
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 	if !auth.HasPermission(user.OrgRole, wsSubscribeMethod) {
+		slog.WarnContext(r.Context(), "websocket connection rejected: insufficient permissions", "user_id", user.ID, "org_role", string(user.OrgRole))
 		http.Error(w, "insufficient permissions", http.StatusForbidden)
 		return
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		slog.WarnContext(r.Context(), "websocket upgrade failed", "user_id", user.ID, "err", err)
 		return
 	}
 
 	client := h.hub.NewClient()
-	for _, sevID := range r.URL.Query()["sev_id"] {
+	sevIDs := r.URL.Query()["sev_id"]
+	for _, sevID := range sevIDs {
 		if sevID != "" {
 			h.hub.Subscribe(client, sevID)
 		}
 	}
+	slog.InfoContext(r.Context(), "websocket connected", "user_id", user.ID, "sev_ids", sevIDs)
 
 	writeDone := make(chan struct{})
 	go func() {
@@ -119,6 +126,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = conn.Close()
 	h.hub.Close(client)
 	<-writeDone
+	slog.InfoContext(r.Context(), "websocket disconnected", "user_id", user.ID)
 }
 
 // writePump delivers queued events to conn, interleaved with periodic pings
@@ -169,6 +177,7 @@ func readPump(conn *websocket.Conn, hub *Hub, client *Client) {
 		}
 		var msg controlMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
+			slog.Debug("websocket control frame ignored: malformed", "err", err)
 			continue
 		}
 		if msg.SEVID == "" {

@@ -5,6 +5,7 @@ package ws
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync"
 )
 
@@ -46,11 +47,15 @@ func (c *Client) Events() <-chan Event {
 }
 
 // send enqueues evt for delivery, dropping it if the client's buffer is full
-// rather than blocking the publisher.
+// rather than blocking the publisher. A drop means that client missed a
+// real-time update — logged at Warn since it's silent otherwise and is
+// exactly the kind of thing "why didn't my SEV page update live" debugging
+// needs to rule in or out.
 func (c *Client) enqueue(evt Event) {
 	select {
 	case c.send <- evt:
 	default:
+		slog.Warn("websocket event dropped: client buffer full", "sev_id", evt.SEVID, "type", evt.Type)
 	}
 }
 
@@ -132,16 +137,19 @@ func (h *Hub) Publish(sevID, eventType string, payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	evt := Event{Type: eventType, SEVID: sevID, Payload: payload}
+	delivered := 0
 	for c := range h.rooms[sevID] {
 		c.enqueue(evt)
+		delivered++
 	}
-	if sevID == BroadcastRoom {
-		return
-	}
-	for c := range h.rooms[BroadcastRoom] {
-		if _, dup := h.rooms[sevID][c]; dup {
-			continue
+	if sevID != BroadcastRoom {
+		for c := range h.rooms[BroadcastRoom] {
+			if _, dup := h.rooms[sevID][c]; dup {
+				continue
+			}
+			c.enqueue(evt)
+			delivered++
 		}
-		c.enqueue(evt)
 	}
+	slog.Debug("websocket event published", "sev_id", sevID, "type", eventType, "subscribers", delivered)
 }

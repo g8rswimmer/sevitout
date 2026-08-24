@@ -39,6 +39,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       PAGERDUTY_API_KEY: ${PAGERDUTY_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       migrate:
         condition: service_completed_successfully
