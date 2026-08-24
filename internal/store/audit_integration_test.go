@@ -78,14 +78,26 @@ func TestAuditWriterRole(t *testing.T) {
 	}
 	defer auditConn.Close(ctx)
 
-	// INSERT should succeed.
+	// INSERT should succeed. Deliberately not using RETURNING here: it
+	// requires SELECT privilege on the table in addition to INSERT, which
+	// audit_writer must not have (INSERT-only is the whole point of this
+	// role) — granting it just to make RETURNING work would defeat the
+	// test. Read the new row back over the superuser connection instead.
+	_, err = auditConn.Exec(ctx,
+		`INSERT INTO audit_log (sev_id, user_id, action) VALUES ($1, 'audit_writer_test', 'test')`,
+		sevID,
+	)
+	if err != nil {
+		t.Fatalf("audit_writer INSERT failed (want success): %v", err)
+	}
+
 	var auditID int64
-	err = auditConn.QueryRow(ctx,
-		`INSERT INTO audit_log (sev_id, user_id, action) VALUES ($1, 'audit_writer_test', 'test') RETURNING id`,
+	err = superConn.QueryRow(ctx,
+		`SELECT id FROM audit_log WHERE sev_id = $1 AND user_id = 'audit_writer_test' ORDER BY id DESC LIMIT 1`,
 		sevID,
 	).Scan(&auditID)
 	if err != nil {
-		t.Fatalf("audit_writer INSERT failed (want success): %v", err)
+		t.Fatalf("fetch inserted audit_log id: %v", err)
 	}
 
 	// UPDATE must be denied.
