@@ -16,6 +16,7 @@ import { AnnouncementsPanel } from '@/components/sev/AnnouncementsPanel'
 import { ChatLogPanel } from '@/components/sev/ChatLogPanel'
 import { TasksPanel } from '@/components/sev/TasksPanel'
 import { LinkedSevsPanel } from '@/components/sev/LinkedSevsPanel'
+import { ShareLinkControl } from '@/components/sev/ShareLinkControl'
 import { hasRole } from '@/types/api'
 
 export function SevDetailPage() {
@@ -71,9 +72,12 @@ export function SevDetailPage() {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="text-2xl font-semibold">{record.title}</h1>
-          <Link to={`/sevs/${sevId}/postmortem`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-            <FileText className="h-3.5 w-3.5" /> Postmortem
-          </Link>
+          <div className="flex gap-2">
+            <ShareLinkControl sevId={sevId} canShare={canCommand && !record.sensitive} />
+            <Link to={`/sevs/${sevId}/postmortem`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              <FileText className="h-3.5 w-3.5" /> Postmortem
+            </Link>
+          </div>
         </div>
         <StatusTransitionControl sev={record} canTransition={canCommand} />
       </div>

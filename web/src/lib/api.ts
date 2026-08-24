@@ -10,9 +10,11 @@ import type {
   CreateOnCallRotationRequest,
   CreateSEVRequest,
   CreateServiceRequest,
+  CreateShareLinkRequest,
   DashboardMetricsResponse,
   AddChatEntryRequest,
   AIOutputResponse,
+  ExportSEVsParams,
   IntegrationConfigResponse,
   IntegrationsHealthResponse,
   LinkSEVsRequest,
@@ -38,9 +40,12 @@ import type {
   SEVLinkResponse,
   SEVResponse,
   SEVRoleResponse,
+  SEVTrendsResponse,
   SearchSEVsParams,
   SearchSEVsResponse,
   ServiceResponse,
+  ShareLinkResponse,
+  SharedSEVResponse,
   TaskResponse,
   TransitionPostmortemStatusRequest,
   TransitionStatusRequest,
@@ -181,6 +186,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+/** Like `request`, but for the two endpoints whose response body isn't
+ * JSON: `GET /v1/sevs/export.csv` (raw text/csv, via ExportSEVs'
+ * google.api.HttpBody) and `GET /s/{token}` (JSON on success, but its
+ * errors — internal/api/grpc.ShareViewHandler is a plain net/http handler,
+ * not gRPC-gateway — are plain text via the stdlib's http.Error, not the
+ * {"message"|"error": ...} shapes `request`'s error handling expects).
+ * Attaching a bearer token is harmless even for the unauthenticated share
+ * view — that handler never reads it — so this always behaves like
+ * `request` on that front for one code path instead of two. */
+async function requestText(path: string, init?: RequestInit): Promise<string> {
+  const token = tokenStorage.get()
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers })
+
+  if (res.status === 401) {
+    onUnauthorized?.()
+  }
+
+  const text = await res.text()
+  if (!res.ok) {
+    throw new ApiError(res.status, text || res.statusText)
+  }
+  return text
+}
+
 function buildQuery(params: object): string {
   const qs = new URLSearchParams()
   for (const [key, value] of Object.entries(params) as [string, unknown][]) {
@@ -227,6 +259,21 @@ export const api = {
   reports: {
     dashboardMetrics: () =>
       request<DashboardMetricsResponse>('/v1/reports/dashboard'),
+    trends: () => request<SEVTrendsResponse>('/v1/reports/trends'),
+    // Returns raw CSV text (not JSON) — pass straight to
+    // lib/download.ts's downloadTextFile.
+    exportCSV: (params: ExportSEVsParams = {}) => requestText(`/v1/sevs/export.csv${buildQuery(params)}`),
+  },
+  shares: {
+    create: (sevId: string, req: CreateShareLinkRequest = {}) =>
+      request<ShareLinkResponse>(`/v1/sevs/${sevId}/share`, { method: 'POST', body: JSON.stringify(req) }),
+    revoke: (sevId: string, token: string) =>
+      request<void>(`/v1/sevs/${sevId}/share/${token}`, { method: 'DELETE' }),
+  },
+  // The public, unauthenticated share view (GET /s/{token}) — see
+  // requestText's doc comment for why this doesn't use `request`.
+  shareView: {
+    get: async (token: string): Promise<SharedSEVResponse> => JSON.parse(await requestText(`/s/${token}`)) as SharedSEVResponse,
   },
   roles: {
     list: (sevId: string) => request<ListRolesResponse>(`/v1/sevs/${sevId}/roles`),

@@ -870,3 +870,77 @@ export interface UpdateAIPluginRequest {
   trigger_on_postmortem_review?: boolean
   rate_limit_per_minute?: number
 }
+
+// --- Reporting & trends (ReportService, §17) ------------------------------
+
+export interface RecurringPattern {
+  service_id: string
+  root_cause_category: string
+  count: number
+  // sev_ids is sorted most-recently-created first.
+  sev_ids?: string[]
+}
+
+export interface SEVTrendsResponse {
+  recurring_patterns?: RecurringPattern[]
+}
+
+export interface ExportSEVsParams {
+  severity_levels?: number[]
+  statuses?: string[]
+  service_ids?: string[]
+  root_cause_category?: string
+  started_after?: string
+  started_before?: string
+}
+
+// --- Public shareable links (ShareService, §14.1) -------------------------
+
+export interface ShareLinkResponse {
+  id: string
+  sev_id: string
+  token: string
+  // path is the public view's URL path on this server, e.g. "/s/<token>" —
+  // the backend computes it so the frontend never has to know the route
+  // shape itself.
+  path: string
+  expires_at?: string
+  revoked?: boolean
+  created_by?: string
+  created_at: string
+}
+
+export interface CreateShareLinkRequest {
+  // expires_in_days: how many days from now the link stays valid. Defaults
+  // to 30 server-side when unset or <= 0.
+  expires_in_days?: number
+}
+
+// --- Public share view (GET /s/{token} — a plain net/http handler, not
+// gRPC/grpc-gateway, so this shape is hand-rolled Go JSON via
+// encoding/json, not protojson: no int64-as-string quirk (severity_level is
+// a plain number) and no zero-value omission beyond normal `omitempty` tags
+// — see internal/api/grpc/share_view.go's sharedSEVResponse.) -------------
+
+export interface SharedAnnouncement {
+  message: string
+  created_at: string
+}
+
+/** The curated, public-safe view of a SEV — only what
+ * docs/requirements.md §14.1 lists (title, severity, status, lifecycle
+ * timestamps, `external`-audience announcements, business impact); nothing
+ * else from the SEV record is present, not just hidden by a zero value. */
+export interface SharedSEVResponse {
+  id: string
+  title: string
+  severity_level: number
+  status: SEVStatus
+  started_at?: string
+  detected_at?: string
+  mitigated_at?: string
+  resolved_at?: string
+  postmortem_completed_at?: string
+  business_impact?: string
+  announcements: SharedAnnouncement[]
+}

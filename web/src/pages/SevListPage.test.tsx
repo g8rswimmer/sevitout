@@ -82,4 +82,38 @@ describe('SevListPage', () => {
       expect(called).toBe(true)
     })
   })
+
+  it('exports the current severity/status filters as a downloaded CSV', async () => {
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = String(input)
+      if (url.startsWith('/v1/config/services')) return Promise.resolve(jsonResponse({}))
+      if (url.startsWith('/v1/sevs/export.csv')) {
+        expect(url).toContain('severity_levels=1')
+        return Promise.resolve(new Response('id,title\nSEV-2026-0001,Database outage', { status: 200 }))
+      }
+      return Promise.resolve(jsonResponse(RESULTS))
+    })
+
+    renderWithProviders(<SevListPage />)
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+
+    let anchor: HTMLAnchorElement | undefined
+    const createElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const el = createElement(tag)
+      if (tag === 'a') anchor = el as HTMLAnchorElement
+      return el
+    })
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:mock-url'), revokeObjectURL: vi.fn() })
+    const originalClick = HTMLAnchorElement.prototype.click
+    HTMLAnchorElement.prototype.click = vi.fn<() => void>()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('checkbox', { name: 'SEV-1' }))
+    await user.click(screen.getByRole('button', { name: /export csv/i }))
+
+    await waitFor(() => expect(anchor?.download).toBe('sevs-export.csv'))
+
+    HTMLAnchorElement.prototype.click = originalClick
+  })
 })

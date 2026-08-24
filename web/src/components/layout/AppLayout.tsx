@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ListChecks, LogOut, Settings, Siren } from 'lucide-react'
+import { BarChart3, LayoutDashboard, ListChecks, LogOut, Settings, Siren } from 'lucide-react'
 import { useAuth } from '@/auth/useAuth'
 import { Button } from '@/components/ui/button'
 import { hasRole, ORG_ROLE_LABELS } from '@/types/api'
@@ -7,6 +7,7 @@ import { hasRole, ORG_ROLE_LABELS } from '@/types/api'
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/sevs', label: 'SEVs', icon: ListChecks },
+  { to: '/reports', label: 'Reports', icon: BarChart3 },
 ]
 
 function isActive(pathname: string, to: string): boolean {

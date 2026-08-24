@@ -256,4 +256,31 @@ describe('SevDetailPage', () => {
     expect(screen.getByRole('button', { name: 'Mitigated' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument()
   })
+
+  it('does not offer Share to a Responder (Incident-Commander-only)', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor(SEV, me('responder'))
+    renderDetailPage()
+
+    await screen.findByRole('heading', { name: 'Database outage' })
+    expect(screen.queryByRole('button', { name: /^share$/i })).not.toBeInTheDocument()
+  })
+
+  it('offers Share to an Incident Commander, but not for a Sensitive SEV', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor(SEV, me('incident-commander'))
+    renderDetailPage()
+
+    await screen.findByRole('heading', { name: 'Database outage' })
+    expect(screen.getByRole('button', { name: /^share$/i })).toBeInTheDocument()
+  })
+
+  it('hides Share even for an Incident Commander on a Sensitive SEV', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor({ ...SEV, sensitive: true }, me('incident-commander'))
+    renderDetailPage()
+
+    await screen.findByRole('heading', { name: 'Database outage' })
+    expect(screen.queryByRole('button', { name: /^share$/i })).not.toBeInTheDocument()
+  })
 })

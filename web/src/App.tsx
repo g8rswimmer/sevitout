@@ -8,6 +8,8 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { SevListPage } from '@/pages/SevListPage'
 import { SevCreatePage } from '@/pages/SevCreatePage'
 import { SevDetailPage } from '@/pages/SevDetailPage'
+import { ReportsPage } from '@/pages/ReportsPage'
+import { PublicSharePage } from '@/pages/PublicSharePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
 // Lazy-loaded: TipTap + ProseMirror (the postmortem editor's dependencies)
@@ -25,6 +27,14 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      {/* Public, unauthenticated shareable-link view (§14.1) — deliberately
+          outside ProtectedRoute/AppLayout, the one page in this app anyone
+          can open without a session. Shares its exact URL path with the
+          backend's own GET /s/{token} JSON endpoint — see nginx.conf's and
+          vite.config.ts's matching /s/ proxy config for how a browser's
+          navigation here reaches this SPA route while api.shareView.get's
+          own fetch() call to the same URL still reaches the real API. */}
+      <Route path="/s/:token" element={<PublicSharePage />} />
 
       <Route
         element={
@@ -34,6 +44,7 @@ export function App() {
         }
       >
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/reports" element={<ReportsPage />} />
         <Route path="/sevs" element={<SevListPage />} />
         <Route
           path="/sevs/new"

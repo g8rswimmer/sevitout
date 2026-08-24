@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { ArrowDownAZ, ArrowUpAZ, Plus, Search } from 'lucide-react'
-import { api } from '@/lib/api'
+import { ArrowDownAZ, ArrowUpAZ, Download, Plus, Search } from 'lucide-react'
+import { api, ApiError } from '@/lib/api'
+import { downloadTextFile } from '@/lib/download'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -45,6 +46,8 @@ export function SevListPage() {
   const [sort, setSort] = useState<SEVSortField>('started_at')
   const [sortDesc, setSortDesc] = useState(true)
   const [offset, setOffset] = useState(0)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const results = useQuery({
     queryKey: ['search', 'sevs', { query, quickView, severityLevels, statuses, sort, sortDesc, offset }],
@@ -76,6 +79,28 @@ export function SevListPage() {
     setQuickView(qv)
   }
 
+  // Exports whatever severity/status filters are currently active on this
+  // page (quick views map to statuses server-side already, so quick_view
+  // itself isn't passed — ExportSEVsRequest has no quick_view concept).
+  // service_ids/root_cause_category/date range aren't filterable from this
+  // page yet, so they're left unset — ExportSEVs then just exports every
+  // SEV, filtered only by whatever the two lists below narrow it to.
+  async function handleExportCSV() {
+    setExporting(true)
+    setExportError(null)
+    try {
+      const csv = await api.reports.exportCSV({
+        severity_levels: severityLevels.length ? severityLevels : undefined,
+        statuses: !quickView && statuses.length ? statuses : undefined,
+      })
+      downloadTextFile('sevs-export.csv', csv, 'text/csv')
+    } catch (err) {
+      setExportError(err instanceof ApiError ? err.message : 'Failed to export CSV')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const sevs = results.data?.sevs ?? []
   const total = results.data?.total ?? 0
 
@@ -83,13 +108,24 @@ export function SevListPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">SEVs</h1>
-        <Link to="/sevs/new" className="inline-flex">
-          <Button>
-            <Plus className="h-4 w-4" aria-hidden />
-            New SEV
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExportCSV} disabled={exporting}>
+            <Download className="h-4 w-4" aria-hidden />
+            {exporting ? 'Exporting…' : 'Export CSV'}
           </Button>
-        </Link>
+          <Link to="/sevs/new" className="inline-flex">
+            <Button>
+              <Plus className="h-4 w-4" aria-hidden />
+              New SEV
+            </Button>
+          </Link>
+        </div>
       </div>
+      {exportError && (
+        <p role="alert" className="text-sm text-destructive">
+          {exportError}
+        </p>
+      )}
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside className="flex shrink-0 flex-col gap-5 lg:w-56">

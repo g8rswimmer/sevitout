@@ -26,7 +26,19 @@ export default defineConfig({
       // (Vite's proxy match is a plain string-prefix test, not path-segment
       // aware) — every request under /sevs would silently 404 against the
       // API instead of falling through to index.html for React Router.
-      '/s/': 'http://localhost:8080',
+      //
+      // Content-negotiated like nginx.conf's matching /s/ block (see its
+      // comment for the full rationale): a browser's initial navigation to
+      // a share link sends Accept: text/html, so `bypass` hands it
+      // index.html instead of proxying — PublicSharePage then mounts and
+      // fetches this same URL itself (default Accept: */*), which isn't
+      // bypassed and reaches the real backend.
+      '/s/': {
+        target: 'http://localhost:8080',
+        bypass(req) {
+          if (req.headers.accept?.includes('text/html')) return '/index.html'
+        },
+      },
       '/ws': { target: 'ws://localhost:8080', ws: true },
       '/openapi.json': 'http://localhost:8080',
     },
