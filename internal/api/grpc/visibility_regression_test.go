@@ -97,6 +97,13 @@ func TestSensitiveSEVSubResourcesHiddenFromCallerWithoutAccess(t *testing.T) {
 		t.Fatalf("seed sev link: %v", err)
 	}
 
+	audit := memory.NewAuditStore()
+	if err := audit.Append(context.Background(), &store.AuditEntry{
+		SEVID: sevID, UserID: "user-admin", Action: "sev.created", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed audit entry: %v", err)
+	}
+
 	viewerCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-outsider", OrgRole: store.OrgRoleViewer})
 
 	cases := []struct {
@@ -155,6 +162,14 @@ func TestSensitiveSEVSubResourcesHiddenFromCallerWithoutAccess(t *testing.T) {
 			call: func(ctx context.Context) error {
 				s := grpchandler.NewSEVLinkServer(links, sevs, access, memory.NewAuditStore())
 				_, err := s.ListLinkedSEVs(ctx, &pb.ListLinkedSEVsRequest{SevId: sevID})
+				return err
+			},
+		},
+		{
+			name: "AuditService.ListAuditEntries",
+			call: func(ctx context.Context) error {
+				s := grpchandler.NewAuditServer(audit, sevs, access)
+				_, err := s.ListAuditEntries(ctx, &pb.ListAuditEntriesRequest{SevId: sevID})
 				return err
 			},
 		},

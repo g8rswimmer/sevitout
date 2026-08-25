@@ -143,7 +143,7 @@ func main() {
 		Audit:  stores.Audit,
 		Signer: shareSigner,
 	})
-	auditServer := grpchandler.NewAuditServer(stores.Audit)
+	auditServer := grpchandler.NewAuditServer(stores.Audit, stores.SEV, stores.SEVAccess)
 	authServer := grpchandler.NewAuthServer(stores.User)
 	roleServer := grpchandler.NewRoleServer(grpchandler.RoleServerParams{
 		Roles: stores.Role, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit, Publisher: wsHub,
