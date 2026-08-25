@@ -15,7 +15,7 @@ All three services are protected by the existing JWT auth interceptors and use t
 ## Prerequisites
 
 - M05 complete (auth, SEV lifecycle, postmortem all working)
-- Required env vars: `JWT_SECRET` (optional — default used if absent)
+- Required env vars: `JWT_SECRET` — or set `ALLOW_INSECURE_JWT_SECRET=true` to run with the insecure dev default instead; the server now refuses to start with neither set
 - `curl` and `jq` installed
 
 ---
@@ -29,7 +29,7 @@ make up
 Or for local development without Docker:
 
 ```bash
-go run ./cmd/server
+ALLOW_INSECURE_JWT_SECRET=true go run ./cmd/server
 ```
 
 ---

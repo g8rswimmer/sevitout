@@ -72,9 +72,19 @@ func main() {
 	}
 
 	// --- JWT signer ---
+	// A fixed, source-visible signing secret would let anyone forge a valid
+	// session/unlock/share-link token, so this refuses to start rather than
+	// silently falling back to one. ALLOW_INSECURE_JWT_SECRET=true is the
+	// explicit, deliberate opt-in for local dev/CI convenience — the choice
+	// to run insecurely has to be made by whoever starts the process, not
+	// defaulted to by whoever forgets to set JWT_SECRET.
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		log.Warn("JWT_SECRET not set — using insecure default (change before deploying)")
+		if os.Getenv("ALLOW_INSECURE_JWT_SECRET") != "true" {
+			log.Error("JWT_SECRET not set — refusing to start with a fixed signing secret. Set JWT_SECRET, or set ALLOW_INSECURE_JWT_SECRET=true to accept the insecure dev default")
+			os.Exit(1)
+		}
+		log.Warn("JWT_SECRET not set — using insecure default (ALLOW_INSECURE_JWT_SECRET=true was set)")
 		jwtSecret = "insecure-default-secret-change-before-deploying"
 	}
 	jwtTTLHours := 24

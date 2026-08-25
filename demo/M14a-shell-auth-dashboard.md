@@ -57,8 +57,8 @@ authentication, and the dashboard page, in a new `web/` Vite project.
 - M02 (SEV API), M03 (auth), M13 (`ReportService`) complete — this demo creates a SEV
   and reads it back through `GetDashboardMetrics`
 - Node.js 22+ and `npm` (for running the frontend outside Docker)
-- `JWT_SECRET` set in `.env` (or accept the insecure dev default the server logs a
-  warning about)
+- `JWT_SECRET` set in `.env` — or `ALLOW_INSECURE_JWT_SECRET=true` to explicitly opt
+  into the insecure dev default; the server now refuses to start with neither set
 
 ---
 
