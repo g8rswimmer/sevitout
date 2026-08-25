@@ -142,7 +142,7 @@ func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb
 		return nil, status.Error(codes.Internal, "failed to create linked task")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "task.linked",
@@ -190,7 +190,7 @@ func (s *TaskServer) UnlinkTask(ctx context.Context, req *pb.UnlinkTaskRequest) 
 		return nil, status.Error(codes.Internal, "failed to delete task")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "task.unlinked",
@@ -243,7 +243,7 @@ func (s *TaskServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*
 			if err == nil {
 				if applied {
 					t.DueDate = computed
-					_ = s.audit.Append(ctx, &store.AuditEntry{
+					auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 						SEVID:     req.GetSevId(),
 						UserID:    callerID,
 						Action:    "task.due_date_backfilled",
@@ -297,7 +297,7 @@ func (s *TaskServer) UpdateTaskDueDate(ctx context.Context, req *pb.UpdateTaskDu
 		return nil, status.Error(codes.Internal, "failed to update task")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "task.due_date_updated",
@@ -393,7 +393,7 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 			"GitHub issue %s was created but could not be linked to the SEV: %v", issue.URL, err)
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "task.github_issue_created",

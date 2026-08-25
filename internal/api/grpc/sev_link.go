@@ -84,7 +84,7 @@ func (s *SEVLinkServer) LinkSEVs(ctx context.Context, req *pb.LinkSEVsRequest) (
 		return nil, status.Error(codes.Internal, "failed to create link")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSourceSevId(),
 		UserID:    callerID,
 		Action:    "sev.linked",
@@ -133,7 +133,7 @@ func (s *SEVLinkServer) UnlinkSEVs(ctx context.Context, req *pb.UnlinkSEVsReques
 		return nil, status.Error(codes.Internal, "failed to delete link")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSourceSevId(),
 		UserID:    callerID,
 		Action:    "sev.unlinked",
