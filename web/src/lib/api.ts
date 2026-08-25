@@ -15,10 +15,12 @@ import type {
   AddChatEntryRequest,
   AIOutputResponse,
   ExportSEVsParams,
+  GrantAccessRequest,
   IntegrationConfigResponse,
   IntegrationsHealthResponse,
   LinkSEVsRequest,
   LinkTaskRequest,
+  ListAccessResponse,
   ListAIOutputsResponse,
   ListAIPluginsResponse,
   ListAnnouncementsResponse,
@@ -37,6 +39,7 @@ import type {
   OnCallRotationResponse,
   PostmortemResponse,
   RetentionConfigResponse,
+  SEVAccessResponse,
   SEVLinkResponse,
   SEVResponse,
   SEVRoleResponse,
@@ -281,6 +284,16 @@ export const api = {
       request<SEVRoleResponse>(`/v1/sevs/${sevId}/roles`, { method: 'POST', body: JSON.stringify(req) }),
     remove: (sevId: string, id: string) =>
       request<void>(`/v1/sevs/${sevId}/roles/${id}`, { method: 'DELETE' }),
+  },
+  // Explicit per-user visibility grants for Sensitive SEVs (§14). Grant/revoke
+  // require Incident Commander or Admin server-side; list is open to anyone
+  // who can already see the SEV (internal/auth/rbac.go).
+  sevAccess: {
+    list: (sevId: string) => request<ListAccessResponse>(`/v1/sevs/${sevId}/access`),
+    grant: (sevId: string, req: GrantAccessRequest) =>
+      request<SEVAccessResponse>(`/v1/sevs/${sevId}/access`, { method: 'POST', body: JSON.stringify(req) }),
+    revoke: (sevId: string, id: string) =>
+      request<void>(`/v1/sevs/${sevId}/access/${id}`, { method: 'DELETE' }),
   },
   announcements: {
     list: (sevId: string) => request<ListAnnouncementsResponse>(`/v1/sevs/${sevId}/announcements`),

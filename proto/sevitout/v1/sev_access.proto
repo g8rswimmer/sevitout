@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// SEVAccessService manages explicit per-user visibility grants for SEVs
+// flagged Sensitive (docs/requirements.md §14: "only explicitly added users
+// can view"). Only Sensitive SEVs consult these grants at all.
+service SEVAccessService {
+  rpc GrantAccess(GrantAccessRequest) returns (SEVAccessResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/access"
+      body: "*"
+    };
+  }
+  rpc RevokeAccess(RevokeAccessRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/sevs/{sev_id}/access/{id}"
+    };
+  }
+  rpc ListAccess(ListAccessRequest) returns (ListAccessResponse) {
+    option (google.api.http) = {
+      get: "/v1/sevs/{sev_id}/access"
+    };
+  }
+}
+
+message SEVAccessResponse {
+  int64 id = 1;
+  string sev_id = 2;
+  string user_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+  string created_by = 5;
+}
+
+message GrantAccessRequest {
+  string sev_id = 1;
+  string user_id = 2;
+}
+
+message RevokeAccessRequest {
+  string sev_id = 1;
+  int64 id = 2;
+}
+
+message ListAccessRequest {
+  string sev_id = 1;
+}
+
+message ListAccessResponse {
+  repeated SEVAccessResponse access = 1;
+}

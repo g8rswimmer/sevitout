@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { EyeOff, FileText, Lock } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { useSevSocket } from '@/lib/ws'
 import { useAuth } from '@/auth/useAuth'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -12,6 +12,7 @@ import { StatusTransitionControl } from '@/components/sev/StatusTransitionContro
 import { LifecyclePanel } from '@/components/sev/LifecyclePanel'
 import { DetailsPanel } from '@/components/sev/DetailsPanel'
 import { RolesPanel } from '@/components/sev/RolesPanel'
+import { AllowedViewersPanel } from '@/components/sev/AllowedViewersPanel'
 import { AnnouncementsPanel } from '@/components/sev/AnnouncementsPanel'
 import { ChatLogPanel } from '@/components/sev/ChatLogPanel'
 import { TasksPanel } from '@/components/sev/TasksPanel'
@@ -42,9 +43,15 @@ export function SevDetailPage() {
   }
 
   if (sev.isError) {
+    // A 404 here is deliberately ambiguous — it's also what a caller sees
+    // when a Sensitive SEV exists but they haven't been explicitly granted
+    // access (§14), so this doesn't confirm or deny which case it is.
+    const notFound = sev.error instanceof ApiError && sev.error.status === 404
     return (
       <p role="alert" className="text-sm text-destructive">
-        Failed to load SEV: {(sev.error as Error).message}
+        {notFound
+          ? "This SEV doesn't exist or you don't have access to view it."
+          : `Failed to load SEV: ${(sev.error as Error).message}`}
       </p>
     )
   }
@@ -85,6 +92,7 @@ export function SevDetailPage() {
       <DetailsPanel sev={record} canEdit={canEditDetails} />
       <LifecyclePanel sev={record} canEdit={canEditDetails} />
       <RolesPanel sevId={sevId} canManage={canCommand} />
+      {record.sensitive && <AllowedViewersPanel sevId={sevId} canManage={canCommand} />}
       <AnnouncementsPanel sevId={sevId} canPost={canRespond} />
       <ChatLogPanel sevId={sevId} canAdd={canRespond} />
       <TasksPanel sevId={sevId} canManage={canRespond} defaultRepo={record.github_repo} />

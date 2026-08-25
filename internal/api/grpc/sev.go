@@ -42,6 +42,7 @@ type SEVServer struct {
 	services    store.ServiceStore
 	postmortems store.PostmortemStore
 	links       store.SEVLinkStore
+	access      store.SEVAccessStore
 	onCaller    OnCaller // nil when PagerDuty is not configured
 	unlock      Unlocker
 	publisher   Publisher    // nil when WebSocket support is not wired up
@@ -60,6 +61,7 @@ type SEVServerParams struct {
 	Services    store.ServiceStore
 	Postmortems store.PostmortemStore
 	Links       store.SEVLinkStore
+	Access      store.SEVAccessStore
 	OnCaller    OnCaller
 	Unlock      Unlocker
 	Publisher   Publisher
@@ -75,6 +77,7 @@ func NewSEVServer(p SEVServerParams) *SEVServer {
 		services:    p.Services,
 		postmortems: p.Postmortems,
 		links:       p.Links,
+		access:      p.Access,
 		onCaller:    p.OnCaller,
 		unlock:      p.Unlock,
 		publisher:   p.Publisher,
@@ -236,6 +239,18 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		return nil, status.Error(codes.Internal, "failed to create SEV")
 	}
 
+	// Auto-grant the creator visibility into their own Sensitive SEV (§14) —
+	// without this, the reporter would immediately lose the ability to view
+	// what they just filed. Best-effort: never blocks or fails the response,
+	// matching the on-call auto-population pattern below.
+	if record.Sensitive {
+		if err := s.access.Grant(ctx, &store.SEVAccess{
+			SEVID: record.ID, UserID: callerID, CreatedAt: now, CreatedBy: callerID,
+		}); err != nil {
+			slog.ErrorContext(ctx, "auto-grant creator access failed", "sev_id", record.ID, "err", err)
+		}
+	}
+
 	_ = s.audit.Append(ctx, &store.AuditEntry{
 		SEVID:     record.ID,
 		UserID:    callerID,
@@ -305,6 +320,13 @@ func (s *SEVServer) GetSEV(ctx context.Context, req *pb.GetSEVRequest) (*pb.SEVR
 		}
 		return nil, status.Error(codes.Internal, "failed to get SEV")
 	}
+	visible, err := sensitiveSEVVisible(ctx, s.access, record)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+	}
+	if !visible {
+		return nil, status.Error(codes.NotFound, "SEV not found")
+	}
 	return sevToProto(record), nil
 }
 
@@ -319,6 +341,13 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
 		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+	visible, err := sensitiveSEVVisible(ctx, s.access, record)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+	}
+	if !visible {
+		return nil, status.Error(codes.NotFound, "SEV not found")
 	}
 
 	if record.Locked {
@@ -406,8 +435,13 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		t := req.GetDetectedAt().AsTime()
 		record.DetectedAt = &t
 	}
+	sensitiveFlipped := false
 	if req.GetSensitive() != nil {
-		record.Sensitive = req.GetSensitive().GetValue()
+		newVal := req.GetSensitive().GetValue()
+		if newVal && !record.Sensitive {
+			sensitiveFlipped = true
+		}
+		record.Sensitive = newVal
 	}
 	if req.GetAiDisabled() != nil {
 		record.AIDisabled = req.GetAiDisabled().GetValue()
@@ -423,6 +457,21 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	updaterID := req.GetUserId()
 	if uc, ok := auth.UserFromContext(ctx); ok {
 		updaterID = uc.UserID
+	}
+
+	// Auto-grant the original reporter visibility when someone else flags
+	// their SEV Sensitive (§14) — they shouldn't lose access to their own
+	// report the moment it's flagged. Deliberately doesn't also grant
+	// updaterID: they already bypass the check as Admin/IC (the only roles
+	// allowed to flip this flag's visibility consequences matter for), or
+	// can grant themselves via SEVAccessService. Best-effort, and ErrConflict
+	// (already granted) is expected and swallowed, not an error.
+	if sensitiveFlipped {
+		if err := s.access.Grant(ctx, &store.SEVAccess{
+			SEVID: record.ID, UserID: record.CreatedBy, CreatedAt: record.UpdatedAt, CreatedBy: updaterID,
+		}); err != nil && !errors.Is(err, store.ErrConflict) {
+			slog.ErrorContext(ctx, "auto-grant creator access on sensitive flip failed", "sev_id", record.ID, "err", err)
+		}
 	}
 
 	_ = s.audit.Append(ctx, &store.AuditEntry{
@@ -449,6 +498,18 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	return resp, nil
 }
 
+// sevListFanoutLimit bounds the unpaginated SEVStore.List call
+// visibleSEVsForNonPrivileged makes to enforce sensitive-SEV visibility (§14)
+// in Go rather than in the store layer — mirrors searchFanoutLimit
+// (search.go) and reportFanoutLimit (report.go), the same "single-org v1
+// scale" trade-off already accepted elsewhere in this codebase.
+const sevListFanoutLimit = 10000
+
+// defaultSEVListLimit is the page size applied when the caller doesn't set
+// one, for the same non-privileged path — mirrors defaultSearchLimit
+// (search.go) and postgres.SEVStore.List's own default.
+const defaultSEVListLimit = 100
+
 func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.ListSEVsResponse, error) {
 	filter := store.SEVFilter{
 		OnCallUser: req.GetOnCallUser(),
@@ -463,23 +524,88 @@ func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.
 		filter.Statuses = append(filter.Statuses, store.SEVStatus(st))
 	}
 
-	total, err := s.sevs.Count(ctx, filter)
-	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to count SEVs")
+	// An Admin or Incident Commander bypasses per-user sensitive-SEV
+	// visibility filtering entirely (same trust boundary as
+	// sensitiveSEVVisible), so they keep today's fully-pushed-down,
+	// SQL-paginated fast path unchanged.
+	uc, ok := auth.UserFromContext(ctx)
+	if ok && (uc.OrgRole == store.OrgRoleAdmin || uc.OrgRole == store.OrgRoleIncidentCommander) {
+		total, err := s.sevs.Count(ctx, filter)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "failed to count SEVs")
+		}
+		records, err := s.sevs.List(ctx, filter)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "failed to list SEVs")
+		}
+		resp := &pb.ListSEVsResponse{Total: int32(total)}
+		for _, r := range records {
+			resp.Sevs = append(resp.Sevs, sevToProto(r))
+		}
+		return resp, nil
 	}
 
-	records, err := s.sevs.List(ctx, filter)
+	visible, err := s.visibleSEVsForNonPrivileged(ctx, filter, uc)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list SEVs")
+		return nil, err
+	}
+	total := len(visible)
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = defaultSEVListLimit
+	}
+	offset := filter.Offset
+	if offset > len(visible) {
+		offset = len(visible)
+	}
+	visible = visible[offset:]
+	if limit < len(visible) {
+		visible = visible[:limit]
 	}
 
-	resp := &pb.ListSEVsResponse{
-		Total: int32(total),
-	}
-	for _, r := range records {
+	resp := &pb.ListSEVsResponse{Total: int32(total)}
+	for _, r := range visible {
 		resp.Sevs = append(resp.Sevs, sevToProto(r))
 	}
 	return resp, nil
+}
+
+// visibleSEVsForNonPrivileged fetches SEVs matching filter — unpaginated but
+// capped at sevListFanoutLimit, since combining a per-user visibility filter
+// with SQL-level pagination can't be done correctly in one query (same
+// reasoning as SearchServer.searchWithAnnouncements) — and drops any
+// Sensitive SEV uc hasn't been explicitly granted access to (§14). uc may be
+// nil (unauthenticated caller; defensive only, should be unreachable
+// post-interceptor), in which case every Sensitive SEV is dropped.
+func (s *SEVServer) visibleSEVsForNonPrivileged(ctx context.Context, filter store.SEVFilter, uc *auth.UserContext) ([]*store.SEV, error) {
+	unpaginated := filter
+	unpaginated.Limit, unpaginated.Offset = sevListFanoutLimit, 0
+	all, err := s.sevs.List(ctx, unpaginated)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to list SEVs")
+	}
+	if len(all) >= sevListFanoutLimit {
+		return nil, status.Error(codes.ResourceExhausted, "matched too many SEVs to enforce visibility reliably; narrow the filter")
+	}
+
+	accessSet := map[string]bool{}
+	if uc != nil {
+		ids, err := s.access.ListSEVIDsByUser(ctx, uc.UserID)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "failed to resolve sensitive SEV access")
+		}
+		for _, id := range ids {
+			accessSet[id] = true
+		}
+	}
+
+	visible := make([]*store.SEV, 0, len(all))
+	for _, r := range all {
+		if !r.Sensitive || accessSet[r.ID] {
+			visible = append(visible, r)
+		}
+	}
+	return visible, nil
 }
 
 func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStatusRequest) (*pb.SEVResponse, error) {
@@ -508,6 +634,13 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
 		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+	visible, err := sensitiveSEVVisible(ctx, s.access, record)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+	}
+	if !visible {
+		return nil, status.Error(codes.NotFound, "SEV not found")
 	}
 
 	// A locked SEV requires a valid unlock token for any transition.

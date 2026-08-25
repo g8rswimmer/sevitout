@@ -28,6 +28,7 @@ var (
 	_ store.RetentionConfigStore   = (*memory.RetentionConfigStore)(nil)
 	_ store.ShareStore             = (*memory.ShareStore)(nil)
 	_ store.RoleStore              = (*memory.RoleStore)(nil)
+	_ store.SEVAccessStore         = (*memory.SEVAccessStore)(nil)
 )
 
 var ctx = context.Background()
@@ -1549,6 +1550,114 @@ func TestShareStore(t *testing.T) {
 
 	t.Run("RevokeNotFound", func(t *testing.T) {
 		if err := s.Revoke(ctx, "missing", "user-1"); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+}
+
+func TestSEVAccessStore(t *testing.T) {
+	s := memory.NewSEVAccessStore()
+
+	grant := &store.SEVAccess{
+		SEVID:     "SEV-2026-0001",
+		UserID:    "user-alice",
+		CreatedBy: "user-admin",
+		CreatedAt: time.Now(),
+	}
+
+	t.Run("Grant", func(t *testing.T) {
+		if err := s.Grant(ctx, grant); err != nil {
+			t.Fatalf("Grant: %v", err)
+		}
+		if grant.ID == 0 {
+			t.Fatal("ID should be set after Grant")
+		}
+	})
+
+	grantID := grant.ID
+
+	t.Run("GrantDuplicate", func(t *testing.T) {
+		dup := &store.SEVAccess{SEVID: "SEV-2026-0001", UserID: "user-alice", CreatedBy: "user-admin", CreatedAt: time.Now()}
+		if err := s.Grant(ctx, dup); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want 1, got %d", len(items))
+		}
+		if items[0].UserID != "user-alice" {
+			t.Errorf("user_id = %q, want user-alice", items[0].UserID)
+		}
+	})
+
+	t.Run("ListBySEVID_OtherSEV", func(t *testing.T) {
+		items, _ := s.ListBySEVID(ctx, "SEV-2026-9999")
+		if len(items) != 0 {
+			t.Fatal("expected empty for unknown SEV")
+		}
+	})
+
+	t.Run("HasAccess_True", func(t *testing.T) {
+		ok, err := s.HasAccess(ctx, "SEV-2026-0001", "user-alice")
+		if err != nil {
+			t.Fatalf("HasAccess: %v", err)
+		}
+		if !ok {
+			t.Fatal("expected true")
+		}
+	})
+
+	t.Run("HasAccess_False", func(t *testing.T) {
+		ok, err := s.HasAccess(ctx, "SEV-2026-0001", "user-bob")
+		if err != nil {
+			t.Fatalf("HasAccess: %v", err)
+		}
+		if ok {
+			t.Fatal("expected false")
+		}
+	})
+
+	t.Run("ListSEVIDsByUser", func(t *testing.T) {
+		if err := s.Grant(ctx, &store.SEVAccess{SEVID: "SEV-2026-0002", UserID: "user-alice", CreatedBy: "user-admin", CreatedAt: time.Now()}); err != nil {
+			t.Fatalf("Grant second: %v", err)
+		}
+		ids, err := s.ListSEVIDsByUser(ctx, "user-alice")
+		if err != nil {
+			t.Fatalf("ListSEVIDsByUser: %v", err)
+		}
+		if len(ids) != 2 {
+			t.Fatalf("want 2, got %d", len(ids))
+		}
+	})
+
+	t.Run("ListSEVIDsByUser_EmptyUser", func(t *testing.T) {
+		ids, err := s.ListSEVIDsByUser(ctx, "")
+		if err != nil {
+			t.Fatalf("ListSEVIDsByUser: %v", err)
+		}
+		if ids != nil {
+			t.Fatalf("want nil, got %v", ids)
+		}
+	})
+
+	t.Run("Revoke", func(t *testing.T) {
+		if err := s.Revoke(ctx, "SEV-2026-0001", grantID); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		ok, _ := s.HasAccess(ctx, "SEV-2026-0001", "user-alice")
+		if ok {
+			t.Fatal("expected access revoked")
+		}
+	})
+
+	t.Run("RevokeNotFound", func(t *testing.T) {
+		if err := s.Revoke(ctx, "SEV-2026-0001", 9999); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound, got %v", err)
 		}
 	})
