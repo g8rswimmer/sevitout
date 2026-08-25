@@ -55,6 +55,99 @@ func TestHTTPProvider_SuggestTasks(t *testing.T) {
 	}
 }
 
+func TestHTTPProvider_DraftAnnouncement(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req["action"] != "draft_announcement" {
+			t.Errorf("expected action=draft_announcement, got %v", req["action"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"text": "external announcement draft"})
+	}))
+	t.Cleanup(srv.Close)
+
+	p := ai.NewHTTPProvider(srv.URL, "")
+	got, err := p.DraftAnnouncement(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("DraftAnnouncement: %v", err)
+	}
+	if got != "external announcement draft" {
+		t.Fatalf("unexpected result: %q", got)
+	}
+}
+
+func TestHTTPProvider_SuggestRootCause(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"root_causes": []map[string]string{{"category": "deployment", "rationale": "bad rollout"}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	p := ai.NewHTTPProvider(srv.URL, "")
+	got, err := p.SuggestRootCause(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("SuggestRootCause: %v", err)
+	}
+	if len(got) != 1 || got[0].Category != "deployment" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestHTTPProvider_DraftPostmortem(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"postmortem": map[string]string{"summary": "s", "action_items": "a"},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	p := ai.NewHTTPProvider(srv.URL, "")
+	got, err := p.DraftPostmortem(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("DraftPostmortem: %v", err)
+	}
+	if got.Summary != "s" || got.ActionItems != "a" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestHTTPProvider_FindSimilar(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"similar": []map[string]string{{"sev_id": "SEV-2025-0042", "title": "prior outage", "reason": "same root cause"}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	p := ai.NewHTTPProvider(srv.URL, "")
+	got, err := p.FindSimilar(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("FindSimilar: %v", err)
+	}
+	if len(got) != 1 || got[0].SEVID != "SEV-2025-0042" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestHTTPProvider_SuggestResponders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"responders": []map[string]string{{"role": "incident-commander", "rationale": "on-call"}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	p := ai.NewHTTPProvider(srv.URL, "")
+	got, err := p.SuggestResponders(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("SuggestResponders: %v", err)
+	}
+	if len(got) != 1 || got[0].Role != "incident-commander" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
 func TestHTTPProvider_ErrorFieldSurfacesAsGoError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "upstream model unavailable"})

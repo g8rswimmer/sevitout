@@ -263,6 +263,59 @@ func TestRun_RateLimitEnforced(t *testing.T) {
 	}
 }
 
+func TestEvictRateLimit_ResetsPluginWindow(t *testing.T) {
+	h := newHarness(t)
+	sev := mustCreateSEV(t, h, &store.SEV{Title: "x", SeverityLevel: 3})
+	plugin := mustCreatePlugin(t, h, &store.AIPlugin{Name: "p1", HandlerType: store.AIHandlerBuiltin, Enabled: true, RateLimitPerMinute: 1})
+
+	if _, err := h.dispatch.Run(context.Background(), sev.ID, ai.ActionSummarize, plugin.ID); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if _, err := h.dispatch.Run(context.Background(), sev.ID, ai.ActionSummarize, plugin.ID); err != ai.ErrRateLimited {
+		t.Fatalf("second Run: want ErrRateLimited, got %v", err)
+	}
+
+	h.dispatch.EvictRateLimit(plugin.ID)
+
+	// Same as ConfigServer.DeleteAIPlugin's use case (see EvictRateLimit's
+	// doc comment): evicting drops the window entirely, so a call right
+	// after must be allowed again even though the original window hasn't
+	// expired.
+	if _, err := h.dispatch.Run(context.Background(), sev.ID, ai.ActionSummarize, plugin.ID); err != nil {
+		t.Fatalf("Run after EvictRateLimit: want allowed, got %v", err)
+	}
+}
+
+func TestNewDispatcher_ConstructsWorkingDispatcher(t *testing.T) {
+	// NewDispatcher itself is a one-line delegate to NewDispatcherWithFactory
+	// (which every other test in this file uses via newHarness) — this just
+	// confirms the production entry point wires a Dispatcher that actually
+	// works end-to-end, using the real newProvider factory this time.
+	sevs := memory.NewSEVStore()
+	history := memory.NewStatusHistoryStore()
+	anns := memory.NewAnnouncementStore()
+	plugins := memory.NewAIPluginStore()
+	outputs := memory.NewAIOutputStore()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	d := ai.NewDispatcher(ctx, sevs, history, anns, plugins, outputs, nil, nil, nil, 1)
+	if d == nil {
+		t.Fatal("NewDispatcher returned nil")
+	}
+
+	sev := &store.SEV{Title: "x", SeverityLevel: 3}
+	if err := sevs.Create(context.Background(), sev); err != nil {
+		t.Fatalf("create SEV: %v", err)
+	}
+	// No plugins registered: Run should reach ErrNoEnabledPlugin rather than
+	// hang or panic, confirming the dispatcher's internal wiring (stores,
+	// limiter, worker pool) is functional without making a real Provider call.
+	if _, err := d.Run(context.Background(), sev.ID, ai.ActionSummarize, 0); err != ai.ErrNoEnabledPlugin {
+		t.Fatalf("Run: want ErrNoEnabledPlugin, got %v", err)
+	}
+}
+
 func TestDispatch_SEVOpenedOnlyTriggersForSEV1And2(t *testing.T) {
 	h := newHarness(t)
 	mustCreatePlugin(t, h, &store.AIPlugin{Name: "p1", HandlerType: store.AIHandlerBuiltin, Enabled: true, TriggerOnOpen: true})

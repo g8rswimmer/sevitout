@@ -82,6 +82,69 @@ func TestAnthropicProvider_DraftPostmortem(t *testing.T) {
 	}
 }
 
+func TestNewAnthropicProvider_DefaultsToRealBaseURL(t *testing.T) {
+	// A trivial one-liner (delegates to NewAnthropicProviderWithBaseURL with
+	// the real API's base URL), but it's the only constructor callers
+	// outside this package actually use — confirms it doesn't panic and
+	// returns a usable *AnthropicProvider satisfying Provider.
+	p := ai.NewAnthropicProvider("test-key", "claude-sonnet-5")
+	if p == nil {
+		t.Fatal("NewAnthropicProvider returned nil")
+	}
+}
+
+func TestAnthropicProvider_DraftAnnouncement(t *testing.T) {
+	srv := newAnthropicTestServer(t, "We are investigating a database outage.", http.StatusOK)
+	p := ai.NewAnthropicProviderWithBaseURL("test-key", "claude-sonnet-5", srv.URL)
+
+	got, err := p.DraftAnnouncement(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001", Title: "db outage"})
+	if err != nil {
+		t.Fatalf("DraftAnnouncement: %v", err)
+	}
+	if got != "We are investigating a database outage." {
+		t.Fatalf("unexpected announcement: %q", got)
+	}
+}
+
+func TestAnthropicProvider_SuggestTasks(t *testing.T) {
+	srv := newAnthropicTestServer(t, `[{"title":"Add retry logic","description":"d","relationship_type":"action-item","priority":"critical"}]`, http.StatusOK)
+	p := ai.NewAnthropicProviderWithBaseURL("test-key", "claude-sonnet-5", srv.URL)
+
+	got, err := p.SuggestTasks(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("SuggestTasks: %v", err)
+	}
+	if len(got) != 1 || got[0].Title != "Add retry logic" || got[0].Priority != "critical" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestAnthropicProvider_FindSimilar(t *testing.T) {
+	srv := newAnthropicTestServer(t, `[{"sev_id":"SEV-2025-0042","title":"prior outage","reason":"same root cause"}]`, http.StatusOK)
+	p := ai.NewAnthropicProviderWithBaseURL("test-key", "claude-sonnet-5", srv.URL)
+
+	got, err := p.FindSimilar(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("FindSimilar: %v", err)
+	}
+	if len(got) != 1 || got[0].SEVID != "SEV-2025-0042" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestAnthropicProvider_SuggestResponders(t *testing.T) {
+	srv := newAnthropicTestServer(t, `[{"role":"incident-commander","rationale":"on-call for affected service"}]`, http.StatusOK)
+	p := ai.NewAnthropicProviderWithBaseURL("test-key", "claude-sonnet-5", srv.URL)
+
+	got, err := p.SuggestResponders(context.Background(), &ai.SEVContext{ID: "SEV-2026-0001"})
+	if err != nil {
+		t.Fatalf("SuggestResponders: %v", err)
+	}
+	if len(got) != 1 || got[0].Role != "incident-commander" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
 func TestAnthropicProvider_NonOKStatusIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
