@@ -225,6 +225,18 @@ type SEVRole struct {
 	CreatedBy   string
 }
 
+// SEVAccess is an explicit per-user visibility grant on a SEV flagged
+// Sensitive (§14: "only explicitly added users can view"). It is consulted
+// only when the SEV's own Sensitive flag is true — see
+// internal/api/grpc.sensitiveSEVVisible.
+type SEVAccess struct {
+	ID        int64
+	SEVID     string
+	UserID    string
+	CreatedAt time.Time
+	CreatedBy string
+}
+
 // Announcement is a time-ordered status update on a SEV.
 type Announcement struct {
 	ID          int64

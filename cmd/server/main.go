@@ -129,11 +129,13 @@ func main() {
 		Services:    stores.Service,
 		Postmortems: stores.Postmortem,
 		Links:       stores.SEVLink,
+		Access:      stores.SEVAccess,
 		OnCaller:    onCaller,
 		Unlock:      unlockSigner,
 		Publisher:   wsHub,
 		AIDispatch:  aiDispatcher,
 	})
+	sevAccessServer := grpchandler.NewSEVAccessServer(stores.SEVAccess, stores.SEV, stores.Audit)
 	reportServer := grpchandler.NewReportServer(stores.SEV, stores.Postmortem, stores.Task)
 	shareServer := grpchandler.NewShareServer(grpchandler.ShareServerParams{
 		Shares: stores.Share,
@@ -198,6 +200,7 @@ func main() {
 	pb.RegisterAIServiceServer(grpcSrv, aiServer)
 	pb.RegisterReportServiceServer(grpcSrv, reportServer)
 	pb.RegisterShareServiceServer(grpcSrv, shareServer)
+	pb.RegisterSEVAccessServiceServer(grpcSrv, sevAccessServer)
 	reflection.Register(grpcSrv)
 
 	// --- REST gateway ---
@@ -267,6 +270,9 @@ func main() {
 			return pb.RegisterReportServiceHandlerClient(ctx, gwMux, pb.NewReportServiceClient(conn))
 		}},
 		{"share", func() error { return pb.RegisterShareServiceHandlerClient(ctx, gwMux, pb.NewShareServiceClient(conn)) }},
+		{"sev-access", func() error {
+			return pb.RegisterSEVAccessServiceHandlerClient(ctx, gwMux, pb.NewSEVAccessServiceClient(conn))
+		}},
 	}
 	for _, svc := range gatewayServices {
 		if err := svc.register(); err != nil {
@@ -368,6 +374,7 @@ type Stores struct {
 	AIPlugin          store.AIPluginStore
 	AIOutput          store.AIOutputStore
 	Share             store.ShareStore
+	SEVAccess         store.SEVAccessStore
 }
 
 func buildStores(ctx context.Context, log *slog.Logger) *Stores {
@@ -392,6 +399,7 @@ func buildStores(ctx context.Context, log *slog.Logger) *Stores {
 			AIPlugin:          memory.NewAIPluginStore(),
 			AIOutput:          memory.NewAIOutputStore(),
 			Share:             memory.NewShareStore(),
+			SEVAccess:         memory.NewSEVAccessStore(),
 		}
 	}
 	pool, err := postgres.Open(ctx, dsn)
@@ -418,6 +426,7 @@ func buildStores(ctx context.Context, log *slog.Logger) *Stores {
 		AIPlugin:          postgres.NewAIPluginStore(pool),
 		AIOutput:          postgres.NewAIOutputStore(pool),
 		Share:             postgres.NewShareStore(pool),
+		SEVAccess:         postgres.NewSEVAccessStore(pool),
 	}
 }
 

@@ -7,13 +7,25 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/g8rswimmer/sevitout/internal/ai"
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
+
+// adminCtx returns a context carrying an Admin auth.UserContext — Admin
+// bypasses sensitiveSEVVisible (§14) unconditionally, so tests exercising
+// unrelated behavior against a Sensitive SEV (e.g. publish suppression,
+// auto-link exclusion) can use this instead of context.Background(), which
+// would now be denied visibility into a Sensitive SEV as an unauthenticated
+// caller.
+func adminCtx() context.Context {
+	return auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-admin", OrgRole: store.OrgRoleAdmin})
+}
 
 // testSEVServer groups a SEVServer with its backing in-memory stores.
 type testSEVServer struct {
@@ -22,6 +34,7 @@ type testSEVServer struct {
 	audit   *memory.AuditStore
 	history *memory.StatusHistoryStore
 	links   *memory.SEVLinkStore
+	access  *memory.SEVAccessStore
 	pub     *fakePublisher
 	ai      *fakeAIDispatcher
 }
@@ -32,18 +45,20 @@ func newTestSEVServer() *testSEVServer {
 	audit := memory.NewAuditStore()
 	history := memory.NewStatusHistoryStore()
 	links := memory.NewSEVLinkStore()
+	access := memory.NewSEVAccessStore()
 	pub := &fakePublisher{}
 	aiDispatch := &fakeAIDispatcher{}
 	return &testSEVServer{
 		server: grpchandler.NewSEVServer(grpchandler.SEVServerParams{
 			SEVs: sevs, Audit: audit, History: history, Roles: memory.NewRoleStore(),
 			Services: memory.NewServiceStore(), Postmortems: memory.NewPostmortemStore(),
-			Links: links, Publisher: pub, AIDispatch: aiDispatch,
+			Links: links, Access: access, Publisher: pub, AIDispatch: aiDispatch,
 		}),
 		sevs:    sevs,
 		audit:   audit,
 		history: history,
 		links:   links,
+		access:  access,
 		pub:     pub,
 		ai:      aiDispatch,
 	}
@@ -160,6 +175,50 @@ func TestCreateSEV_SensitiveSEVDoesNotPublish(t *testing.T) {
 
 	if events := ts.pub.All(); len(events) != 0 {
 		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestCreateSEV_AutoGrantsCreatorOnSensitiveCreate(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-reporter", OrgRole: store.OrgRoleResponder})
+
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Sensitive incident", SeverityLevel: 1, Sensitive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	ok, err := ts.access.HasAccess(context.Background(), created.GetId(), "user-reporter")
+	if err != nil {
+		t.Fatalf("HasAccess: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected the creator to be auto-granted access to their own Sensitive SEV")
+	}
+
+	// Confirm the grant is actually load-bearing: the reporter can still
+	// GetSEV their own SEV afterward without needing Admin/IC.
+	if _, err := ts.server.GetSEV(ctx, &pb.GetSEVRequest{Id: created.GetId()}); err != nil {
+		t.Fatalf("GetSEV as reporter: %v", err)
+	}
+}
+
+func TestCreateSEV_NonSensitiveDoesNotAutoGrant(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-reporter", OrgRole: store.OrgRoleResponder})
+
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "Ordinary incident", SeverityLevel: 3})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	grants, err := ts.access.ListBySEVID(context.Background(), created.GetId())
+	if err != nil {
+		t.Fatalf("ListBySEVID: %v", err)
+	}
+	if len(grants) != 0 {
+		t.Errorf("want no access grants for a non-sensitive SEV, got %d", len(grants))
 	}
 }
 
@@ -286,6 +345,50 @@ func TestGetSEV_UnknownID(t *testing.T) {
 	}
 }
 
+func TestGetSEV_SensitiveSEVHiddenFromCallerWithoutAccess(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSensitiveSEV(t, ts)
+
+	viewerCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-outsider", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.GetSEV(viewerCtx, &pb.GetSEVRequest{Id: sevID})
+	if code := grpcCode(err); code != codes.NotFound {
+		t.Errorf("error code = %v, want NotFound (masking existence, not PermissionDenied)", code)
+	}
+}
+
+func TestGetSEV_SensitiveSEVVisibleToGrantedUser(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSensitiveSEV(t, ts)
+
+	if err := ts.access.Grant(context.Background(), &store.SEVAccess{SEVID: sevID, UserID: "user-granted", CreatedBy: "user-admin"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	grantedCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-granted", OrgRole: store.OrgRoleViewer})
+	if _, err := ts.server.GetSEV(grantedCtx, &pb.GetSEVRequest{Id: sevID}); err != nil {
+		t.Fatalf("GetSEV: %v", err)
+	}
+}
+
+func TestGetSEV_SensitiveSEVVisibleToAdmin(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSensitiveSEV(t, ts)
+
+	if _, err := ts.server.GetSEV(adminCtx(), &pb.GetSEVRequest{Id: sevID}); err != nil {
+		t.Fatalf("GetSEV as Admin: %v", err)
+	}
+}
+
+func TestGetSEV_SensitiveSEVVisibleToIncidentCommander(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSensitiveSEV(t, ts)
+
+	icCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-ic", OrgRole: store.OrgRoleIncidentCommander})
+	if _, err := ts.server.GetSEV(icCtx, &pb.GetSEVRequest{Id: sevID}); err != nil {
+		t.Fatalf("GetSEV as Incident Commander: %v", err)
+	}
+}
+
 // ── UpdateSEV ─────────────────────────────────────────────────────────────────
 
 func TestUpdateSEV_Title(t *testing.T) {
@@ -397,6 +500,17 @@ func TestUpdateSEV_UnknownDetectionMethod(t *testing.T) {
 	}
 }
 
+func TestUpdateSEV_SensitiveSEVHiddenFromCallerWithoutAccess(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSensitiveSEV(t, ts)
+
+	viewerCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-outsider", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.UpdateSEV(viewerCtx, &pb.UpdateSEVRequest{Id: sevID, Title: "should not apply"})
+	if code := grpcCode(err); code != codes.NotFound {
+		t.Errorf("error code = %v, want NotFound (masking existence, not PermissionDenied)", code)
+	}
+}
+
 // ── ListSEVs ──────────────────────────────────────────────────────────────────
 
 func TestListSEVs_Empty(t *testing.T) {
@@ -437,6 +551,90 @@ func TestListSEVs_AfterCreate(t *testing.T) {
 	}
 	if len(resp.GetSevs()) > 0 && resp.GetSevs()[0].GetTitle() != "Memory leak" {
 		t.Errorf("SEV[0].Title = %q, want %q", resp.GetSevs()[0].GetTitle(), "Memory leak")
+	}
+}
+
+func TestListSEVs_ExcludesSensitiveSEVsWithoutAccess(t *testing.T) {
+	ts := newTestSEVServer()
+	seedSensitiveSEV(t, ts)
+
+	viewerCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-outsider", OrgRole: store.OrgRoleViewer})
+	resp, err := ts.server.ListSEVs(viewerCtx, &pb.ListSEVsRequest{})
+	if err != nil {
+		t.Fatalf("ListSEVs: %v", err)
+	}
+	if len(resp.GetSevs()) != 0 {
+		t.Errorf("len(SEVs) = %d, want 0 (sensitive SEV should be excluded)", len(resp.GetSevs()))
+	}
+	if resp.GetTotal() != 0 {
+		t.Errorf("Total = %d, want 0", resp.GetTotal())
+	}
+}
+
+func TestListSEVs_IncludesGrantedSensitiveSEVs(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSensitiveSEV(t, ts)
+	if err := ts.access.Grant(context.Background(), &store.SEVAccess{SEVID: sevID, UserID: "user-granted", CreatedBy: "user-admin"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	grantedCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-granted", OrgRole: store.OrgRoleViewer})
+	resp, err := ts.server.ListSEVs(grantedCtx, &pb.ListSEVsRequest{})
+	if err != nil {
+		t.Fatalf("ListSEVs: %v", err)
+	}
+	if len(resp.GetSevs()) != 1 {
+		t.Errorf("len(SEVs) = %d, want 1 (granted SEV should be included)", len(resp.GetSevs()))
+	}
+}
+
+func TestListSEVs_AdminOrICSeesAllViaFastPath(t *testing.T) {
+	ts := newTestSEVServer()
+	seedSensitiveSEV(t, ts)
+
+	resp, err := ts.server.ListSEVs(adminCtx(), &pb.ListSEVsRequest{})
+	if err != nil {
+		t.Fatalf("ListSEVs as Admin: %v", err)
+	}
+	if len(resp.GetSevs()) != 1 {
+		t.Errorf("len(SEVs) = %d, want 1 (Admin sees all)", len(resp.GetSevs()))
+	}
+
+	icCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-ic", OrgRole: store.OrgRoleIncidentCommander})
+	resp, err = ts.server.ListSEVs(icCtx, &pb.ListSEVsRequest{})
+	if err != nil {
+		t.Fatalf("ListSEVs as Incident Commander: %v", err)
+	}
+	if len(resp.GetSevs()) != 1 {
+		t.Errorf("len(SEVs) = %d, want 1 (Incident Commander sees all)", len(resp.GetSevs()))
+	}
+}
+
+func TestListSEVs_PaginationCorrectAfterFiltering(t *testing.T) {
+	ts := newTestSEVServer()
+	viewerCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-outsider", OrgRole: store.OrgRoleViewer})
+
+	// Two visible SEVs and one sensitive SEV the caller can't see, seeded in
+	// between so filtering can't accidentally line up with the page boundary
+	// by coincidence.
+	seedSEV(t, ts)
+	seedSensitiveSEV(t, ts)
+	seedSEV(t, ts)
+
+	resp, err := ts.server.ListSEVs(viewerCtx, &pb.ListSEVsRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListSEVs: %v", err)
+	}
+	if resp.GetTotal() != 2 {
+		t.Errorf("Total = %d, want 2 (post-filter count, not the raw 3 seeded)", resp.GetTotal())
+	}
+	if len(resp.GetSevs()) != 2 {
+		t.Errorf("len(SEVs) = %d, want 2", len(resp.GetSevs()))
+	}
+	for _, sv := range resp.GetSevs() {
+		if sv.GetSensitive() {
+			t.Errorf("sensitive SEV %s leaked into a non-privileged caller's page", sv.GetId())
+		}
 	}
 }
 
@@ -495,6 +693,19 @@ func TestTransitionStatus_UnknownSEV(t *testing.T) {
 	}
 	if code := grpcCode(err); code != codes.NotFound {
 		t.Errorf("error code = %v, want NotFound", code)
+	}
+}
+
+func TestTransitionStatus_SensitiveSEVHiddenFromCallerWithoutAccess(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSensitiveSEV(t, ts)
+
+	viewerCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-outsider", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.TransitionStatus(viewerCtx, &pb.TransitionStatusRequest{
+		Id: sevID, ToStatus: string(store.SEVStatusInvestigating),
+	})
+	if code := grpcCode(err); code != codes.NotFound {
+		t.Errorf("error code = %v, want NotFound (masking existence, not PermissionDenied)", code)
 	}
 }
 
@@ -594,7 +805,7 @@ func seedSensitiveSEV(t *testing.T, ts *testSEVServer) string {
 
 func TestUpdateSEV_SensitiveSEVDoesNotPublish(t *testing.T) {
 	ts := newTestSEVServer()
-	ctx := context.Background()
+	ctx := adminCtx()
 	sevID := seedSensitiveSEV(t, ts)
 
 	if _, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: sevID, Title: "New title"}); err != nil {
@@ -606,9 +817,70 @@ func TestUpdateSEV_SensitiveSEVDoesNotPublish(t *testing.T) {
 	}
 }
 
+func TestUpdateSEV_AutoGrantsCreatorOnSensitiveFlip(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSEV(t, ts) // seedSEV's CreatedBy is "user-seed", not the flipper below
+
+	if _, err := ts.server.UpdateSEV(adminCtx(), &pb.UpdateSEVRequest{
+		Id: sevID, Sensitive: wrapperspb.Bool(true),
+	}); err != nil {
+		t.Fatalf("UpdateSEV: %v", err)
+	}
+
+	ok, err := ts.access.HasAccess(context.Background(), sevID, "user-seed")
+	if err != nil {
+		t.Fatalf("HasAccess: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected the original reporter (CreatedBy) to be auto-granted access on the sensitive flip")
+	}
+
+	// The flipper (admin) is not auto-granted — they already bypass the
+	// check via their org role and don't need an explicit grant.
+	flipperOk, err := ts.access.HasAccess(context.Background(), sevID, "user-admin")
+	if err != nil {
+		t.Fatalf("HasAccess: %v", err)
+	}
+	if flipperOk {
+		t.Error("did not expect the flipper to be auto-granted a redundant explicit grant")
+	}
+}
+
+func TestUpdateSEV_NoDuplicateGrantOnRepeatedFlip(t *testing.T) {
+	ts := newTestSEVServer()
+	sevID := seedSEV(t, ts)
+
+	if _, err := ts.server.UpdateSEV(adminCtx(), &pb.UpdateSEVRequest{
+		Id: sevID, Sensitive: wrapperspb.Bool(true),
+	}); err != nil {
+		t.Fatalf("UpdateSEV(first flip): %v", err)
+	}
+	// Flip back to false, then true again — re-flipping to true a second
+	// time re-grants the same (sev_id, user_id) pair, which the store maps
+	// to ErrConflict; the handler must swallow that, not fail the request.
+	if _, err := ts.server.UpdateSEV(adminCtx(), &pb.UpdateSEVRequest{
+		Id: sevID, Sensitive: wrapperspb.Bool(false),
+	}); err != nil {
+		t.Fatalf("UpdateSEV(un-flip): %v", err)
+	}
+	if _, err := ts.server.UpdateSEV(adminCtx(), &pb.UpdateSEVRequest{
+		Id: sevID, Sensitive: wrapperspb.Bool(true),
+	}); err != nil {
+		t.Fatalf("UpdateSEV(re-flip): %v", err)
+	}
+
+	grants, err := ts.access.ListBySEVID(context.Background(), sevID)
+	if err != nil {
+		t.Fatalf("ListBySEVID: %v", err)
+	}
+	if len(grants) != 1 {
+		t.Errorf("want exactly 1 grant for the reporter after repeated flips, got %d", len(grants))
+	}
+}
+
 func TestTransitionStatus_SensitiveSEVDoesNotPublish(t *testing.T) {
 	ts := newTestSEVServer()
-	ctx := context.Background()
+	ctx := adminCtx()
 	sevID := seedSensitiveSEV(t, ts)
 
 	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{Id: sevID, ToStatus: string(store.SEVStatusInvestigating)}); err != nil {
@@ -753,7 +1025,7 @@ func TestUpdateSEV_AutoLinksRecurrence_SameServiceAndCategory(t *testing.T) {
 
 func TestUpdateSEV_NoAutoLinkToSensitiveSEV(t *testing.T) {
 	ts := newTestSEVServer()
-	ctx := context.Background()
+	ctx := adminCtx()
 
 	first, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
 		Title: "Sensitive outage", SeverityLevel: 2, AffectedServices: []string{"svc-api"}, Sensitive: true,

@@ -153,6 +153,14 @@ type Sev struct {
 	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 }
 
+type SevAccess struct {
+	ID        int64              `json:"id"`
+	SevID     string             `json:"sev_id"`
+	UserID    string             `json:"user_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	CreatedBy string             `json:"created_by"`
+}
+
 type SevAnnouncement struct {
 	ID           int64              `json:"id"`
 	SevID        string             `json:"sev_id"`

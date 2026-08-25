@@ -178,3 +178,23 @@ type RoleStore interface {
 	// roleType is non-nil, only that role type is considered.
 	ListSEVIDsByUser(ctx context.Context, user string, roleType *SEVRoleType) ([]string, error)
 }
+
+// SEVAccessStore manages explicit per-user visibility grants for SEVs
+// flagged Sensitive (§14). Only Sensitive SEVs consult this store at all —
+// see internal/api/grpc.sensitiveSEVVisible.
+type SEVAccessStore interface {
+	// Grant records that UserID may view SEVID. Returns ErrConflict if the
+	// pair is already granted.
+	Grant(ctx context.Context, access *SEVAccess) error
+	// Revoke deletes the grant with the given id from the given SEV. Returns
+	// ErrNotFound when no matching grant exists.
+	Revoke(ctx context.Context, sevID string, id int64) error
+	ListBySEVID(ctx context.Context, sevID string) ([]*SEVAccess, error)
+	// HasAccess reports whether userID has been explicitly granted access to
+	// sevID. A dedicated existence check, since GetSEV/UpdateSEV/
+	// TransitionStatus call this on every request against a Sensitive SEV.
+	HasAccess(ctx context.Context, sevID, userID string) (bool, error)
+	// ListSEVIDsByUser returns the distinct SEV IDs userID has been granted
+	// access to — used by ListSEVs' per-user visibility filtering.
+	ListSEVIDsByUser(ctx context.Context, userID string) ([]string, error)
+}

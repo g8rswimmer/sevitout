@@ -28,6 +28,16 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.RoleService/AssignRole": store.OrgRoleIncidentCommander,
 	"/sevitout.v1.RoleService/RemoveRole": store.OrgRoleIncidentCommander,
 	"/sevitout.v1.RoleService/ListRoles":  store.OrgRoleViewer,
+	// SEV access service — granting/revoking a user's visibility into a
+	// Sensitive SEV (§14) is scoped the same as unlocking a completed SEV
+	// and creating/revoking a share link: IC or Admin. ListAccess itself
+	// stays open at Viewer, since the handler body re-applies
+	// sensitiveSEVVisible per-record (see sev_access.go) — otherwise a
+	// non-allowed Viewer could still probe who has access to a SEV they
+	// can't see.
+	"/sevitout.v1.SEVAccessService/GrantAccess":  store.OrgRoleIncidentCommander,
+	"/sevitout.v1.SEVAccessService/RevokeAccess": store.OrgRoleIncidentCommander,
+	"/sevitout.v1.SEVAccessService/ListAccess":   store.OrgRoleViewer,
 	// Postmortem service
 	"/sevitout.v1.PostmortemService/GetPostmortem":              store.OrgRoleViewer,
 	"/sevitout.v1.PostmortemService/UpdatePostmortem":           store.OrgRoleResponder,

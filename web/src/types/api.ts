@@ -389,6 +389,24 @@ export interface ListRolesResponse {
   roles?: SEVRoleResponse[]
 }
 
+// --- Sensitive SEV access grants (§14) -------------------------------------
+
+export interface SEVAccessResponse {
+  id: string
+  sev_id: string
+  user_id: string
+  created_at: string
+  created_by?: string
+}
+
+export interface GrantAccessRequest {
+  user_id: string
+}
+
+export interface ListAccessResponse {
+  access?: SEVAccessResponse[]
+}
+
 // --- Announcements --------------------------------------------------------
 
 export type AnnouncementAudience = 'internal' | 'external' | 'status-page'
