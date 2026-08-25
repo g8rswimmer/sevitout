@@ -41,30 +41,58 @@ func NewClientWithBaseURL(apiKey, baseURL string) *Client {
 	}
 }
 
+// newRequest builds a GET request against c.baseURL+path with PagerDuty's
+// standard auth/accept headers set, shared by every method below so the
+// header-setting logic exists in exactly one place.
+func (c *Client) newRequest(ctx context.Context, rawURL string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("pagerduty: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Token token="+c.apiKey)
+	req.Header.Set("Accept", "application/vnd.pagerduty+json;version=2")
+	return req, nil
+}
+
+// do sends req and validates the response status, logging and returning an
+// error for either a transport failure or a non-200 response — the same
+// "do → check status → log on failure" sequence every method below needs.
+// logAttrs are extra slog key-value pairs specific to the call (e.g.
+// OnCallLookup's service_id), appended after "op" and before the final
+// err/status pair so the field order matches what each method logged before
+// this was factored out. The caller is responsible for closing resp.Body on
+// a nil error.
+func (c *Client) do(ctx context.Context, op string, req *http.Request, logAttrs ...any) (*http.Response, error) {
+	resp, err := c.http.Do(req)
+	if err != nil {
+		args := append([]any{"op", op}, logAttrs...)
+		slog.WarnContext(ctx, "pagerduty api call failed", append(args, "err", err)...)
+		return nil, fmt.Errorf("pagerduty: request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		args := append([]any{"op", op}, logAttrs...)
+		slog.WarnContext(ctx, "pagerduty api call returned non-200", append(args, "status", resp.StatusCode)...)
+		return nil, fmt.Errorf("pagerduty: unexpected status %d", resp.StatusCode)
+	}
+	return resp, nil
+}
+
 // Ping verifies that apiKey is accepted by PagerDuty, by calling a
 // lightweight authenticated endpoint that requires no special scopes. Used
 // by the Configuration API's integration health check (docs/project-plan.md
 // M10) to report "connected" vs. "error" for a configured PagerDuty integration.
 func (c *Client) Ping(ctx context.Context) error {
 	slog.DebugContext(ctx, "pagerduty api call", "op", "Ping")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/abilities", nil)
+	req, err := c.newRequest(ctx, c.baseURL+"/abilities")
 	if err != nil {
-		return fmt.Errorf("pagerduty: build request: %w", err)
+		return err
 	}
-	req.Header.Set("Authorization", "Token token="+c.apiKey)
-	req.Header.Set("Accept", "application/vnd.pagerduty+json;version=2")
-
-	resp, err := c.http.Do(req)
+	resp, err := c.do(ctx, "Ping", req)
 	if err != nil {
-		slog.WarnContext(ctx, "pagerduty api call failed", "op", "Ping", "err", err)
-		return fmt.Errorf("pagerduty: request: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.WarnContext(ctx, "pagerduty api call returned non-200", "op", "Ping", "status", resp.StatusCode)
-		return fmt.Errorf("pagerduty: unexpected status %d", resp.StatusCode)
-	}
 	return nil
 }
 
@@ -80,24 +108,15 @@ func (c *Client) OnCallLookup(ctx context.Context, serviceID string) (string, er
 	q.Add("service_ids[]", serviceID)
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := c.newRequest(ctx, u.String())
 	if err != nil {
-		return "", fmt.Errorf("pagerduty: build request: %w", err)
+		return "", err
 	}
-	req.Header.Set("Authorization", "Token token="+c.apiKey)
-	req.Header.Set("Accept", "application/vnd.pagerduty+json;version=2")
-
-	resp, err := c.http.Do(req)
+	resp, err := c.do(ctx, "OnCallLookup", req, "service_id", serviceID)
 	if err != nil {
-		slog.WarnContext(ctx, "pagerduty api call failed", "op", "OnCallLookup", "service_id", serviceID, "err", err)
-		return "", fmt.Errorf("pagerduty: request: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.WarnContext(ctx, "pagerduty api call returned non-200", "op", "OnCallLookup", "service_id", serviceID, "status", resp.StatusCode)
-		return "", fmt.Errorf("pagerduty: unexpected status %d", resp.StatusCode)
-	}
 
 	var body struct {
 		OnCalls []struct {
