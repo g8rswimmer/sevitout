@@ -2,12 +2,12 @@ package memory
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/g8rswimmer/sevitout/internal/sev"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
@@ -25,12 +25,16 @@ func NewSEVStore() *SEVStore {
 
 var _ store.SEVStore = (*SEVStore)(nil)
 
-func (s *SEVStore) Create(_ context.Context, sev *store.SEV) error {
+func (s *SEVStore) Create(_ context.Context, sv *store.SEV) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sev.ID = fmt.Sprintf("SEV-%d-%04d", time.Now().UTC().Year(), s.seq.Add(1))
-	cp := *sev
-	s.data[sev.ID] = &cp
+	// sev.FormatID is the single source of truth for the ID shape — the
+	// postgres store (internal/store/postgres/sev.go) uses it too, so both
+	// implementations stay format-consistent by construction rather than by
+	// convention.
+	sv.ID = sev.FormatID(time.Now().UTC().Year(), s.seq.Add(1))
+	cp := *sv
+	s.data[sv.ID] = &cp
 	return nil
 }
 
