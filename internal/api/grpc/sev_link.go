@@ -18,14 +18,15 @@ import (
 // SEVLinkServer implements pb.SEVLinkServiceServer.
 type SEVLinkServer struct {
 	pb.UnimplementedSEVLinkServiceServer
-	links store.SEVLinkStore
-	sevs  store.SEVStore
-	audit store.AuditStore
+	links  store.SEVLinkStore
+	sevs   store.SEVStore
+	access store.SEVAccessStore
+	audit  store.AuditStore
 }
 
 // NewSEVLinkServer returns a SEVLinkServer backed by the given stores.
-func NewSEVLinkServer(links store.SEVLinkStore, sevs store.SEVStore, audit store.AuditStore) *SEVLinkServer {
-	return &SEVLinkServer{links: links, sevs: sevs, audit: audit}
+func NewSEVLinkServer(links store.SEVLinkStore, sevs store.SEVStore, access store.SEVAccessStore, audit store.AuditStore) *SEVLinkServer {
+	return &SEVLinkServer{links: links, sevs: sevs, access: access, audit: audit}
 }
 
 func (s *SEVLinkServer) LinkSEVs(ctx context.Context, req *pb.LinkSEVsRequest) (*pb.SEVLinkResponse, error) {
@@ -148,11 +149,8 @@ func (s *SEVLinkServer) ListLinkedSEVs(ctx context.Context, req *pb.ListLinkedSE
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "SEV not found")
-		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+	if _, err := loadVisibleSEV(ctx, s.sevs, s.access, req.GetSevId()); err != nil {
+		return nil, err
 	}
 
 	links, err := s.links.ListBySEVID(ctx, req.GetSevId())

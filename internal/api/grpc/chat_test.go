@@ -18,17 +18,20 @@ type testChatServer struct {
 	server *grpchandler.ChatServer
 	chat   *memory.ChatStore
 	sevs   *memory.SEVStore
+	access *memory.SEVAccessStore
 	pub    *fakePublisher
 }
 
 func newTestChatServer() *testChatServer {
 	chat := memory.NewChatStore()
 	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
 	pub := &fakePublisher{}
 	return &testChatServer{
-		server: grpchandler.NewChatServer(chat, sevs, pub),
+		server: grpchandler.NewChatServer(chat, sevs, access, pub),
 		chat:   chat,
 		sevs:   sevs,
+		access: access,
 		pub:    pub,
 	}
 }

@@ -57,6 +57,7 @@ type testTaskServer struct {
 	server *grpchandler.TaskServer
 	tasks  *memory.TaskStore
 	sevs   *memory.SEVStore
+	access *memory.SEVAccessStore
 	audit  *memory.AuditStore
 	pub    *fakePublisher
 }
@@ -64,16 +65,18 @@ type testTaskServer struct {
 func newTestTaskServer(gh grpchandler.IssueClient) *testTaskServer {
 	tasks := memory.NewTaskStore()
 	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
 	audit := memory.NewAuditStore()
 	pub := &fakePublisher{}
 	return &testTaskServer{
 		server: grpchandler.NewTaskServer(grpchandler.TaskServerParams{
-			Tasks: tasks, SEVs: sevs, Audit: audit, GitHub: gh, Publisher: pub,
+			Tasks: tasks, SEVs: sevs, Access: access, Audit: audit, GitHub: gh, Publisher: pub,
 		}),
-		tasks: tasks,
-		sevs:  sevs,
-		audit: audit,
-		pub:   pub,
+		tasks:  tasks,
+		sevs:   sevs,
+		access: access,
+		audit:  audit,
+		pub:    pub,
 	}
 }
 

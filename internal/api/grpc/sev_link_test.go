@@ -17,17 +17,20 @@ type testSEVLinkServer struct {
 	server *grpchandler.SEVLinkServer
 	links  *memory.SEVLinkStore
 	sevs   *memory.SEVStore
+	access *memory.SEVAccessStore
 	audit  *memory.AuditStore
 }
 
 func newTestSEVLinkServer() *testSEVLinkServer {
 	links := memory.NewSEVLinkStore()
 	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
 	audit := memory.NewAuditStore()
 	return &testSEVLinkServer{
-		server: grpchandler.NewSEVLinkServer(links, sevs, audit),
+		server: grpchandler.NewSEVLinkServer(links, sevs, access, audit),
 		links:  links,
 		sevs:   sevs,
+		access: access,
 		audit:  audit,
 	}
 }

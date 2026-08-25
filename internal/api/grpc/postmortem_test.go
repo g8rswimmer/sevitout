@@ -20,6 +20,7 @@ type testPostmortemServer struct {
 	server      *grpchandler.PostmortemServer
 	postmortems *memory.PostmortemStore
 	sevs        *memory.SEVStore
+	access      *memory.SEVAccessStore
 	audit       *memory.AuditStore
 	unlock      *postmortem.UnlockSigner
 	pub         *fakePublisher
@@ -28,6 +29,7 @@ type testPostmortemServer struct {
 
 func newTestPostmortemServer() *testPostmortemServer {
 	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
 	audit := memory.NewAuditStore()
 	pms := memory.NewPostmortemStore()
 	signer := postmortem.NewUnlockSigner("test-secret-at-least-32-chars-long")
@@ -35,10 +37,11 @@ func newTestPostmortemServer() *testPostmortemServer {
 	aiDispatch := &fakeAIDispatcher{}
 	return &testPostmortemServer{
 		server: grpchandler.NewPostmortemServer(grpchandler.PostmortemServerParams{
-			Postmortems: pms, SEVs: sevs, Audit: audit, Unlock: signer, Publisher: pub, AIDispatch: aiDispatch,
+			Postmortems: pms, SEVs: sevs, Access: access, Audit: audit, Unlock: signer, Publisher: pub, AIDispatch: aiDispatch,
 		}),
 		postmortems: pms,
 		sevs:        sevs,
+		access:      access,
 		audit:       audit,
 		unlock:      signer,
 		pub:         pub,

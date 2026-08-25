@@ -19,12 +19,13 @@ type ChatServer struct {
 	pb.UnimplementedChatServiceServer
 	chat      store.ChatStore
 	sevs      store.SEVStore
+	access    store.SEVAccessStore
 	publisher Publisher // nil when WebSocket support is not wired up
 }
 
 // NewChatServer returns a ChatServer backed by the given stores.
-func NewChatServer(chat store.ChatStore, sevs store.SEVStore, publisher Publisher) *ChatServer {
-	return &ChatServer{chat: chat, sevs: sevs, publisher: publisher}
+func NewChatServer(chat store.ChatStore, sevs store.SEVStore, access store.SEVAccessStore, publisher Publisher) *ChatServer {
+	return &ChatServer{chat: chat, sevs: sevs, access: access, publisher: publisher}
 }
 
 func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryRequest) (*pb.ChatEntryResponse, error) {
@@ -90,11 +91,8 @@ func (s *ChatServer) ListChatEntries(ctx context.Context, req *pb.ListChatEntrie
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "SEV not found")
-		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+	if _, err := loadVisibleSEV(ctx, s.sevs, s.access, req.GetSevId()); err != nil {
+		return nil, err
 	}
 
 	entries, err := s.chat.ListBySEVID(ctx, req.GetSevId())
