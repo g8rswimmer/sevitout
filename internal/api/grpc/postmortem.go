@@ -121,7 +121,7 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 		return nil, status.Error(codes.Internal, "failed to update postmortem")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "postmortem.updated",
@@ -175,7 +175,7 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 		return nil, status.Error(codes.Internal, "failed to update postmortem")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "postmortem.status_transitioned",
@@ -233,7 +233,7 @@ func (s *PostmortemServer) UnlockSEV(ctx context.Context, req *pb.UnlockSEVReque
 	}
 
 	reason := req.GetReason()
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "sev.unlock_requested",

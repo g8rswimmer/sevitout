@@ -96,7 +96,7 @@ func (s *ShareServer) CreateShareLink(ctx context.Context, req *pb.CreateShareLi
 		return nil, status.Error(codes.Internal, "failed to create share link")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "sev.share_link_created",
@@ -137,7 +137,7 @@ func (s *ShareServer) RevokeShareLink(ctx context.Context, req *pb.RevokeShareLi
 		return nil, status.Error(codes.Internal, "failed to revoke share link")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "sev.share_link_revoked",

@@ -87,7 +87,7 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		return nil, status.Error(codes.Internal, "failed to assign role")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "role.assigned",
@@ -130,7 +130,7 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		return nil, status.Error(codes.Internal, "failed to remove role")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "role.removed",

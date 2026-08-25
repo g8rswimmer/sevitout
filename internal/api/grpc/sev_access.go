@@ -68,7 +68,7 @@ func (s *SEVAccessServer) GrantAccess(ctx context.Context, req *pb.GrantAccessRe
 		return nil, status.Error(codes.Internal, "failed to grant access")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "sev.access_granted",
@@ -106,7 +106,7 @@ func (s *SEVAccessServer) RevokeAccess(ctx context.Context, req *pb.RevokeAccess
 		return nil, status.Error(codes.Internal, "failed to revoke access")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     req.GetSevId(),
 		UserID:    callerID,
 		Action:    "sev.access_revoked",

@@ -251,7 +251,7 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		}
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     record.ID,
 		UserID:    callerID,
 		Action:    "sev.created",
@@ -474,7 +474,7 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		}
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     record.ID,
 		UserID:    updaterID,
 		Action:    "sev.updated",
@@ -708,7 +708,7 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		return nil, status.Error(codes.Internal, "failed to update SEV")
 	}
 
-	_ = s.audit.Append(ctx, &store.AuditEntry{
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
 		SEVID:     record.ID,
 		UserID:    transitionerID,
 		Action:    "sev.status_transitioned",
