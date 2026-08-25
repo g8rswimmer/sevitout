@@ -45,7 +45,17 @@ func TestSigner_Validate_Tampered(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	tampered := tok[:len(tok)-1] + "x"
+	// Flip the token's first character rather than its last: the JWT's
+	// three segments (header/payload/signature) are each base64url-encoded
+	// independently, and the *last* character of a segment can have unused
+	// low-order bits when the segment's byte length isn't a multiple of 3
+	// — replacing only that character has a real (~1-in-16, confirmed
+	// empirically) chance of decoding to the exact same bytes, making the
+	// "tampered" token spuriously valid and this test flaky. The first
+	// character of a segment has no such ambiguity: it always encodes the
+	// top bits of the first byte, so changing it always changes the
+	// decoded content.
+	tampered := "x" + tok[1:]
 	if tampered == tok {
 		t.Fatal("tamper produced identical token")
 	}
