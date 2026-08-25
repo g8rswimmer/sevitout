@@ -171,23 +171,11 @@ func validateDetectionMethod(v string) error {
 	}
 }
 
-func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*pb.SEVResponse, error) {
-	if req.GetTitle() == "" {
-		return nil, status.Error(codes.InvalidArgument, "title is required")
-	}
-	if req.GetSeverityLevel() < 1 || req.GetSeverityLevel() > 4 {
-		return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
-	}
-	if err := validateDetectionMethod(req.GetDetectionMethod()); err != nil {
-		return nil, err
-	}
-
-	callerID := req.GetCreatedBy()
-	if uc, ok := auth.UserFromContext(ctx); ok {
-		callerID = uc.UserID
-	}
-
-	now := time.Now()
+// newSEVFromCreateRequest builds a *store.SEV from req's fields, callerID,
+// and now. Split out of CreateSEV so that handler reads as validation +
+// construction + persistence + side effects, rather than burying the field
+// mapping in the middle of all of that.
+func newSEVFromCreateRequest(req *pb.CreateSEVRequest, callerID string, now time.Time) *store.SEV {
 	record := &store.SEV{
 		Title:            req.GetTitle(),
 		Description:      req.GetDescription(),
@@ -233,6 +221,27 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		record.DetectedAt = &t
 	}
 
+	return record
+}
+
+func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*pb.SEVResponse, error) {
+	if req.GetTitle() == "" {
+		return nil, status.Error(codes.InvalidArgument, "title is required")
+	}
+	if req.GetSeverityLevel() < 1 || req.GetSeverityLevel() > 4 {
+		return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
+	}
+	if err := validateDetectionMethod(req.GetDetectionMethod()); err != nil {
+		return nil, err
+	}
+
+	callerID := req.GetCreatedBy()
+	if uc, ok := auth.UserFromContext(ctx); ok {
+		callerID = uc.UserID
+	}
+
+	now := time.Now()
+	record := newSEVFromCreateRequest(req, callerID, now)
 	sev.ComputeMetrics(record)
 
 	if err := s.sevs.Create(ctx, record); err != nil {
@@ -330,32 +339,18 @@ func (s *SEVServer) GetSEV(ctx context.Context, req *pb.GetSEVRequest) (*pb.SEVR
 	return sevToProto(record), nil
 }
 
-func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*pb.SEVResponse, error) {
-	if req.GetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "id is required")
-	}
-
-	record, err := s.sevs.Get(ctx, req.GetId())
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "SEV not found")
-		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
-	}
-	visible, err := sensitiveSEVVisible(ctx, s.access, record)
-	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
-	}
-	if !visible {
-		return nil, status.Error(codes.NotFound, "SEV not found")
-	}
-
-	if record.Locked {
-		if err := validateUnlock(s.unlock, req.GetUnlockToken(), req.GetId()); err != nil {
-			return nil, err
-		}
-	}
-
+// applySEVUpdate copies every field req sets onto record — an unset/empty
+// field on a partial-update request leaves the corresponding field on record
+// untouched, matching every other Update* handler in this package. Split out
+// of UpdateSEV so that handler reads as validation + fetch + field mapping +
+// persistence + side effects, rather than one 160-line function mixing all
+// of those together.
+//
+// Returns whether root_cause_category actually changed (UpdateSEV uses this
+// to decide whether to re-run §17's recurrence auto-link) and whether
+// sensitive flipped false→true (UpdateSEV uses this to auto-grant the
+// original reporter access under §14).
+func applySEVUpdate(record *store.SEV, req *pb.UpdateSEVRequest) (rootCauseCategoryChanged, sensitiveFlipped bool, err error) {
 	if v := req.GetTitle(); v != "" {
 		record.Title = v
 	}
@@ -364,11 +359,10 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	}
 	if v := req.GetSeverityLevel(); v != 0 {
 		if v < 1 || v > 4 {
-			return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
+			return false, false, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
 		}
 		record.SeverityLevel = int16(v)
 	}
-	rootCauseCategoryChanged := false
 	if v := req.GetRootCauseCategory(); v != "" {
 		if record.RootCauseCategory == nil || *record.RootCauseCategory != v {
 			rootCauseCategoryChanged = true
@@ -391,7 +385,7 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		record.AffectedServices = v
 	}
 	if err := validateDetectionMethod(req.GetDetectionMethod()); err != nil {
-		return nil, err
+		return false, false, err
 	}
 	if v := req.GetDetectionMethod(); v != "" {
 		record.DetectionMethod = &v
@@ -435,7 +429,6 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		t := req.GetDetectedAt().AsTime()
 		record.DetectedAt = &t
 	}
-	sensitiveFlipped := false
 	if req.GetSensitive() != nil {
 		newVal := req.GetSensitive().GetValue()
 		if newVal && !record.Sensitive {
@@ -445,6 +438,40 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	}
 	if req.GetAiDisabled() != nil {
 		record.AIDisabled = req.GetAiDisabled().GetValue()
+	}
+
+	return rootCauseCategoryChanged, sensitiveFlipped, nil
+}
+
+func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*pb.SEVResponse, error) {
+	if req.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
+
+	record, err := s.sevs.Get(ctx, req.GetId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+	visible, err := sensitiveSEVVisible(ctx, s.access, record)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+	}
+	if !visible {
+		return nil, status.Error(codes.NotFound, "SEV not found")
+	}
+
+	if record.Locked {
+		if err := validateUnlock(s.unlock, req.GetUnlockToken(), req.GetId()); err != nil {
+			return nil, err
+		}
+	}
+
+	rootCauseCategoryChanged, sensitiveFlipped, err := applySEVUpdate(record, req)
+	if err != nil {
+		return nil, err
 	}
 
 	record.UpdatedAt = time.Now()
@@ -608,6 +635,36 @@ func (s *SEVServer) visibleSEVsForNonPrivileged(ctx context.Context, filter stor
 	return visible, nil
 }
 
+// applyTransitionTimestamps copies the optional lifecycle timestamps req
+// sets onto record, then applies the postmortem-complete lock/unlock side
+// effect: locked (with postmortem_completed_at defaulted to now if the
+// caller didn't supply one) on entering PostmortemComplete, unlocked on
+// leaving it (e.g. re-open after postmortem review). The unlock token itself
+// is validated by the caller before this runs, when record.Locked was true.
+func applyTransitionTimestamps(record *store.SEV, req *pb.TransitionStatusRequest, toStatus store.SEVStatus, now time.Time) {
+	if req.GetMitigatedAt() != nil {
+		t := req.GetMitigatedAt().AsTime()
+		record.MitigatedAt = &t
+	}
+	if req.GetResolvedAt() != nil {
+		t := req.GetResolvedAt().AsTime()
+		record.ResolvedAt = &t
+	}
+	if req.GetPostmortemCompletedAt() != nil {
+		t := req.GetPostmortemCompletedAt().AsTime()
+		record.PostmortemCompletedAt = &t
+	}
+
+	if toStatus == store.SEVStatusPostmortemComplete {
+		if record.PostmortemCompletedAt == nil {
+			record.PostmortemCompletedAt = &now
+		}
+		record.Locked = true
+	} else {
+		record.Locked = false
+	}
+}
+
 func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStatusRequest) (*pb.SEVResponse, error) {
 	if req.GetId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "id is required")
@@ -657,32 +714,8 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	fromStatus := record.Status
 	record.Status = toStatus
 
-	if req.GetMitigatedAt() != nil {
-		t := req.GetMitigatedAt().AsTime()
-		record.MitigatedAt = &t
-	}
-	if req.GetResolvedAt() != nil {
-		t := req.GetResolvedAt().AsTime()
-		record.ResolvedAt = &t
-	}
-	if req.GetPostmortemCompletedAt() != nil {
-		t := req.GetPostmortemCompletedAt().AsTime()
-		record.PostmortemCompletedAt = &t
-	}
-
 	now := time.Now()
-
-	// Lock the SEV on entering PostmortemComplete; clear the lock when leaving
-	// (e.g. re-open after postmortem review). The unlock token was already
-	// validated above when record.Locked was true.
-	if toStatus == store.SEVStatusPostmortemComplete {
-		if record.PostmortemCompletedAt == nil {
-			record.PostmortemCompletedAt = &now
-		}
-		record.Locked = true
-	} else {
-		record.Locked = false
-	}
+	applyTransitionTimestamps(record, req, toStatus, now)
 
 	sev.ComputeMetrics(record)
 	record.UpdatedAt = now
