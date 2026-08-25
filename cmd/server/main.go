@@ -53,7 +53,11 @@ func main() {
 	// LOG_LEVEL or AddSource.
 	slog.SetDefault(log)
 
-	stores := buildStores(ctx, log)
+	stores, err := buildStores(ctx, log, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Error("postgres connect", "err", err)
+		os.Exit(1)
+	}
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
@@ -388,8 +392,13 @@ type Stores struct {
 	SEVAccess         store.SEVAccessStore
 }
 
-func buildStores(ctx context.Context, log *slog.Logger) *Stores {
-	dsn := os.Getenv("DATABASE_URL")
+// buildStores selects the store backend: in-memory when dsn is empty,
+// PostgreSQL (connecting and verifying reachability via postgres.Open)
+// otherwise. It reports a connect failure via its error return rather than
+// exiting itself, so the exit decision stays in main alongside the other
+// startup fail-closed checks (JWT_SECRET, ENCRYPTION_KEY) — and so this is
+// testable in-process without a real Postgres for the failure path.
+func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, error) {
 	if dsn == "" {
 		log.Warn("DATABASE_URL not set — using in-memory store (data will not persist)")
 		return &Stores{
@@ -411,12 +420,11 @@ func buildStores(ctx context.Context, log *slog.Logger) *Stores {
 			AIOutput:          memory.NewAIOutputStore(),
 			Share:             memory.NewShareStore(),
 			SEVAccess:         memory.NewSEVAccessStore(),
-		}
+		}, nil
 	}
 	pool, err := postgres.Open(ctx, dsn)
 	if err != nil {
-		log.Error("postgres connect", "err", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("postgres connect: %w", err)
 	}
 	log.Info("using postgres store")
 	return &Stores{
@@ -438,7 +446,7 @@ func buildStores(ctx context.Context, log *slog.Logger) *Stores {
 		AIOutput:          postgres.NewAIOutputStore(pool),
 		Share:             postgres.NewShareStore(pool),
 		SEVAccess:         postgres.NewSEVAccessStore(pool),
-	}
+	}, nil
 }
 
 // githubIssueClient adapts *github.Client to grpchandler.IssueClient,
