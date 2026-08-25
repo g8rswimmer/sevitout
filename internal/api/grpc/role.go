@@ -20,6 +20,7 @@ type RoleServer struct {
 	pb.UnimplementedRoleServiceServer
 	roles     store.RoleStore
 	sevs      store.SEVStore
+	access    store.SEVAccessStore
 	audit     store.AuditStore
 	publisher Publisher // nil when WebSocket support is not wired up
 }
@@ -29,13 +30,14 @@ type RoleServer struct {
 type RoleServerParams struct {
 	Roles     store.RoleStore
 	SEVs      store.SEVStore
+	Access    store.SEVAccessStore
 	Audit     store.AuditStore
 	Publisher Publisher
 }
 
 // NewRoleServer returns a RoleServer backed by p.
 func NewRoleServer(p RoleServerParams) *RoleServer {
-	return &RoleServer{roles: p.Roles, sevs: p.SEVs, audit: p.Audit, publisher: p.Publisher}
+	return &RoleServer{roles: p.Roles, sevs: p.SEVs, access: p.Access, audit: p.Audit, publisher: p.Publisher}
 }
 
 func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) (*pb.SEVRoleResponse, error) {
@@ -150,11 +152,8 @@ func (s *RoleServer) ListRoles(ctx context.Context, req *pb.ListRolesRequest) (*
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "SEV not found")
-		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+	if _, err := loadVisibleSEV(ctx, s.sevs, s.access, req.GetSevId()); err != nil {
+		return nil, err
 	}
 
 	roles, err := s.roles.ListBySEVID(ctx, req.GetSevId())

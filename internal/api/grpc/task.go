@@ -47,6 +47,7 @@ type TaskServer struct {
 	pb.UnimplementedTaskServiceServer
 	tasks     store.TaskStore
 	sevs      store.SEVStore
+	access    store.SEVAccessStore
 	audit     store.AuditStore
 	github    IssueClient // nil when GITHUB_TOKEN is not set
 	publisher Publisher   // nil when WebSocket support is not wired up
@@ -58,6 +59,7 @@ type TaskServer struct {
 type TaskServerParams struct {
 	Tasks     store.TaskStore
 	SEVs      store.SEVStore
+	Access    store.SEVAccessStore
 	Audit     store.AuditStore
 	GitHub    IssueClient
 	Publisher Publisher
@@ -65,7 +67,7 @@ type TaskServerParams struct {
 
 // NewTaskServer returns a TaskServer backed by p.
 func NewTaskServer(p TaskServerParams) *TaskServer {
-	return &TaskServer{tasks: p.Tasks, sevs: p.SEVs, audit: p.Audit, github: p.GitHub, publisher: p.Publisher}
+	return &TaskServer{tasks: p.Tasks, sevs: p.SEVs, access: p.Access, audit: p.Audit, github: p.GitHub, publisher: p.Publisher}
 }
 
 func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb.TaskResponse, error) {
@@ -212,12 +214,9 @@ func (s *TaskServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
 	}
 
-	sev, err := s.sevs.Get(ctx, req.GetSevId())
+	sev, err := loadVisibleSEV(ctx, s.sevs, s.access, req.GetSevId())
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "SEV not found")
-		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, err
 	}
 
 	tasks, err := s.tasks.ListBySEVID(ctx, req.GetSevId())

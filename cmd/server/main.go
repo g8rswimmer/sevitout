@@ -146,21 +146,22 @@ func main() {
 	auditServer := grpchandler.NewAuditServer(stores.Audit)
 	authServer := grpchandler.NewAuthServer(stores.User)
 	roleServer := grpchandler.NewRoleServer(grpchandler.RoleServerParams{
-		Roles: stores.Role, SEVs: stores.SEV, Audit: stores.Audit, Publisher: wsHub,
+		Roles: stores.Role, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit, Publisher: wsHub,
 	})
 	postmortemServer := grpchandler.NewPostmortemServer(grpchandler.PostmortemServerParams{
 		Postmortems: stores.Postmortem,
 		SEVs:        stores.SEV,
+		Access:      stores.SEVAccess,
 		Audit:       stores.Audit,
 		Unlock:      unlockSigner,
 		Publisher:   wsHub,
 		AIDispatch:  aiDispatcher,
 	})
-	announcementServer := grpchandler.NewAnnouncementServer(stores.Announcement, stores.SEV, wsHub)
-	chatServer := grpchandler.NewChatServer(stores.Chat, stores.SEV, wsHub)
-	sevLinkServer := grpchandler.NewSEVLinkServer(stores.SEVLink, stores.SEV, stores.Audit)
+	announcementServer := grpchandler.NewAnnouncementServer(stores.Announcement, stores.SEV, stores.SEVAccess, wsHub)
+	chatServer := grpchandler.NewChatServer(stores.Chat, stores.SEV, stores.SEVAccess, wsHub)
+	sevLinkServer := grpchandler.NewSEVLinkServer(stores.SEVLink, stores.SEV, stores.SEVAccess, stores.Audit)
 	taskServer := grpchandler.NewTaskServer(grpchandler.TaskServerParams{
-		Tasks: stores.Task, SEVs: stores.SEV, Audit: stores.Audit, GitHub: issueClient, Publisher: wsHub,
+		Tasks: stores.Task, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit, GitHub: issueClient, Publisher: wsHub,
 	})
 	searchServer := grpchandler.NewSearchServer(stores.SEV, stores.Role, stores.Announcement)
 	configServer := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{

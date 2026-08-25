@@ -28,6 +28,7 @@ type PostmortemServer struct {
 	pb.UnimplementedPostmortemServiceServer
 	postmortems store.PostmortemStore
 	sevs        store.SEVStore
+	access      store.SEVAccessStore
 	audit       store.AuditStore
 	unlock      Unlocker
 	publisher   Publisher    // nil when WebSocket support is not wired up
@@ -40,6 +41,7 @@ type PostmortemServer struct {
 type PostmortemServerParams struct {
 	Postmortems store.PostmortemStore
 	SEVs        store.SEVStore
+	Access      store.SEVAccessStore
 	Audit       store.AuditStore
 	Unlock      Unlocker
 	Publisher   Publisher
@@ -51,6 +53,7 @@ func NewPostmortemServer(p PostmortemServerParams) *PostmortemServer {
 	return &PostmortemServer{
 		postmortems: p.Postmortems,
 		sevs:        p.SEVs,
+		access:      p.Access,
 		audit:       p.Audit,
 		unlock:      p.Unlock,
 		publisher:   p.Publisher,
@@ -61,6 +64,9 @@ func NewPostmortemServer(p PostmortemServerParams) *PostmortemServer {
 func (s *PostmortemServer) GetPostmortem(ctx context.Context, req *pb.GetPostmortemRequest) (*pb.PostmortemResponse, error) {
 	if req.GetSevId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
+	}
+	if _, err := loadVisibleSEV(ctx, s.sevs, s.access, req.GetSevId()); err != nil {
+		return nil, err
 	}
 	pm, err := s.postmortems.GetBySEVID(ctx, req.GetSevId())
 	if err != nil {

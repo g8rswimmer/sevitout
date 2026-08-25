@@ -18,6 +18,7 @@ type testRoleServer struct {
 	server *grpchandler.RoleServer
 	roles  *memory.RoleStore
 	sevs   *memory.SEVStore
+	access *memory.SEVAccessStore
 	audit  *memory.AuditStore
 	pub    *fakePublisher
 }
@@ -25,12 +26,14 @@ type testRoleServer struct {
 func newTestRoleServer() *testRoleServer {
 	roles := memory.NewRoleStore()
 	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
 	audit := memory.NewAuditStore()
 	pub := &fakePublisher{}
 	return &testRoleServer{
-		server: grpchandler.NewRoleServer(grpchandler.RoleServerParams{Roles: roles, SEVs: sevs, Audit: audit, Publisher: pub}),
+		server: grpchandler.NewRoleServer(grpchandler.RoleServerParams{Roles: roles, SEVs: sevs, Access: access, Audit: audit, Publisher: pub}),
 		roles:  roles,
 		sevs:   sevs,
+		access: access,
 		audit:  audit,
 		pub:    pub,
 	}

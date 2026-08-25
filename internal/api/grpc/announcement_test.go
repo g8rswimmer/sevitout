@@ -17,17 +17,20 @@ type testAnnouncementServer struct {
 	server        *grpchandler.AnnouncementServer
 	announcements *memory.AnnouncementStore
 	sevs          *memory.SEVStore
+	access        *memory.SEVAccessStore
 	pub           *fakePublisher
 }
 
 func newTestAnnouncementServer() *testAnnouncementServer {
 	announcements := memory.NewAnnouncementStore()
 	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
 	pub := &fakePublisher{}
 	return &testAnnouncementServer{
-		server:        grpchandler.NewAnnouncementServer(announcements, sevs, pub),
+		server:        grpchandler.NewAnnouncementServer(announcements, sevs, access, pub),
 		announcements: announcements,
 		sevs:          sevs,
+		access:        access,
 		pub:           pub,
 	}
 }

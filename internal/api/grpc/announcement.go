@@ -19,12 +19,13 @@ type AnnouncementServer struct {
 	pb.UnimplementedAnnouncementServiceServer
 	announcements store.AnnouncementStore
 	sevs          store.SEVStore
+	access        store.SEVAccessStore
 	publisher     Publisher // nil when WebSocket support is not wired up
 }
 
 // NewAnnouncementServer returns an AnnouncementServer backed by the given stores.
-func NewAnnouncementServer(announcements store.AnnouncementStore, sevs store.SEVStore, publisher Publisher) *AnnouncementServer {
-	return &AnnouncementServer{announcements: announcements, sevs: sevs, publisher: publisher}
+func NewAnnouncementServer(announcements store.AnnouncementStore, sevs store.SEVStore, access store.SEVAccessStore, publisher Publisher) *AnnouncementServer {
+	return &AnnouncementServer{announcements: announcements, sevs: sevs, access: access, publisher: publisher}
 }
 
 func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.CreateAnnouncementRequest) (*pb.AnnouncementResponse, error) {
@@ -87,11 +88,8 @@ func (s *AnnouncementServer) ListAnnouncements(ctx context.Context, req *pb.List
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
 	}
 
-	if _, err := s.sevs.Get(ctx, req.GetSevId()); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "SEV not found")
-		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+	if _, err := loadVisibleSEV(ctx, s.sevs, s.access, req.GetSevId()); err != nil {
+		return nil, err
 	}
 
 	all, err := s.announcements.ListBySEVID(ctx, req.GetSevId())

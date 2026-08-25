@@ -2,6 +2,10 @@ package grpc
 
 import (
 	"context"
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
@@ -38,4 +42,32 @@ func sensitiveSEVVisible(ctx context.Context, access store.SEVAccessStore, recor
 		return true, nil
 	}
 	return access.HasAccess(ctx, record.ID, uc.UserID)
+}
+
+// loadVisibleSEV fetches the SEV identified by sevID and enforces its §14
+// visibility via sensitiveSEVVisible. Any handler that accepts a bare sev_id
+// and returns sub-resource data (announcements, chat, roles, tasks,
+// postmortem, linked SEVs, ...) should call this instead of calling
+// sevs.Get directly — otherwise a Sensitive SEV's sub-resources can be read
+// by a caller who couldn't see the SEV itself.
+//
+// Both "the SEV doesn't exist" and "the SEV exists but isn't visible to this
+// caller" map to codes.NotFound — never codes.PermissionDenied — matching
+// sensitiveSEVVisible's existence-masking contract.
+func loadVisibleSEV(ctx context.Context, sevs store.SEVStore, access store.SEVAccessStore, sevID string) (*store.SEV, error) {
+	record, err := sevs.Get(ctx, sevID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to get SEV")
+	}
+	visible, err := sensitiveSEVVisible(ctx, access, record)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+	}
+	if !visible {
+		return nil, status.Error(codes.NotFound, "SEV not found")
+	}
+	return record, nil
 }
