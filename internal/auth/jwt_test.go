@@ -67,12 +67,21 @@ func TestJWTSigner_Validate_Tampered(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	// Flip the last character to corrupt the signature.
+	// Flip the token's first character rather than its last: the JWT's
+	// three segments (header/payload/signature) are each base64url-encoded
+	// independently, and the *last* character of a segment can have unused
+	// low-order bits when the segment's byte length isn't a multiple of 3
+	// — replacing only that character has a real (~1-in-16, confirmed
+	// empirically) chance of decoding to the exact same bytes, making the
+	// "tampered" token spuriously valid and this test flaky. The first
+	// character of a segment has no such ambiguity: it always encodes the
+	// top bits of the first byte, so changing it always changes the
+	// decoded content.
 	runes := []rune(tokenStr)
-	if runes[len(runes)-1] == 'X' {
-		runes[len(runes)-1] = 'Y'
+	if runes[0] == 'X' {
+		runes[0] = 'Y'
 	} else {
-		runes[len(runes)-1] = 'X'
+		runes[0] = 'X'
 	}
 	tampered := string(runes)
 
