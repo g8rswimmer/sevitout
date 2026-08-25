@@ -11,18 +11,26 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
+// AuditServer implements pb.AuditServiceServer.
 type AuditServer struct {
 	pb.UnimplementedAuditServiceServer
-	audit store.AuditStore
+	audit  store.AuditStore
+	sevs   store.SEVStore
+	access store.SEVAccessStore
 }
 
-func NewAuditServer(audit store.AuditStore) *AuditServer {
-	return &AuditServer{audit: audit}
+// NewAuditServer returns an AuditServer backed by the given stores.
+func NewAuditServer(audit store.AuditStore, sevs store.SEVStore, access store.SEVAccessStore) *AuditServer {
+	return &AuditServer{audit: audit, sevs: sevs, access: access}
 }
 
 func (s *AuditServer) ListAuditEntries(ctx context.Context, req *pb.ListAuditEntriesRequest) (*pb.ListAuditEntriesResponse, error) {
 	if req.GetSevId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
+	}
+
+	if _, err := loadVisibleSEV(ctx, s.sevs, s.access, req.GetSevId()); err != nil {
+		return nil, err
 	}
 
 	entries, err := s.audit.ListBySEVID(ctx, req.GetSevId())
