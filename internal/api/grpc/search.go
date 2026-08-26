@@ -37,7 +37,17 @@ func NewSearchServer(sevs store.SEVStore, roles store.RoleStore, announcements s
 	return &SearchServer{sevs: sevs, roles: roles, announcements: announcements}
 }
 
-func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest) (*pb.SearchSEVsResponse, error) {
+// buildSearchFilter translates req's non-role-based fields into a
+// store.SEVFilter: severity/status/tag/date-range filters, sort order
+// (validated against the known SEVSortField values), and quick_view's
+// default status set for "open"/"awaiting_postmortem" (validated against the
+// known quick-view values). Split out of SearchSEVs so that handler reads as
+// filter construction + role-based ID resolution + fetch + paginate, rather
+// than burying all of this in the middle of that. Role-based constraints
+// (on_call_user, detected_by, my_sevs) and the announcement-search ID
+// resolution stay in SearchSEVs itself, since they need ctx and the
+// server's stores rather than just req.
+func buildSearchFilter(req *pb.SearchSEVsRequest) (store.SEVFilter, error) {
 	filter := store.SEVFilter{
 		RootCauseCategory: req.GetRootCauseCategory(),
 		ServiceIDs:        req.GetServiceIds(),
@@ -74,11 +84,10 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 	case string(store.SEVSortStartedAt), string(store.SEVSortSeverity), string(store.SEVSortMTTR), string(store.SEVSortUpdatedAt):
 		filter.Sort = store.SEVSortField(req.GetSort())
 	default:
-		return nil, status.Error(codes.InvalidArgument, "unknown sort value")
+		return store.SEVFilter{}, status.Error(codes.InvalidArgument, "unknown sort value")
 	}
 
-	quickView := req.GetQuickView()
-	switch quickView {
+	switch req.GetQuickView() {
 	case "":
 	case "open":
 		if len(filter.Statuses) == 0 {
@@ -89,10 +98,20 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 			filter.Statuses = []store.SEVStatus{store.SEVStatusResolved, store.SEVStatusPostmortemInProgress}
 		}
 	case "my_sevs":
-		// resolved below once we can attribute it to the caller
+		// resolved by SearchSEVs once it can attribute this to the caller
 	default:
-		return nil, status.Error(codes.InvalidArgument, "unknown quick_view value")
+		return store.SEVFilter{}, status.Error(codes.InvalidArgument, "unknown quick_view value")
 	}
+
+	return filter, nil
+}
+
+func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest) (*pb.SearchSEVsResponse, error) {
+	filter, err := buildSearchFilter(req)
+	if err != nil {
+		return nil, err
+	}
+	quickView := req.GetQuickView()
 
 	// Resolve role-based constraints (on_call_user, detected_by, and the
 	// my_sevs quick view) into a SEV ID allowlist, intersected when more than
