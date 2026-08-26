@@ -30,7 +30,7 @@ shape these phases produce.
 
 ## Phase 0 — `internal/config` package
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/config-package.md`](../demo/config-package.md)
 
 Replace the scattered `os.Getenv` calls throughout `cmd/server/main.go` (roughly ten
 env vars: `DATABASE_URL`, `JWT_SECRET`, `ALLOW_INSECURE_JWT_SECRET`,
