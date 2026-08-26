@@ -575,6 +575,11 @@ minutes with no Incident Commander assigned.
 
 - [`docs/architecture.md`](architecture.md) — system design, database
   schema, and every API service.
+- [`docs/roadmap.md`](roadmap.md) — the current phased plan for engineering,
+  observability, and feature work, updated as phases ship.
+- [`docs/architecture-evolution.md`](architecture-evolution.md) — proposed
+  observability and infrastructure additions (request-scoped logging,
+  metrics, health checks) building on the system design above.
 - [`docs/requirements.md`](requirements.md) — the full functional
   specification this system was built against.
 - [`demo/`](../demo/) — one runbook per milestone with exact `curl`/API

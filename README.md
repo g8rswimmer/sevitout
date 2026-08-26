@@ -125,6 +125,8 @@ Frontend tests and build live under `web/` (`npm test`, `npm run build`).
 |---|---|
 | [`docs/user-guide.md`](docs/user-guide.md) | How to use Sevitout — creating SEVs, understanding metrics, running postmortems, configuring integrations. Start here if you're an operator, IC, or admin |
 | [`docs/architecture.md`](docs/architecture.md) | System design: services, database schema, API layer, key architectural decisions |
+| [`docs/roadmap.md`](docs/roadmap.md) | The current phased plan for engineering, observability, and feature work — what's next and why, updated as phases ship |
+| [`docs/architecture-evolution.md`](docs/architecture-evolution.md) | Proposed infra additions on top of `docs/architecture.md` — request-scoped logging, metrics, config package — and what's explicitly out of scope for now |
 | [`docs/requirements.md`](docs/requirements.md) | Full functional specification |
 | [`docs/project-plan.md`](docs/project-plan.md) | The milestone-by-milestone build plan (historical planning record — see `demo/` and `docs/user-guide.md` for how the system actually behaves today) |
 | [`demo/`](demo/) | One runbook per milestone with exact `curl`/Slack/UI walkthroughs and known limitations — the most detailed reference for exact API behavior |
