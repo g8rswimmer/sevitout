@@ -8,8 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -25,6 +23,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/api/ws"
 	"github.com/g8rswimmer/sevitout/internal/auth"
+	"github.com/g8rswimmer/sevitout/internal/config"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
 	"github.com/g8rswimmer/sevitout/internal/integrations/slack"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
@@ -41,9 +40,21 @@ var openAPISpec []byte
 
 func main() {
 	ctx := context.Background()
+
+	// cfg.Load reads every env var main() needs up front and never calls
+	// os.Exit itself (see internal/config's doc comment) — but there's no
+	// logger yet to report a problem through, since the logger's own level
+	// comes from cfg. A malformed value (today, only JWT_TTL_HOURS) is
+	// therefore reported directly to stderr rather than via slog.
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "config:", err)
+		os.Exit(1)
+	}
+
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource: true,
-		Level:     parseLogLevel(os.Getenv("LOG_LEVEL")),
+		Level:     cfg.LogLevel,
 	}))
 	// Package-level slog.InfoContext/WarnContext/ErrorContext calls scattered
 	// across internal/api/grpc and internal/auth (rather than a threaded
@@ -53,7 +64,7 @@ func main() {
 	// LOG_LEVEL or AddSource.
 	slog.SetDefault(log)
 
-	stores, err := buildStores(ctx, log, os.Getenv("DATABASE_URL"))
+	stores, err := buildStores(ctx, log, cfg.DatabaseURL)
 	if err != nil {
 		log.Error("postgres connect", "err", err)
 		os.Exit(1)
@@ -61,15 +72,15 @@ func main() {
 
 	// --- PagerDuty client (optional) ---
 	var onCaller grpchandler.OnCaller
-	if apiKey := os.Getenv("PAGERDUTY_API_KEY"); apiKey != "" {
-		onCaller = pagerduty.NewClient(apiKey)
+	if cfg.PagerDutyAPIKey != "" {
+		onCaller = pagerduty.NewClient(cfg.PagerDutyAPIKey)
 		log.Info("PagerDuty on-call integration enabled")
 	}
 
 	// --- GitHub client (optional) ---
 	var issueClient grpchandler.IssueClient
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		issueClient = &githubIssueClient{c: github.NewClient(token)}
+	if cfg.GitHubToken != "" {
+		issueClient = &githubIssueClient{c: github.NewClient(cfg.GitHubToken)}
 		log.Info("GitHub Issues integration enabled")
 	} else {
 		log.Info("GitHub Issues integration DISABLED")
@@ -82,22 +93,16 @@ func main() {
 	// explicit, deliberate opt-in for local dev/CI convenience — the choice
 	// to run insecurely has to be made by whoever starts the process, not
 	// defaulted to by whoever forgets to set JWT_SECRET.
-	jwtSecret := os.Getenv("JWT_SECRET")
+	jwtSecret := cfg.JWTSecret
 	if jwtSecret == "" {
-		if os.Getenv("ALLOW_INSECURE_JWT_SECRET") != "true" {
+		if !cfg.AllowInsecureJWTSecret {
 			log.Error("JWT_SECRET not set — refusing to start with a fixed signing secret. Set JWT_SECRET, or set ALLOW_INSECURE_JWT_SECRET=true to accept the insecure dev default")
 			os.Exit(1)
 		}
 		log.Warn("JWT_SECRET not set — using insecure default (ALLOW_INSECURE_JWT_SECRET=true was set)")
 		jwtSecret = "insecure-default-secret-change-before-deploying"
 	}
-	jwtTTLHours := 24
-	if v := os.Getenv("JWT_TTL_HOURS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			jwtTTLHours = n
-		}
-	}
-	jwtSigner := auth.NewJWTSigner(jwtSecret, jwtTTLHours)
+	jwtSigner := auth.NewJWTSigner(jwtSecret, cfg.JWTTTLHours)
 
 	// --- Unlock token signer (reuses JWT_SECRET; 15-min TTL) ---
 	unlockSigner := postmortem.NewUnlockSigner(jwtSecret)
@@ -109,8 +114,8 @@ func main() {
 	// encryptable/decryptable when ENCRYPTION_KEY is set. Config API writes
 	// that include credentials are rejected while it's absent. ---
 	var encryptor grpchandler.Encryptor
-	if raw := os.Getenv("ENCRYPTION_KEY"); raw != "" {
-		key, err := crypto.DecodeKey(raw)
+	if cfg.EncryptionKey != "" {
+		key, err := crypto.DecodeKey(cfg.EncryptionKey)
 		if err != nil {
 			log.Error("ENCRYPTION_KEY invalid (must be base64-encoded 32 bytes)", "err", err)
 			os.Exit(1)
@@ -515,23 +520,6 @@ func (slackHealthChecker) Check(ctx context.Context, credentials map[string]stri
 		return fmt.Errorf("slack: no bot_token configured")
 	}
 	return slack.NewClient(token).Ping(ctx)
-}
-
-// parseLogLevel maps LOG_LEVEL's value ("debug", "info", "warn"/"warning",
-// "error", case-insensitive) to a slog.Level, defaulting to Info for an
-// empty or unrecognized value so a typo degrades gracefully instead of
-// silencing every log line.
-func parseLogLevel(v string) slog.Level {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn", "warning":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
 }
 
 // loggingMiddleware wraps next with a request-level access log — method,
