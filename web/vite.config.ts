@@ -59,5 +59,14 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // Reporting only — no threshold configured yet. See the better-eng
+    // roadmap: this establishes a baseline before any gate is considered;
+    // a flat repo-wide threshold this early would invite low-value tests
+    // written just to satisfy it rather than reflecting real coverage.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+    },
   },
 })
