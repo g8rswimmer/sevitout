@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/g8rswimmer/sevitout/internal/store"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // ShareTokenValidator checks a share token's signature and expiry, returning
@@ -72,6 +73,8 @@ func NewShareViewHandler(p ShareViewHandlerParams) *ShareViewHandler {
 }
 
 func (h *ShareViewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log := telemetry.LoggerFromContext(r.Context())
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -89,6 +92,7 @@ func (h *ShareViewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "link not found", http.StatusNotFound)
 			return
 		}
+		log.ErrorContext(r.Context(), "share view: failed to look up link", "err", err)
 		http.Error(w, "failed to look up link", http.StatusInternalServerError)
 		return
 	}
@@ -116,6 +120,7 @@ func (h *ShareViewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "SEV not found", http.StatusNotFound)
 			return
 		}
+		log.ErrorContext(r.Context(), "share view: failed to get SEV", "sev_id", link.SEVID, "err", err)
 		http.Error(w, "failed to get SEV", http.StatusInternalServerError)
 		return
 	}
@@ -131,6 +136,7 @@ func (h *ShareViewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	all, err := h.announcements.ListBySEVID(r.Context(), sev.ID)
 	if err != nil {
+		log.ErrorContext(r.Context(), "share view: failed to list announcements", "sev_id", sev.ID, "err", err)
 		http.Error(w, "failed to list announcements", http.StatusInternalServerError)
 		return
 	}

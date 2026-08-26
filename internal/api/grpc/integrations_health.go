@@ -9,6 +9,7 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // healthCheckTimeout bounds each integration's connectivity check
@@ -88,33 +89,46 @@ func NewIntegrationsHealthHandler(p IntegrationsHealthHandlerParams) *Integratio
 }
 
 func (h *IntegrationsHealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log := telemetry.LoggerFromContext(r.Context())
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// This handler duplicates auth.authenticate's JWT+active-user+RBAC checks
+	// by hand (see its doc comment for why: it's a plain HTTP handler, not a
+	// gRPC service, so it bypasses the interceptor chain entirely) — and
+	// mirrors that function's practice of logging each rejection branch
+	// itself at Warn, since a plain http.Error here would otherwise be as
+	// invisible as an unlogged gRPC auth rejection.
 	token := auth.ExtractBearerToken(r)
 	if token == "" {
+		log.WarnContext(r.Context(), "integrations health rejected: missing bearer token")
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return
 	}
 	claims, err := h.signer.Validate(token)
 	if err != nil {
+		log.WarnContext(r.Context(), "integrations health rejected: invalid or expired token", "err", err)
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 	user, err := h.users.Get(r.Context(), claims.Subject)
 	if err != nil || !user.Active {
+		log.WarnContext(r.Context(), "integrations health rejected: unknown or inactive user", "user_id", claims.Subject)
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 	if !auth.HasPermission(user.OrgRole, integrationsHealthMethod) {
+		log.WarnContext(r.Context(), "integrations health rejected: insufficient permissions", "user_id", user.ID, "org_role", string(user.OrgRole))
 		http.Error(w, "insufficient permissions", http.StatusForbidden)
 		return
 	}
 
 	cfgs, err := h.integrations.List(r.Context())
 	if err != nil {
+		log.ErrorContext(r.Context(), "integrations health: failed to list integration configs", "err", err)
 		http.Error(w, "failed to list integration configs", http.StatusInternalServerError)
 		return
 	}

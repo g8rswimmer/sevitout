@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
@@ -33,6 +34,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store/crypto"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 	"github.com/g8rswimmer/sevitout/internal/store/postgres"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 //go:embed openapi/openapi.json
@@ -196,15 +198,26 @@ func main() {
 	aiServer := grpchandler.NewAIServer(aiDispatcher, stores.AIOutput, stores.AIPlugin)
 
 	grpcSrv := grpc.NewServer(
-		// auth runs outermost (not logging): it attaches *auth.UserContext to
-		// ctx via a new context.Context value, which only propagates to
+		// Three deep, outermost to innermost: request-ID, then auth, then
+		// logging. Each attaches its own value to a *new* context.Context
+		// (context.Context is immutable), which only propagates to
 		// interceptors/handlers further in — an interceptor can't see a
-		// context value added by something it calls. Logging needs to run
-		// after auth for its user_id attribution to work, so it's innermost
-		// here; auth.authenticate itself logs its own rejections (Warn) so a
-		// call that never reaches this logging interceptor is still visible.
-		grpc.ChainUnaryInterceptor(auth.UnaryInterceptor(jwtSigner, stores.User), grpchandler.LoggingUnaryInterceptor(log)),
-		grpc.ChainStreamInterceptor(auth.StreamInterceptor(jwtSigner, stores.User), grpchandler.LoggingStreamInterceptor(log)),
+		// context value added by something it calls. So request-ID has to run
+		// before auth for auth.authenticate's own rejection logs to carry it,
+		// and auth has to run before logging for its user_id attribution to
+		// work; logging is therefore innermost. auth.authenticate itself logs
+		// its own rejections (Warn, with request_id when available) so a call
+		// that never reaches the logging interceptor is still visible.
+		grpc.ChainUnaryInterceptor(
+			grpchandler.RequestIDUnaryInterceptor(),
+			auth.UnaryInterceptor(jwtSigner, stores.User),
+			grpchandler.LoggingUnaryInterceptor(log),
+		),
+		grpc.ChainStreamInterceptor(
+			grpchandler.RequestIDStreamInterceptor(),
+			auth.StreamInterceptor(jwtSigner, stores.User),
+			grpchandler.LoggingStreamInterceptor(log),
+		),
 	)
 	pb.RegisterSEVServiceServer(grpcSrv, sevServer)
 	pb.RegisterAuditServiceServer(grpcSrv, auditServer)
@@ -226,7 +239,11 @@ func main() {
 	// --- REST gateway ---
 	// WithMetadata extracts the JWT from either the Authorization header or the
 	// "token" httpOnly cookie and forwards it as gRPC metadata so the auth
-	// interceptors can validate it.
+	// interceptors can validate it. It also bridges an incoming X-Request-Id
+	// HTTP header into the same gRPC metadata key
+	// grpchandler.RequestIDUnaryInterceptor checks, so one correlation ID
+	// survives the REST→loopback-gRPC hop instead of a fresh one being minted
+	// at this boundary.
 	gwMux := runtime.NewServeMux(
 		// HTTPBodyMarshaler falls back to the wrapped JSONPb marshaler for
 		// every response except google.api.HttpBody (ReportService.ExportSEVs'
@@ -238,13 +255,7 @@ func main() {
 			},
 		}),
 		runtime.WithMetadata(func(_ context.Context, r *http.Request) metadata.MD {
-			if v := r.Header.Get("Authorization"); v != "" {
-				return metadata.Pairs("authorization", v)
-			}
-			if c, err := r.Cookie("token"); err == nil {
-				return metadata.Pairs("authorization", "Bearer "+c.Value)
-			}
-			return nil
+			return gatewayMetadata(r)
 		}),
 	)
 	// Dial a single loopback connection shared across all gateway services.
@@ -522,17 +533,62 @@ func (slackHealthChecker) Check(ctx context.Context, credentials map[string]stri
 	return slack.NewClient(token).Ping(ctx)
 }
 
+// gatewayMetadata builds the gRPC metadata grpc-gateway attaches to every
+// loopback call it makes on behalf of an incoming REST request: the caller's
+// bearer token (from either the Authorization header or the "token"
+// httpOnly cookie) so the auth interceptors can validate it, and an
+// X-Request-Id header, if present, forwarded as
+// grpchandler.RequestIDMetadataKey so RequestIDUnaryInterceptor reuses it
+// instead of minting a fresh ID at this hop. Returns nil (grpc-gateway's
+// documented "no extra metadata" value) when neither is present, rather
+// than an empty-but-non-nil MD.
+func gatewayMetadata(r *http.Request) metadata.MD {
+	var pairs []string
+	if v := r.Header.Get("Authorization"); v != "" {
+		pairs = append(pairs, "authorization", v)
+	} else if c, err := r.Cookie("token"); err == nil {
+		pairs = append(pairs, "authorization", "Bearer "+c.Value)
+	}
+	if v := r.Header.Get("X-Request-Id"); v != "" {
+		pairs = append(pairs, grpchandler.RequestIDMetadataKey, v)
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	return metadata.Pairs(pairs...)
+}
+
 // loggingMiddleware wraps next with a request-level access log — method,
 // path, resulting status code, and duration — tagged with name so the three
 // plain http.Handlers that sit outside the gRPC server (WebSocket upgrades,
 // the integration health check, and the public share view) get the same
 // visibility grpchandler.LoggingUnaryInterceptor gives every gRPC/REST call.
+//
+// It also gives these three handlers the same request-scoped logging the
+// gRPC path has: it reuses an incoming X-Request-Id header or mints a fresh
+// UUID, echoes it back in the response header, and binds a *slog.Logger
+// carrying that request_id into the request's context (via
+// telemetry.WithLogger) so next can retrieve it with
+// telemetry.LoggerFromContext(r.Context()) — this is what lets
+// share_view.go and integrations_health.go log their own internal failures
+// instead of only ever calling http.Error.
 func loggingMiddleware(log *slog.Logger, name string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+
+		reqID := r.Header.Get("X-Request-Id")
+		if reqID == "" {
+			reqID = uuid.NewString()
+		}
+		w.Header().Set("X-Request-Id", reqID)
+		reqLog := log.With("request_id", reqID)
+		ctx := telemetry.WithRequestID(r.Context(), reqID)
+		ctx = telemetry.WithLogger(ctx, reqLog)
+		r = r.WithContext(ctx)
+
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
-		log.InfoContext(r.Context(), "http request",
+		reqLog.InfoContext(r.Context(), "http request",
 			"handler", name, "method", r.Method, "path", r.URL.Path,
 			"status", sw.status, "duration_ms", time.Since(start).Milliseconds())
 	})

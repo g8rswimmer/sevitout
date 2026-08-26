@@ -1,8 +1,11 @@
 package grpc_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +16,56 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
+
+// withCapturedDefaultLog temporarily installs a JSON slog.Logger as the
+// package-level default — what telemetry.LoggerFromContext falls back to
+// when a handler is invoked directly (as in these tests) rather than
+// through cmd/server/main.go's loggingMiddleware, which would otherwise
+// bind a request-scoped logger into ctx. Mirrors
+// internal/auth/password_logging_test.go's helper of the same name.
+func withCapturedDefaultLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// erroringShareStore wraps *memory.ShareStore, returning err from
+// GetByToken instead of delegating — the in-memory store's own methods only
+// ever fail with store.ErrNotFound, which ShareViewHandler handles as an
+// expected 404, so a fault-injecting wrapper is needed to exercise its
+// internal-error (500) logging path at all.
+type erroringShareStore struct {
+	*memory.ShareStore
+	err error
+}
+
+func (e *erroringShareStore) GetByToken(_ context.Context, _ string) (*store.ShareableLink, error) {
+	return nil, e.err
+}
+
+// erroringSEVStore is erroringShareStore's counterpart for store.SEVStore.Get.
+type erroringSEVStore struct {
+	*memory.SEVStore
+	err error
+}
+
+func (e *erroringSEVStore) Get(_ context.Context, _ string) (*store.SEV, error) {
+	return nil, e.err
+}
+
+// erroringAnnouncementStore is erroringShareStore's counterpart for
+// store.AnnouncementStore.ListBySEVID.
+type erroringAnnouncementStore struct {
+	*memory.AnnouncementStore
+	err error
+}
+
+func (e *erroringAnnouncementStore) ListBySEVID(_ context.Context, _ string) ([]*store.Announcement, error) {
+	return nil, e.err
+}
 
 type testShareView struct {
 	ts     *httptest.Server
@@ -198,5 +251,138 @@ func TestShareViewHandler_MethodNotAllowed(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", resp.StatusCode)
+	}
+}
+
+// The three tests below guard that ShareViewHandler's internal-error (500)
+// paths now log at Error before calling http.Error — previously these three
+// call sites had no accompanying slog call at all.
+
+func TestShareViewHandler_LookupFailure_LogsError(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	boom := errors.New("db exploded")
+	handler := grpchandler.NewShareViewHandler(grpchandler.ShareViewHandlerParams{
+		Shares:        &erroringShareStore{ShareStore: memory.NewShareStore(), err: boom},
+		SEVs:          memory.NewSEVStore(),
+		Announcements: memory.NewAnnouncementStore(),
+		Validator:     share.NewSigner("test-secret"),
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/s/{token}", handler)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/s/some-token")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+
+	fields := lastLogLine(t, buf)
+	if fields["level"] != "ERROR" {
+		t.Errorf("level = %v, want ERROR", fields["level"])
+	}
+	if fields["msg"] != "share view: failed to look up link" {
+		t.Errorf("msg = %v, want %q", fields["msg"], "share view: failed to look up link")
+	}
+}
+
+func TestShareViewHandler_SEVFetchFailure_LogsError(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	shares := memory.NewShareStore()
+	signer := share.NewSigner("test-secret")
+	now := time.Now()
+	expiresAt := now.Add(time.Hour)
+	token, err := signer.Sign("sev-missing-from-fake-store", expiresAt)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if err := shares.Create(context.Background(), &store.ShareableLink{
+		SEVID: "sev-missing-from-fake-store", Token: token, CreatedBy: "user-1", ExpiresAt: &expiresAt, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("Create share link: %v", err)
+	}
+
+	boom := errors.New("db exploded")
+	handler := grpchandler.NewShareViewHandler(grpchandler.ShareViewHandlerParams{
+		Shares:        shares,
+		SEVs:          &erroringSEVStore{SEVStore: memory.NewSEVStore(), err: boom},
+		Announcements: memory.NewAnnouncementStore(),
+		Validator:     signer,
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/s/{token}", handler)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/s/" + token)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+
+	fields := lastLogLine(t, buf)
+	if fields["level"] != "ERROR" {
+		t.Errorf("level = %v, want ERROR", fields["level"])
+	}
+	if fields["msg"] != "share view: failed to get SEV" {
+		t.Errorf("msg = %v, want %q", fields["msg"], "share view: failed to get SEV")
+	}
+}
+
+func TestShareViewHandler_AnnouncementsFailure_LogsError(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	sevs := memory.NewSEVStore()
+	shares := memory.NewShareStore()
+	signer := share.NewSigner("test-secret")
+	now := time.Now()
+	sv := &store.SEV{Title: "Outage", SeverityLevel: 1, Status: store.SEVStatusOpen, StartedAt: &now, CreatedBy: "user-1", CreatedAt: now, UpdatedAt: now}
+	if err := sevs.Create(context.Background(), sv); err != nil {
+		t.Fatalf("Create SEV: %v", err)
+	}
+	expiresAt := now.Add(time.Hour)
+	token, err := signer.Sign(sv.ID, expiresAt)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if err := shares.Create(context.Background(), &store.ShareableLink{
+		SEVID: sv.ID, Token: token, CreatedBy: "user-1", ExpiresAt: &expiresAt, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("Create share link: %v", err)
+	}
+
+	boom := errors.New("db exploded")
+	handler := grpchandler.NewShareViewHandler(grpchandler.ShareViewHandlerParams{
+		Shares:        shares,
+		SEVs:          sevs,
+		Announcements: &erroringAnnouncementStore{AnnouncementStore: memory.NewAnnouncementStore(), err: boom},
+		Validator:     signer,
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/s/{token}", handler)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/s/" + token)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+
+	fields := lastLogLine(t, buf)
+	if fields["level"] != "ERROR" {
+		t.Errorf("level = %v, want ERROR", fields["level"])
+	}
+	if fields["msg"] != "share view: failed to list announcements" {
+		t.Errorf("msg = %v, want %q", fields["msg"], "share view: failed to list announcements")
 	}
 }
