@@ -362,6 +362,12 @@ func main() {
 	// line per scrape would be pure noise), matching /openapi.json's
 	// treatment above and standard Prometheus scrape convention.
 	httpMux.Handle("/metrics", promhttp.Handler())
+	// GET /healthz: liveness/readiness probe for a container orchestrator.
+	// Deliberately unauthenticated and un-logged on success, same rationale
+	// as /metrics above — see grpchandler.NewHealthzHandler's doc comment for
+	// how this differs from the authenticated, admin-only
+	// /admin/integrations/health.
+	httpMux.Handle("/healthz", grpchandler.NewHealthzHandler(stores))
 
 	// --- Background metrics refresher: sevitout_open_sevs and (when
 	// running against real Postgres) sevitout_db_pool_* — see
@@ -426,6 +432,17 @@ type Stores struct {
 	// pgxpool.Pool.Stat() for the sevitout_db_pool_* metrics without every
 	// caller needing it threaded through separately.
 	Pool *pgxpool.Pool
+}
+
+// Ping reports whether the backing store is reachable, satisfying
+// grpchandler.Pinger for GET /healthz. Against real Postgres it delegates to
+// pgxpool.Pool.Ping; against the in-memory dev fallback (Pool nil) it's a
+// no-op that always succeeds — there's no connection to lose.
+func (s *Stores) Ping(ctx context.Context) error {
+	if s.Pool == nil {
+		return nil
+	}
+	return s.Pool.Ping(ctx)
 }
 
 // buildStores selects the store backend: in-memory when dsn is empty,
