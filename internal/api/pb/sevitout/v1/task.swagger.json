@@ -55,6 +55,45 @@
         ]
       }
     },
+    "/v1/sevs/{sevId}/jira-issues": {
+      "post": {
+        "summary": "CreateJiraIssue creates a new Jira issue pre-filled with SEV context,\nlinks it to the SEV, and returns the linked task record.",
+        "operationId": "TaskService_CreateJiraIssue",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceCreateJiraIssueBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
     "/v1/sevs/{sevId}/tasks": {
       "get": {
         "summary": "ListTasks returns all tasks linked to a SEV.",
@@ -227,6 +266,35 @@
         "body": {
           "type": "string",
           "description": "body is the issue description; callers should pre-fill with SEV context."
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "description": "priority: critical | non-critical (controls default SLA due date)."
+        }
+      }
+    },
+    "TaskServiceCreateJiraIssueBody": {
+      "type": "object",
+      "properties": {
+        "projectKey": {
+          "type": "string",
+          "description": "project_key is the Jira project's key (e.g. \"OPS\"), not its numeric ID."
+        },
+        "issueType": {
+          "type": "string",
+          "description": "issue_type is the target project's issue type name (e.g. \"Task\", \"Bug\")\n— it must already exist on that project."
+        },
+        "summary": {
+          "type": "string",
+          "description": "summary is the issue's title (Jira's naming for the field GitHub calls\n\"title\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "description is the issue body; callers should pre-fill with SEV\ncontext."
         },
         "relationshipType": {
           "type": "string",
