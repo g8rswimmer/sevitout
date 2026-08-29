@@ -59,14 +59,24 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: true,
-    // Reporting only — no threshold configured yet. See the better-eng
-    // roadmap: this establishes a baseline before any gate is considered;
-    // a flat repo-wide threshold this early would invite low-value tests
-    // written just to satisfy it rather than reflecting real coverage.
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: './coverage',
+      // roadmap Phase 5: gate set a few points below the actual aggregate
+      // measured when this was added (statements 77.86%, branches 72.58%,
+      // functions 67.63%, lines 79.82% — see demo/test-coverage-ci-gate.md)
+      // rather than at it, so normal fluctuation doesn't fail `main` on a
+      // borderline day. `npm test -- --coverage` (frontend-ci.yml) already
+      // fails non-zero when any of these aren't met — global, not
+      // per-file, so one weak file doesn't block on its own. Ratchet
+      // upward in a follow-up once there's real headroom above it.
+      thresholds: {
+        statements: 75,
+        branches: 70,
+        functions: 65,
+        lines: 77,
+      },
     },
   },
 })

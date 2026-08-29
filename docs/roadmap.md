@@ -233,7 +233,7 @@ routes on the same `httpMux`.
 
 ## Phase 5 — Test coverage + CI gate
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/test-coverage-ci-gate.md`](../demo/test-coverage-ci-gate.md)
 
 Test coverage is generally strong (`internal/auth`, `internal/api/grpc`,
 `internal/store/postgres`, `internal/ai`, `cmd/slackbot` are all well-tested), with
