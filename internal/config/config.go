@@ -68,6 +68,17 @@ type Config struct {
 	// API host to default to.
 	JiraCloudID  string
 	JiraAPIToken string
+
+	// JiraSiteURL is JIRA_SITE_URL (e.g. "https://acme.atlassian.net") —
+	// optional, and independent of whether the Jira integration itself is
+	// enabled (that's governed by JiraCloudID/JiraAPIToken alone). It's
+	// used purely to build human-facing "browse" links on created/fetched
+	// Jira issues (internal/integrations/tasktracker/jira.Client.NewClient's
+	// siteURL parameter) — the Cloud ID used for actual API calls doesn't
+	// determine the tenant's site host, so this has to be supplied
+	// separately if a clickable link is wanted. Left unset, issue links
+	// fall back to the API's own non-browsable resource URL.
+	JiraSiteURL string
 }
 
 // Load reads every environment variable cmd/server's main() needs into a
@@ -89,6 +100,7 @@ func Load() (*Config, error) {
 		EncryptionKey:          os.Getenv("ENCRYPTION_KEY"),
 		JiraCloudID:            os.Getenv("JIRA_CLOUD_ID"),
 		JiraAPIToken:           os.Getenv("JIRA_API_TOKEN"),
+		JiraSiteURL:            os.Getenv("JIRA_SITE_URL"),
 	}
 
 	if v := os.Getenv("JWT_TTL_HOURS"); v != "" {

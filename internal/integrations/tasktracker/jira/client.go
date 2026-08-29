@@ -30,15 +30,15 @@ const (
 	gatewayBaseURL = "https://api.atlassian.com/ex/jira"
 )
 
-// Issue is a Jira issue as returned by the client. URL is the REST API's own
-// "self" link (the machine-readable resource URL, e.g.
-// "https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/issue/10007") —
-// unlike github.Issue.HTMLURL, this isn't a human-clickable "browse" page:
-// with only a cloudId (not the tenant's own https://{site}.atlassian.net
-// host — the API gateway and the browsable web UI are different hosts, and
-// the site name isn't derivable from cloudId alone), there's no browse link
-// this client can construct. See CreateIssueRequest's caller
-// (internal/api/grpc/task.go's CreateJiraIssue) for how that's surfaced.
+// Issue is a Jira issue as returned by the client. URL is the human-facing
+// "browse" link (https://{site}.atlassian.net/browse/{Key}, mirroring
+// github.Issue.HTMLURL) when the Client was built with a site URL — the
+// Cloud ID alone (used for every actual API call, via the api.atlassian.com
+// gateway) doesn't determine the tenant's https://{site}.atlassian.net
+// host, so a site URL has to be supplied separately purely for this. When
+// none was supplied, URL falls back to the REST API's own "self" link
+// instead (the machine-readable resource URL, not a page a person can
+// open) — see NewClient's doc comment.
 type Issue struct {
 	Key         string
 	Summary     string
@@ -83,6 +83,7 @@ func (e *APIError) HTTPStatus() int { return e.StatusCode }
 // https://{site}.atlassian.net host directly.
 type Client struct {
 	baseURL  string
+	siteURL  string // optional; see NewClient's doc comment. Empty means Issue.URL falls back to the API's own self link.
 	apiToken string
 	http     *http.Client
 }
@@ -94,20 +95,43 @@ type Client struct {
 // requests through the api.atlassian.com gateway use Bearer token auth, not
 // HTTP Basic Auth — no account email is needed alongside the token. cloudID
 // is the tenant's Cloud ID (a UUID, not its site name) — see that page for
-// how to find it under admin.atlassian.com.
-func NewClient(cloudID, apiToken string) *Client {
-	return NewClientWithBaseURL(gatewayBaseURL+"/"+cloudID, apiToken)
+// how to find it under admin.atlassian.com, or
+// https://{site}.atlassian.net/_edge/tenant_info (public, no auth) to
+// verify it against a known site name directly.
+//
+// siteURL (e.g. "https://acme.atlassian.net") is optional and used purely
+// to build human-facing "browse" links on the Issues this Client returns
+// — it plays no part in any actual API call, which always goes through the
+// cloudID-addressed gateway regardless. Pass "" to skip it; Issue.URL then
+// falls back to the API's own "self" link (see Issue's doc comment).
+func NewClient(cloudID, apiToken, siteURL string) *Client {
+	return newClient(gatewayBaseURL+"/"+cloudID, apiToken, siteURL)
 }
 
 // NewClientWithBaseURL returns a Client that uses a custom base URL instead
 // of deriving one from a Cloud ID, intended for use in tests with
-// httptest.Server — mirrors github.NewClientWithBaseURL.
-func NewClientWithBaseURL(baseURL, apiToken string) *Client {
+// httptest.Server — mirrors github.NewClientWithBaseURL. siteURL is
+// optional, same as NewClient's.
+func NewClientWithBaseURL(baseURL, apiToken, siteURL string) *Client {
+	return newClient(baseURL, apiToken, siteURL)
+}
+
+func newClient(baseURL, apiToken, siteURL string) *Client {
 	return &Client{
 		baseURL:  strings.TrimSuffix(baseURL, "/"),
+		siteURL:  strings.TrimSuffix(siteURL, "/"),
 		apiToken: apiToken,
 		http:     &http.Client{Timeout: requestTimeout},
 	}
+}
+
+// browseURL returns the human-facing browse link for key, or "" when no
+// site URL was configured — see NewClient's doc comment.
+func (c *Client) browseURL(key string) string {
+	if c.siteURL == "" {
+		return ""
+	}
+	return c.siteURL + "/browse/" + url.PathEscape(key)
 }
 
 // Ping verifies that apiToken is accepted by Jira, by calling the
@@ -160,7 +184,14 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*Issue, error) {
 		slog.WarnContext(ctx, "jira api call returned error", "op", "GetIssue", "status", resp.StatusCode, "messages", apiErr.Messages)
 		return nil, apiErr
 	}
-	return decodeIssue(resp.Body)
+	issue, err := decodeIssue(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if u := c.browseURL(issue.Key); u != "" {
+		issue.URL = u
+	}
+	return issue, nil
 }
 
 // CreateIssue creates a new Jira issue in the given project and returns the
@@ -224,6 +255,9 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 		Summary:     req.Summary,
 		Description: req.Description,
 		URL:         created.Self,
+	}
+	if u := c.browseURL(created.Key); u != "" {
+		issue.URL = u
 	}
 	slog.InfoContext(ctx, "jira issue created", "project_key", req.ProjectKey, "key", issue.Key, "url", issue.URL)
 	return issue, nil

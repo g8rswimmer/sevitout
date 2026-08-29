@@ -54,7 +54,9 @@ that the new handler code reads almost identically to its GitHub sibling.
   together (unlike GitHub's single `GITHUB_TOKEN`); partial configuration is
   treated the same as none (`cmd/server/main.go` only builds a client when
   both are non-empty) rather than starting with a client that would fail
-  every call.
+  every call. `JIRA_SITE_URL` (e.g. `"https://acme.atlassian.net"`) is a
+  third, independently optional var — see "Human-clickable issue links"
+  under Design notes below.
 - **`cmd/server/main.go`**: `jiraIssueClient` (adapts `*jira.Client` to
   `grpchandler.JiraIssueClient`, mirroring `githubIssueClient`) and
   `jiraHealthChecker` (adapts it to `grpchandler.HealthChecker`, registered
@@ -62,9 +64,10 @@ that the new handler code reads almost identically to its GitHub sibling.
   mirroring `githubHealthChecker`/`pagerdutyHealthChecker`) — the latter
   reads its Jira tenant's `cloud_id` from the Config API's per-integration
   *settings*, not credentials, since it identifies which tenant to call
-  rather than authenticating to it.
+  rather than authenticating to it. It passes `""` for the site URL, since
+  `Ping` never builds an issue link.
 - `README.md`, `.env.example`, `deploy/docker-compose.yml` updated with the
-  two new env vars, matching every existing optional-integration's
+  three new env vars, matching every existing optional-integration's
   documentation pattern.
 
 ## Design notes
@@ -81,13 +84,23 @@ supported, forward-looking integration path) use a Bearer token in the
 `Authorization` header, addressed by Cloud ID
 (`https://api.atlassian.com/ex/jira/{cloudId}`), not the tenant's site name,
 and no account email is needed alongside the token at all. Fixed by
-reworking `NewClient` to take `(cloudID, apiToken)` and build the gateway
-URL internally, dropping `email` from `Client` and `Config` entirely, and
-switching `setHeaders` from `SetBasicAuth` to a literal `Bearer ` prefix.
-One side effect: with only a Cloud ID (not the site's browsable host), this
-client can no longer construct a human "browse" link for a created issue —
-see `Issue.URL`'s doc comment for what it returns instead (the API's own
-`self` resource link).
+reworking `NewClient` to take `(cloudID, apiToken, siteURL)` and build the
+gateway URL internally, dropping `email` from `Client` and `Config`
+entirely, and switching `setHeaders` from `SetBasicAuth` to a literal
+`Bearer ` prefix.
+
+**Human-clickable issue links: a separate, optional `siteURL`.** A Cloud ID
+alone doesn't determine the tenant's `https://{site}.atlassian.net` host —
+the API gateway and the browsable web UI are different hosts entirely (live
+testing confirmed this concretely: the same Bearer token that works against
+`api.atlassian.com/ex/jira/{cloudId}` gets a `403` calling
+`https://{site}.atlassian.net/rest/api/3/...` directly). So `NewClient`
+takes a third, independently optional `siteURL` parameter used *only* to
+build `Issue.URL` as `{siteURL}/browse/{key}` — it plays no part in any
+actual API call, which always goes through the Cloud-ID-addressed gateway
+regardless of whether `siteURL` is set. Left empty, `Issue.URL` falls back
+to the API's own `self` resource link (not browsable, but always valid) —
+see `Issue`'s doc comment.
 
 **Second interface + second RPC, not a generalized `IssueClient` + a
 `taskTrackerFactory`** — the roadmap named both as options going in. The
@@ -185,13 +198,18 @@ gateway routing layer instead — check, in order:
 ## Walkthrough
 
 ```bash
-# JIRA_CLOUD_ID: find it under admin.atlassian.com (see the linked docs
-# above) — it's a UUID, not the site name.
+# JIRA_CLOUD_ID: find it under admin.atlassian.com, or verify directly
+# against the target site (see Troubleshooting above) — it's a UUID, not
+# the site name.
 export JIRA_CLOUD_ID=1a11d016-8984-4c3e-b9ab-142dd06acb1b
 export JIRA_API_TOKEN=...
+# Optional — omit for a working but non-browsable issue link (see Design
+# notes' "Human-clickable issue links").
+export JIRA_SITE_URL=https://acme.atlassian.net
 make up
 # "Jira integration enabled" in the api container's log, vs. "...DISABLED"
-# when either is unset.
+# when JIRA_CLOUD_ID/JIRA_API_TOKEN aren't both set (JIRA_SITE_URL doesn't
+# affect this).
 
 TOKEN=$(curl -s -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"changeme123"}' | jq -r .token)
@@ -201,11 +219,12 @@ curl -s -X POST "http://localhost:8080/v1/sevs/SEV-2026-0001/jira-issues" \
   -d '{"project_key":"OPS","issue_type":"Task","summary":"Investigate root cause",
        "description":"Follow-up from SEV-2026-0001","relationship_type":"action-item","priority":"critical"}'
 # {"id":..., "external_system":"jira", "task_id":"OPS-7",
-#  "url":"https://api.atlassian.com/ex/jira/1a11d016.../rest/api/3/issue/10007", ...}
-# (the API's own resource link, not a browsable page — see Issue.URL's doc
-# comment)
+#  "url":"https://acme.atlassian.net/browse/OPS-7", ...}
+# (a real, clickable link — this is what a live run actually returned,
+# see Live-verified below. With JIRA_SITE_URL unset, url would instead be
+# the API's own non-browsable self link.)
 
-# Without JIRA_* set, the same call returns 503:
+# Without JIRA_CLOUD_ID/JIRA_API_TOKEN set, the same call returns 503:
 # {"code":14, "message":"Jira integration is not configured (JIRA_CLOUD_ID/JIRA_API_TOKEN not set)"}
 ```
 
@@ -216,17 +235,20 @@ go build ./... && go vet ./... && gofmt -l . && go test ./... && go test -race .
 ```
 
 New coverage: `internal/integrations/tasktracker/jira/client_test.go` (client,
-84.6% — Error()/HTTPStatus() untested, matching the existing `github`
+85.2% — Error()/HTTPStatus() untested, matching the existing `github`
 package's own 78.7% baseline for the same trivial methods; includes
 `TestCreateIssue_NonJSONErrorBody_SurfacedVerbatim` and
-`TestCreateIssue_EmptyErrorBody_NoMessages`, covering the raw-body fallback
-described in Troubleshooting above), `task_test.go`'s
+`TestCreateIssue_EmptyErrorBody_NoMessages` covering the raw-body fallback
+described in Troubleshooting above, and
+`TestGetIssue_SiteURLConfigured_*`/`TestCreateIssue_SiteURLConfigured_*`
+covering the browse-link construction — including trailing-slash trimming
+and key-escaping — described in Design notes), `task_test.go`'s
 `TestCreateJiraIssue_*` suite (mirrors every `TestCreateGitHubIssue_*` case:
 valid creation, not-configured, API-error-to-status-code mapping, generic
 error, duplicate-link conflict, SEV-not-found, validation errors, event
 publish, sensitive-SEV suppresses publish), `internal/auth/rbac_test.go`
 (the new `CreateJiraIssue` RBAC floor), `internal/config/config_test.go`
-(the two new env vars).
+(the three new env vars).
 
 Live-verified end-to-end against a running server (in-memory store): route
 registered and reachable (confirmed via the generated swagger — `grep jira
@@ -238,26 +260,32 @@ insufficient permissions` response, because `internal/auth/rbac.go`'s
 design) hadn't been updated alongside the new RPC. Fixed by adding the
 missing entry; the live retest after the fix confirmed the correct `503`.
 
-Separately, live-verified against a **real Jira Cloud instance**: after
-correcting a misconfigured `JIRA_CLOUD_ID` (see Troubleshooting above),
-`CreateJiraIssue` created a real issue, linked it to a SEV, and returned it
-correctly — confirming the client's gateway URL construction, Bearer auth,
-and ADF description encoding all work against Jira's actual API, not just
-the unit tests' mocked one. The test issue was deleted afterward via a
-direct `DELETE /rest/api/3/issue/{key}` call (not something this codebase's
-`JiraIssueClient` exposes — Sevitout has no delete-issue feature — done
-directly against the API to leave the test project clean).
+Separately, live-verified against a **real Jira Cloud instance**, twice:
+first, after correcting a misconfigured `JIRA_CLOUD_ID` (see Troubleshooting
+above), `CreateJiraIssue` created a real issue and linked it to a SEV,
+confirming the client's gateway URL construction, Bearer auth, and ADF
+description encoding all work against Jira's actual API, not just the unit
+tests' mocked one; second, after adding `JIRA_SITE_URL`, the same call
+returned `"url":"https://sevitout.atlassian.net/browse/KAN-6"` — a real,
+correctly-formed browse link, not the API self link. Both test issues were
+deleted afterward via a direct `DELETE /rest/api/3/issue/{key}` call against
+the gateway host (not something this codebase's `JiraIssueClient` exposes —
+Sevitout has no delete-issue feature — done directly against the API to
+leave the test project clean; the same `DELETE` against the site's own host
+instead of the gateway returned `403`, independently confirming the two
+hosts are genuinely separate auth surfaces, not just different URLs for the
+same backend).
 
 ## Known limitations
 
-- **No human-clickable issue link** — `Issue.URL` (and the `url` field on
-  the resulting `TaskResponse`) is the Jira REST API's own `self` resource
-  link, not a `https://{site}.atlassian.net/browse/{key}` page a person can
-  open in a browser. With only a Cloud ID configured, this client has no way
-  to know the tenant's site name to construct one. If a clickable link
-  becomes a real requirement, the fix is adding an optional site-name
-  setting alongside `cloud_id` purely for building browse links — not
-  reverting to the site URL as the base for API calls.
+- **Human-clickable issue links require `JIRA_SITE_URL`** — without it,
+  `Issue.URL` (and the `url` field on the resulting `TaskResponse`) falls
+  back to the Jira REST API's own `self` resource link, not a
+  `https://{site}.atlassian.net/browse/{key}` page a person can open in a
+  browser. This is opt-in rather than automatic because the Cloud ID used
+  for actual API calls doesn't determine the tenant's site host — see
+  Design notes' "Human-clickable issue links" for why they're two separate
+  values.
 - **No frontend UI** — `TasksPanel.tsx`'s "Create GitHub Issue" action has
   no Jira sibling yet. The API is fully functional and independently usable
   (per `CLAUDE.md`'s API-first principle) via `curl`, the Slack bot, or a

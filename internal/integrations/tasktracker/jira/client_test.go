@@ -23,7 +23,7 @@ func TestPing_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	if err := c.Ping(context.Background()); err != nil {
 		t.Errorf("Ping: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestPing_ErrorOnNonOK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "bad-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "bad-token", "")
 	if err := c.Ping(context.Background()); err == nil {
 		t.Error("Ping should error on a non-200 response")
 	}
@@ -69,7 +69,7 @@ func TestGetIssue(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	issue, err := c.GetIssue(context.Background(), "PROJ-42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -92,6 +92,64 @@ func TestGetIssue(t *testing.T) {
 	}
 }
 
+func TestGetIssue_SiteURLConfigured_ReturnsBrowseLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"key":    "PROJ-42",
+			"self":   "https://api.atlassian.com/ex/jira/some-cloud-id/rest/api/3/issue/10042",
+			"fields": map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "https://acme.atlassian.net")
+	issue, err := c.GetIssue(context.Background(), "PROJ-42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://acme.atlassian.net/browse/PROJ-42"
+	if issue.URL != want {
+		t.Errorf("url: got %q, want the human browse link %q (not the API self link)", issue.URL, want)
+	}
+}
+
+func TestGetIssue_SiteURLConfigured_TrailingSlashTrimmed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1", "fields": map[string]any{}})
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "https://acme.atlassian.net/")
+	issue, err := c.GetIssue(context.Background(), "PROJ-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://acme.atlassian.net/browse/PROJ-1"
+	if issue.URL != want {
+		t.Errorf("url: got %q, want %q (no double slash from a trailing-slash site URL)", issue.URL, want)
+	}
+}
+
+func TestGetIssue_SiteURLConfigured_EscapesKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1/../evil", "fields": map[string]any{}})
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "https://acme.atlassian.net")
+	issue, err := c.GetIssue(context.Background(), "PROJ-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://acme.atlassian.net/browse/PROJ-1%2F..%2Fevil"
+	if issue.URL != want {
+		t.Errorf("url: got %q, want %q (key must be escaped in the browse link too)", issue.URL, want)
+	}
+}
+
 func TestGetIssue_NullDescription(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -102,7 +160,7 @@ func TestGetIssue_NullDescription(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	issue, err := c.GetIssue(context.Background(), "PROJ-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -121,7 +179,7 @@ func TestGetIssue_EscapesKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	if _, err := c.GetIssue(context.Background(), "PROJ-1/../evil"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -137,7 +195,7 @@ func TestGetIssue_NotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	_, err := c.GetIssue(context.Background(), "PROJ-999")
 	if err == nil {
 		t.Fatal("expected error for 404, got nil")
@@ -168,7 +226,7 @@ func TestCreateIssue(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	issue, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{
 		ProjectKey: "PROJ", IssueType: "Task", Summary: "SEV follow-up", Description: "details",
 	})
@@ -203,6 +261,25 @@ func TestCreateIssue(t *testing.T) {
 	}
 }
 
+func TestCreateIssue_SiteURLConfigured_ReturnsBrowseLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-7", "self": selfURL()})
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "https://acme.atlassian.net")
+	issue, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://acme.atlassian.net/browse/PROJ-7"
+	if issue.URL != want {
+		t.Errorf("url: got %q, want the human browse link %q (not the API self link %q)", issue.URL, want, selfURL())
+	}
+}
+
 func TestCreateIssue_OmitsDescriptionWhenEmpty(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +290,7 @@ func TestCreateIssue_OmitsDescriptionWhenEmpty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{
 		ProjectKey: "PROJ", IssueType: "Task", Summary: "no description",
 	})
@@ -238,7 +315,7 @@ func TestCreateIssue_SendsLabels(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{
 		ProjectKey: "PROJ", IssueType: "Task", Summary: "s",
 		Labels: []string{"SEV-2026-0009", "critical"},
@@ -260,7 +337,7 @@ func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
 	if err == nil {
 		t.Fatal("expected error for non-201 status, got nil")
@@ -281,7 +358,7 @@ func TestCreateIssue_NonJSONErrorBody_SurfacedVerbatim(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
 
 	var apiErr *jira.APIError
@@ -299,7 +376,7 @@ func TestCreateIssue_EmptyErrorBody_NoMessages(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
 
 	var apiErr *jira.APIError
@@ -325,7 +402,7 @@ func TestCreateIssue_UnexpectedStatus_SurfacesAPIMessages(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{Summary: "s"})
 
 	var apiErr *jira.APIError
@@ -341,10 +418,8 @@ func TestCreateIssue_UnexpectedStatus_SurfacesAPIMessages(t *testing.T) {
 }
 
 // selfURL is a fixed "self" link value used by TestCreateIssue's mock
-// server response — CreateIssue now reads this field directly as the
-// returned Issue.URL (see Issue's doc comment: with only a cloudId, this
-// client can't construct a human "browse" link the way it could when a
-// full site base URL was configured directly).
+// server response — CreateIssue reads this field directly as the returned
+// Issue.URL whenever no site URL is configured (see Issue's doc comment).
 func selfURL() string {
 	return "https://api.atlassian.com/ex/jira/some-cloud-id/rest/api/3/issue/10007"
 }

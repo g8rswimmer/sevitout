@@ -96,10 +96,13 @@ func main() {
 	// are required together (unlike GitHub's single GITHUB_TOKEN — see
 	// config.Config.JiraCloudID's doc comment for why); partial
 	// configuration is treated the same as none rather than starting with a
-	// client that would fail every call.
+	// client that would fail every call. JIRA_SITE_URL is independently
+	// optional (see config.Config.JiraSiteURL's doc comment) — passed
+	// through either way, since jira.NewClient treats "" as "no browse
+	// links" rather than an error.
 	var jiraClient grpchandler.JiraIssueClient
 	if cfg.JiraCloudID != "" && cfg.JiraAPIToken != "" {
-		jiraClient = &jiraIssueClient{c: jira.NewClient(cfg.JiraCloudID, cfg.JiraAPIToken)}
+		jiraClient = &jiraIssueClient{c: jira.NewClient(cfg.JiraCloudID, cfg.JiraAPIToken, cfg.JiraSiteURL)}
 		log.Info("Jira integration enabled")
 	} else {
 		log.Info("Jira integration DISABLED")
@@ -616,7 +619,9 @@ func (jiraHealthChecker) Check(ctx context.Context, credentials map[string]strin
 	if cloudID == "" {
 		return fmt.Errorf("jira: no cloud_id configured")
 	}
-	return jira.NewClient(cloudID, apiToken).Ping(ctx)
+	// No site URL: Ping never builds an issue link, so the (purely cosmetic)
+	// browse-link site URL has nothing to do here.
+	return jira.NewClient(cloudID, apiToken, "").Ping(ctx)
 }
 
 // slackHealthChecker adapts slack.Client to grpchandler.HealthChecker. Its
