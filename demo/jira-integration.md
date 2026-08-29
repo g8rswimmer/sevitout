@@ -143,14 +143,35 @@ gateway routing layer instead — check, in order:
 
 1. **`JIRA_CLOUD_ID` is correct** — it must be the Cloud ID (a UUID, from
    `admin.atlassian.com`), not the site name. A well-formed but wrong UUID
-   still 404s, since the gateway can't map it to any tenant.
+   still 404s, since the gateway can't map it to any tenant. **This was the
+   actual root cause the one time this was hit against a real Jira Cloud
+   instance** — `admin.atlassian.com`'s `/s/{cloudId}` URL had been
+   misread/mistyped into `.env`. Verify independently of the admin
+   console, against the site's own public, unauthenticated tenant-info
+   endpoint (no login or token needed):
+   ```bash
+   curl -s https://{your-site}.atlassian.net/_edge/tenant_info
+   # {"cloudId":"44239164-766e-42e3-b0ca-c8c6188c96c2"}
+   ```
+   If that doesn't match `JIRA_CLOUD_ID`, that's the fix — not the token,
+   not `project_key`/`issue_type`.
 2. **The token actually supports gateway access.** The Bearer-token-via-
    `api.atlassian.com` flow this client uses is specifically documented for
    [organization-managed service-account API tokens](https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/) —
    a personal API token created the traditional way (`id.atlassian.com` →
    Basic Auth against `https://{site}.atlassian.net` directly) is a
    different mechanism and may not resolve through this gateway path at
-   all, independent of whether `project_key`/`issue_type` are valid.
+   all, independent of whether `project_key`/`issue_type` are valid. To
+   isolate this from step 1 (and from any bug in this codebase), test the
+   gateway directly, bypassing the server entirely:
+   ```bash
+   curl -s "https://api.atlassian.com/ex/jira/$JIRA_CLOUD_ID/rest/api/3/myself" \
+     -H "Authorization: Bearer $JIRA_API_TOKEN" -H "Accept: application/json"
+   ```
+   A `404` with `"server: AtlassianEdge"` in the response headers (check
+   with `curl -v`) confirms the request is failing at Atlassian's gateway,
+   before it ever reaches Jira — i.e. it's (1) or (2) above, not a bug in
+   `CreateJiraIssue` itself.
 3. Only once both of those check out is a genuinely bad `project_key` or
    `issue_type` worth suspecting — and that will now show as a `400` with
    Jira's own `errors` detail, not a `404`.
@@ -216,6 +237,16 @@ insufficient permissions` response, because `internal/auth/rbac.go`'s
 `rpcMinRole` table (a method absent from it is denied to everyone by
 design) hadn't been updated alongside the new RPC. Fixed by adding the
 missing entry; the live retest after the fix confirmed the correct `503`.
+
+Separately, live-verified against a **real Jira Cloud instance**: after
+correcting a misconfigured `JIRA_CLOUD_ID` (see Troubleshooting above),
+`CreateJiraIssue` created a real issue, linked it to a SEV, and returned it
+correctly — confirming the client's gateway URL construction, Bearer auth,
+and ADF description encoding all work against Jira's actual API, not just
+the unit tests' mocked one. The test issue was deleted afterward via a
+direct `DELETE /rest/api/3/issue/{key}` call (not something this codebase's
+`JiraIssueClient` exposes — Sevitout has no delete-issue feature — done
+directly against the API to leave the test project clean).
 
 ## Known limitations
 
