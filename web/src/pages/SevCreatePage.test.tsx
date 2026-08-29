@@ -48,7 +48,7 @@ describe('SevCreatePage', () => {
     })
   })
 
-  it('submits detection method, a custom monitoring tool, and the link fields', async () => {
+  it('submits detection method, monitoring tool, and the link/query fields', async () => {
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)
       if (url.startsWith('/v1/config/services')) return Promise.resolve(jsonResponse({}))
@@ -60,12 +60,12 @@ describe('SevCreatePage', () => {
 
     await user.type(screen.getByLabelText('Title'), 'Checkout errors')
     await user.selectOptions(screen.getByLabelText('Detection method'), 'Monitoring Dashboard')
-    await user.selectOptions(screen.getByLabelText('Monitoring tool'), 'Other…')
-    await user.type(screen.getByLabelText(/custom monitoring tool name/i), 'In-house dashboard')
+    await user.selectOptions(screen.getByLabelText('Monitoring tool'), 'Datadog')
     await user.type(screen.getByLabelText('Alert name'), 'checkout-p99-latency')
     await user.type(screen.getByLabelText('Alert link'), 'https://alerts.example.com/1')
-    await user.type(screen.getByLabelText(/metric \/ dashboard link/i), 'https://metrics.example.com/q/1')
+    await user.type(screen.getByLabelText(/dashboard link/i), 'https://metrics.example.com/q/1')
     await user.type(screen.getByLabelText(/snapshot image link/i), 'https://img.example.com/1.png')
+    await user.type(screen.getByLabelText('Saved query'), 'up{{job="checkout"} == 0')
 
     // Alert name reads directly above its link, not separated by the
     // detection method/monitoring tool dropdowns.
@@ -83,10 +83,11 @@ describe('SevCreatePage', () => {
     const body = JSON.parse(String(init!.body))
     expect(body).toMatchObject({
       detection_method: 'monitoring-dashboard',
-      monitoring_tool: 'In-house dashboard',
+      monitoring_tool: 'datadog',
       alert_name: 'checkout-p99-latency',
       alert_url: 'https://alerts.example.com/1',
-      metric_link: 'https://metrics.example.com/q/1',
+      dashboard_url: 'https://metrics.example.com/q/1',
+      query: 'up{job="checkout"} == 0',
       snapshot_url: 'https://img.example.com/1.png',
     })
     // started_at/detected_at were never touched — the caller must set them

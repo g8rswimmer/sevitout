@@ -117,9 +117,8 @@ export const SEV_LIFECYCLE_STAGES: SEVStatus[] = [
 
 /** docs/requirements.md §4.2's root-cause-category examples ("e.g.,
  * deployment, configuration, hardware, dependency") — not an enforced
- * backend enum (root_cause_category stays free text server-side, same as
- * MonitoringTool), just what the dropdown offers before an "Other" free-text
- * entry. */
+ * backend enum (root_cause_category stays free text server-side), just what
+ * the dropdown offers before an "Other" free-text entry. */
 export type RootCauseCategory = 'deployment' | 'configuration' | 'hardware' | 'dependency'
 
 export const ROOT_CAUSE_CATEGORY_LABELS: Record<RootCauseCategory, string> = {
@@ -149,16 +148,18 @@ export const DETECTION_METHOD_LABELS: Record<DetectionMethod, string> = {
   'slack-escalation': 'Slack Escalation',
 }
 
-/** The monitoring tools named throughout docs/requirements.md §13.4 — not an
- * exhaustive backend enum (monitoring_tool stays free text server-side), just
- * what the dropdown offers directly before falling back to a free-text
- * "Other" entry. */
-export type MonitoringTool = 'datadog' | 'prometheus' | 'cloudwatch'
+/** docs/requirements.md §13.4's fixed monitoring-tool vocabulary — enforced
+ * server-side (internal/api/grpc/sev.go's validateMonitoringTool), the same
+ * closed-enum pattern as DetectionMethod above. "other" is itself a valid
+ * value, not a free-text escape hatch — there's no companion custom-name
+ * field. */
+export type MonitoringTool = 'datadog' | 'prometheus' | 'cloudwatch' | 'other'
 
 export const MONITORING_TOOL_LABELS: Record<MonitoringTool, string> = {
   datadog: 'Datadog',
   prometheus: 'Prometheus',
   cloudwatch: 'CloudWatch',
+  other: 'Other',
 }
 
 export interface SEVResponse {
@@ -175,11 +176,13 @@ export interface SEVResponse {
   affected_services?: string[]
   detection_method?: DetectionMethod
   alert_name?: string
-  monitoring_tool?: string
-  // alert_url, metric_link, and snapshot_url are optional supporting links —
-  // see internal/store.SEV's matching fields for the full rationale.
+  monitoring_tool?: MonitoringTool
+  // alert_url, dashboard_url, query, and snapshot_url are optional
+  // supporting detail — see internal/store.SEV's matching fields for the
+  // full rationale.
   alert_url?: string
-  metric_link?: string
+  dashboard_url?: string
+  query?: string
   snapshot_url?: string
   // github_repo is the "owner/repo" this SEV's code lives in — see
   // internal/store.SEV.GitHubRepo. Set via UpdateSEV, not at creation.
@@ -259,9 +262,10 @@ export interface CreateSEVRequest {
   affected_services?: string[]
   detection_method?: DetectionMethod | ''
   alert_name?: string
-  monitoring_tool?: string
+  monitoring_tool?: MonitoringTool | ''
   alert_url?: string
-  metric_link?: string
+  dashboard_url?: string
+  query?: string
   snapshot_url?: string
   tags?: Record<string, string>
   sensitive?: boolean
@@ -280,9 +284,10 @@ export interface UpdateSEVRequest {
   affected_services?: string[]
   detection_method?: DetectionMethod | ''
   alert_name?: string
-  monitoring_tool?: string
+  monitoring_tool?: MonitoringTool | ''
   alert_url?: string
-  metric_link?: string
+  dashboard_url?: string
+  query?: string
   snapshot_url?: string
   github_repo?: string
   root_cause_reference_url?: string
