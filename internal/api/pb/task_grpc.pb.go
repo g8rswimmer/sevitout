@@ -34,6 +34,9 @@ type TaskServiceClient interface {
 	// CreateGitHubIssue creates a new GitHub Issue pre-filled with SEV context,
 	// links it to the SEV, and returns the linked task record.
 	CreateGitHubIssue(ctx context.Context, in *CreateGitHubIssueRequest, opts ...grpc.CallOption) (*TaskResponse, error)
+	// CreateJiraIssue creates a new Jira issue pre-filled with SEV context,
+	// links it to the SEV, and returns the linked task record.
+	CreateJiraIssue(ctx context.Context, in *CreateJiraIssueRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 }
 
 type taskServiceClient struct {
@@ -89,6 +92,15 @@ func (c *taskServiceClient) CreateGitHubIssue(ctx context.Context, in *CreateGit
 	return out, nil
 }
 
+func (c *taskServiceClient) CreateJiraIssue(ctx context.Context, in *CreateJiraIssueRequest, opts ...grpc.CallOption) (*TaskResponse, error) {
+	out := new(TaskResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.TaskService/CreateJiraIssue", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TaskServiceServer is the server API for TaskService service.
 // All implementations must embed UnimplementedTaskServiceServer
 // for forward compatibility
@@ -104,6 +116,9 @@ type TaskServiceServer interface {
 	// CreateGitHubIssue creates a new GitHub Issue pre-filled with SEV context,
 	// links it to the SEV, and returns the linked task record.
 	CreateGitHubIssue(context.Context, *CreateGitHubIssueRequest) (*TaskResponse, error)
+	// CreateJiraIssue creates a new Jira issue pre-filled with SEV context,
+	// links it to the SEV, and returns the linked task record.
+	CreateJiraIssue(context.Context, *CreateJiraIssueRequest) (*TaskResponse, error)
 	mustEmbedUnimplementedTaskServiceServer()
 }
 
@@ -125,6 +140,9 @@ func (UnimplementedTaskServiceServer) UpdateTaskDueDate(context.Context, *Update
 }
 func (UnimplementedTaskServiceServer) CreateGitHubIssue(context.Context, *CreateGitHubIssueRequest) (*TaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateGitHubIssue not implemented")
+}
+func (UnimplementedTaskServiceServer) CreateJiraIssue(context.Context, *CreateJiraIssueRequest) (*TaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateJiraIssue not implemented")
 }
 func (UnimplementedTaskServiceServer) mustEmbedUnimplementedTaskServiceServer() {}
 
@@ -229,6 +247,24 @@ func _TaskService_CreateGitHubIssue_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskService_CreateJiraIssue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateJiraIssueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskServiceServer).CreateJiraIssue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.TaskService/CreateJiraIssue",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskServiceServer).CreateJiraIssue(ctx, req.(*CreateJiraIssueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TaskService_ServiceDesc is the grpc.ServiceDesc for TaskService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -255,6 +291,10 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateGitHubIssue",
 			Handler:    _TaskService_CreateGitHubIssue_Handler,
+		},
+		{
+			MethodName: "CreateJiraIssue",
+			Handler:    _TaskService_CreateJiraIssue_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

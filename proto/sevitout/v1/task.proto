@@ -48,6 +48,15 @@ service TaskService {
       body: "*"
     };
   }
+
+  // CreateJiraIssue creates a new Jira issue pre-filled with SEV context,
+  // links it to the SEV, and returns the linked task record.
+  rpc CreateJiraIssue(CreateJiraIssueRequest) returns (TaskResponse) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/jira-issues"
+      body: "*"
+    };
+  }
 }
 
 // TaskResponse is the linked task record returned by all TaskService RPCs.
@@ -117,6 +126,25 @@ message CreateGitHubIssueRequest {
   string title = 4;
   // body is the issue description; callers should pre-fill with SEV context.
   string body = 5;
+  // relationship_type: action-item | contributing-factor | follow-up | dependency
+  string relationship_type = 6;
+  // priority: critical | non-critical (controls default SLA due date).
+  string priority = 7;
+}
+
+message CreateJiraIssueRequest {
+  string sev_id = 1;
+  // project_key is the Jira project's key (e.g. "OPS"), not its numeric ID.
+  string project_key = 2;
+  // issue_type is the target project's issue type name (e.g. "Task", "Bug")
+  // — it must already exist on that project.
+  string issue_type = 3;
+  // summary is the issue's title (Jira's naming for the field GitHub calls
+  // "title").
+  string summary = 4;
+  // description is the issue body; callers should pre-fill with SEV
+  // context.
+  string description = 5;
   // relationship_type: action-item | contributing-factor | follow-up | dependency
   string relationship_type = 6;
   // priority: critical | non-critical (controls default SLA due date).

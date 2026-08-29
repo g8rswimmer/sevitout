@@ -31,6 +31,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
 	"github.com/g8rswimmer/sevitout/internal/integrations/slack"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
+	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/jira"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
 	"github.com/g8rswimmer/sevitout/internal/share"
 	"github.com/g8rswimmer/sevitout/internal/store"
@@ -89,6 +90,22 @@ func main() {
 		log.Info("GitHub Issues integration enabled")
 	} else {
 		log.Info("GitHub Issues integration DISABLED")
+	}
+
+	// --- Jira client (optional) --- both JIRA_CLOUD_ID and JIRA_API_TOKEN
+	// are required together (unlike GitHub's single GITHUB_TOKEN — see
+	// config.Config.JiraCloudID's doc comment for why); partial
+	// configuration is treated the same as none rather than starting with a
+	// client that would fail every call. JIRA_SITE_URL is independently
+	// optional (see config.Config.JiraSiteURL's doc comment) — passed
+	// through either way, since jira.NewClient treats "" as "no browse
+	// links" rather than an error.
+	var jiraClient grpchandler.JiraIssueClient
+	if cfg.JiraCloudID != "" && cfg.JiraAPIToken != "" {
+		jiraClient = &jiraIssueClient{c: jira.NewClient(cfg.JiraCloudID, cfg.JiraAPIToken, cfg.JiraSiteURL)}
+		log.Info("Jira integration enabled")
+	} else {
+		log.Info("Jira integration DISABLED")
 	}
 
 	// --- JWT signer ---
@@ -185,7 +202,8 @@ func main() {
 	chatServer := grpchandler.NewChatServer(stores.Chat, stores.SEV, stores.SEVAccess, wsHub)
 	sevLinkServer := grpchandler.NewSEVLinkServer(stores.SEVLink, stores.SEV, stores.SEVAccess, stores.Audit)
 	taskServer := grpchandler.NewTaskServer(grpchandler.TaskServerParams{
-		Tasks: stores.Task, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit, GitHub: issueClient, Publisher: wsHub,
+		Tasks: stores.Task, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit,
+		GitHub: issueClient, Jira: jiraClient, Publisher: wsHub,
 	})
 	searchServer := grpchandler.NewSearchServer(stores.SEV, stores.Role, stores.Announcement)
 	configServer := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
@@ -323,6 +341,7 @@ func main() {
 		"pagerduty": pagerdutyHealthChecker{},
 		"github":    githubHealthChecker{},
 		"slack":     slackHealthChecker{},
+		"jira":      jiraHealthChecker{},
 	}
 	integrationsHealthHandler := grpchandler.NewIntegrationsHealthHandler(grpchandler.IntegrationsHealthHandlerParams{
 		Integrations: stores.IntegrationConfig,
@@ -529,6 +548,31 @@ func (a *githubIssueClient) CreateIssue(ctx context.Context, owner, repo, title,
 	}, nil
 }
 
+// jiraIssueClient adapts *jira.Client to grpchandler.JiraIssueClient, mirroring
+// githubIssueClient above.
+type jiraIssueClient struct {
+	c *jira.Client
+}
+
+func (a *jiraIssueClient) CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string) (*grpchandler.CreatedIssue, error) {
+	issue, err := a.c.CreateIssue(ctx, jira.CreateIssueRequest{
+		ProjectKey:  projectKey,
+		IssueType:   issueType,
+		Summary:     summary,
+		Description: description,
+		Labels:      labels,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &grpchandler.CreatedIssue{
+		Key:   issue.Key,
+		Title: issue.Summary,
+		Body:  issue.Description,
+		URL:   issue.URL,
+	}, nil
+}
+
 // pagerdutyHealthChecker adapts pagerduty.Client to grpchandler.HealthChecker,
 // building a fresh client per check from the configured integration's own
 // decrypted credentials (rather than the singleton client built from
@@ -554,6 +598,30 @@ func (githubHealthChecker) Check(ctx context.Context, credentials map[string]str
 		return fmt.Errorf("github: no token configured")
 	}
 	return github.NewClient(token).Ping(ctx)
+}
+
+// jiraHealthChecker adapts jira.Client to grpchandler.HealthChecker; see
+// pagerdutyHealthChecker for why a fresh client is built per check. Unlike
+// pagerduty/github's single-credential Check, this needs two config-API-
+// managed values (cloud_id, api_token) — cloud_id lives in settings, not
+// credentials, since it identifies which Jira tenant to call rather than
+// authenticating to it, mirroring how internal/config.Config's
+// JIRA_CLOUD_ID is a required companion to the credential at the
+// process-level integration too.
+type jiraHealthChecker struct{}
+
+func (jiraHealthChecker) Check(ctx context.Context, credentials map[string]string, settings map[string]any) error {
+	apiToken := credentials["api_token"]
+	if apiToken == "" {
+		return fmt.Errorf("jira: no api_token configured")
+	}
+	cloudID, _ := settings["cloud_id"].(string)
+	if cloudID == "" {
+		return fmt.Errorf("jira: no cloud_id configured")
+	}
+	// No site URL: Ping never builds an issue link, so the (purely cosmetic)
+	// browse-link site URL has nothing to do here.
+	return jira.NewClient(cloudID, apiToken, "").Ping(ctx)
 }
 
 // slackHealthChecker adapts slack.Client to grpchandler.HealthChecker. Its

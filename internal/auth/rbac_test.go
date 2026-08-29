@@ -69,11 +69,13 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleViewer, "/sevitout.v1.TaskService/UnlinkTask", false},
 		{store.OrgRoleViewer, "/sevitout.v1.TaskService/UpdateTaskDueDate", false},
 		{store.OrgRoleViewer, "/sevitout.v1.TaskService/CreateGitHubIssue", false},
+		{store.OrgRoleViewer, "/sevitout.v1.TaskService/CreateJiraIssue", false},
 		{store.OrgRoleResponder, "/sevitout.v1.TaskService/LinkTask", true},
 		{store.OrgRoleResponder, "/sevitout.v1.TaskService/UnlinkTask", true},
 		{store.OrgRoleResponder, "/sevitout.v1.TaskService/ListTasks", true},
 		{store.OrgRoleResponder, "/sevitout.v1.TaskService/UpdateTaskDueDate", true},
 		{store.OrgRoleResponder, "/sevitout.v1.TaskService/CreateGitHubIssue", true},
+		{store.OrgRoleResponder, "/sevitout.v1.TaskService/CreateJiraIssue", true},
 
 		// Search service
 		{store.OrgRoleViewer, "/sevitout.v1.SearchService/SearchSEVs", true},

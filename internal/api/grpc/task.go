@@ -19,10 +19,17 @@ import (
 
 // CreatedIssue is the shape TaskServer needs back from creating an external
 // issue. It is owned by this package (the consumer), not by any tracker
-// integration, so IssueClient implementations stay decoupled from
-// integration-specific types.
+// integration, so IssueClient/JiraIssueClient implementations stay decoupled
+// from integration-specific types.
+//
+// Number and Key are tracker-specific identifiers, populated by whichever
+// adapter is in play and ignored otherwise: GitHub issues are numbered
+// (Number, used to build "owner/repo#N"); Jira issues have a project-scoped
+// string key instead (Key, e.g. "PROJ-7", used directly as the linked
+// task's external ID).
 type CreatedIssue struct {
 	Number int
+	Key    string
 	Title  string
 	Body   string
 	URL    string
@@ -32,6 +39,18 @@ type CreatedIssue struct {
 // Issues). Implementations must be safe for concurrent use.
 type IssueClient interface {
 	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*CreatedIssue, error)
+}
+
+// JiraIssueClient creates issues in Jira. A second, Jira-shaped interface
+// rather than a generalization of IssueClient above: Jira's create-issue
+// call has no owner/repo concept (a project key and issue type instead) and
+// the two integrations' error-mapping needs (githubIssueError vs.
+// jiraIssueError below) already diverge enough that forcing one shared
+// signature would mean one side or the other passing parameters that don't
+// mean what their names say. Implementations must be safe for concurrent
+// use.
+type JiraIssueClient interface {
+	CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string) (*CreatedIssue, error)
 }
 
 // httpStatusError is implemented by integration errors that carry an
@@ -49,25 +68,31 @@ type TaskServer struct {
 	sevs      store.SEVStore
 	access    store.SEVAccessStore
 	audit     store.AuditStore
-	github    IssueClient // nil when GITHUB_TOKEN is not set
-	publisher Publisher   // nil when WebSocket support is not wired up
+	github    IssueClient     // nil when GITHUB_TOKEN is not set
+	jira      JiraIssueClient // nil when JIRA_CLOUD_ID/JIRA_API_TOKEN are not both set
+	publisher Publisher       // nil when WebSocket support is not wired up
 }
 
-// TaskServerParams groups NewTaskServer's dependencies. GitHub may be nil
-// (GITHUB_TOKEN is optional at deploy time); in that case CreateGitHubIssue
-// returns Unavailable. Publisher may also be nil.
+// TaskServerParams groups NewTaskServer's dependencies. GitHub and Jira may
+// each independently be nil (both are optional at deploy time); in that
+// case CreateGitHubIssue/CreateJiraIssue returns Unavailable. Publisher may
+// also be nil.
 type TaskServerParams struct {
 	Tasks     store.TaskStore
 	SEVs      store.SEVStore
 	Access    store.SEVAccessStore
 	Audit     store.AuditStore
 	GitHub    IssueClient
+	Jira      JiraIssueClient
 	Publisher Publisher
 }
 
 // NewTaskServer returns a TaskServer backed by p.
 func NewTaskServer(p TaskServerParams) *TaskServer {
-	return &TaskServer{tasks: p.Tasks, sevs: p.SEVs, access: p.Access, audit: p.Audit, github: p.GitHub, publisher: p.Publisher}
+	return &TaskServer{
+		tasks: p.Tasks, sevs: p.SEVs, access: p.Access, audit: p.Audit,
+		github: p.GitHub, jira: p.Jira, publisher: p.Publisher,
+	}
 }
 
 func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb.TaskResponse, error) {
@@ -409,6 +434,102 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 	return resp, nil
 }
 
+func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssueRequest) (*pb.TaskResponse, error) {
+	if s.jira == nil {
+		return nil, status.Error(codes.Unavailable,
+			"Jira integration is not configured (JIRA_CLOUD_ID/JIRA_API_TOKEN not set)")
+	}
+	if req.GetSevId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
+	}
+	if req.GetProjectKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_key is required")
+	}
+	if req.GetIssueType() == "" {
+		return nil, status.Error(codes.InvalidArgument, "issue_type is required")
+	}
+	if req.GetSummary() == "" {
+		return nil, status.Error(codes.InvalidArgument, "summary is required")
+	}
+	if err := validateRelationshipType(req.GetRelationshipType()); err != nil {
+		return nil, err
+	}
+	if err := validatePriority(req.GetPriority()); err != nil {
+		return nil, err
+	}
+
+	sev, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, internalError(ctx, "failed to get SEV", err)
+	}
+
+	priority := store.TaskPriority(req.GetPriority())
+	labels := []string{req.GetSevId(), string(priority)}
+
+	// Unlike CreateGitHubIssue, this doesn't retry without labels on a
+	// label-related rejection — GitHub can reject issue creation over a
+	// label that doesn't already exist and the org restricting who may
+	// create new ones; Jira Cloud auto-creates unrecognized labels on the
+	// issue instead of rejecting the request, so that failure mode doesn't
+	// apply here.
+	issue, err := s.jira.CreateIssue(ctx, req.GetProjectKey(), req.GetIssueType(), req.GetSummary(), req.GetDescription(), labels)
+	if err != nil {
+		return nil, jiraIssueError(err)
+	}
+
+	callerID := ""
+	if uc, ok := auth.UserFromContext(ctx); ok {
+		callerID = uc.UserID
+	}
+
+	now := time.Now()
+	body := issue.Body
+
+	task := &store.LinkedTask{
+		SEVID:            req.GetSevId(),
+		ExternalSystem:   "jira",
+		TaskID:           issue.Key,
+		URL:              issue.URL,
+		Title:            issue.Title,
+		Description:      &body,
+		RelationshipType: store.TaskRelationshipType(req.GetRelationshipType()),
+		Priority:         priority,
+		DueDate:          computeDueDate(priority, sev.ResolvedAt),
+		CreatedAt:        now,
+		CreatedBy:        callerID,
+	}
+
+	if err := s.tasks.Create(ctx, task); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return nil, status.Errorf(codes.AlreadyExists,
+				"Jira issue %s was created but is already linked to this SEV", issue.URL)
+		}
+		// The Jira issue already exists at this point and cannot be
+		// silently retried without risking a duplicate; surface its URL so
+		// the caller can link it manually via LinkTask.
+		return nil, status.Errorf(codes.Internal,
+			"Jira issue %s was created but could not be linked to the SEV: %v", issue.URL, err)
+	}
+
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
+		SEVID:     req.GetSevId(),
+		UserID:    callerID,
+		Action:    "task.jira_issue_created",
+		NewValue:  strPtr(issue.URL),
+		CreatedAt: now,
+	})
+
+	resp := taskToProto(task, now)
+	if !sev.Sensitive {
+		publishProto(s.publisher, req.GetSevId(), "task.linked", resp)
+	}
+
+	return resp, nil
+}
+
 // isUnprocessable reports whether err represents an HTTP 422 response.
 func isUnprocessable(err error) bool {
 	var statusErr httpStatusError
@@ -436,6 +557,40 @@ func githubIssueError(err error) error {
 		}
 	}
 	return status.Errorf(codes.Internal, "failed to create GitHub issue: %v", err)
+}
+
+// jiraIssueError maps a Jira integration error's HTTP status to the most
+// accurate gRPC status available — the same mapping strategy as
+// githubIssueError above, kept as a separate function since the two
+// trackers' actual status-code vocabularies aren't identical enough to
+// safely share one (e.g. Jira uses 400 for a validation failure where
+// GitHub's equivalent is 422).
+func jiraIssueError(err error) error {
+	var statusErr httpStatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.HTTPStatus() {
+		case http.StatusUnauthorized:
+			return status.Errorf(codes.Unauthenticated, "Jira rejected the request: %s", err.Error())
+		case http.StatusForbidden:
+			return status.Errorf(codes.PermissionDenied, "Jira rejected the request: %s", err.Error())
+		case http.StatusNotFound:
+			// Unlike GitHub's create-issue endpoint (whose URL path embeds
+			// owner/repo, so a bad one genuinely 404s at GitHub's API),
+			// Jira's POST /rest/api/3/issue has a fixed path — project_key
+			// and issue_type are validated in the request body, and an
+			// invalid one there is a 400 from Jira, not a 404. A 404 here
+			// essentially always means the request never reached Jira's
+			// own handler at all: the api.atlassian.com gateway itself
+			// couldn't route it (an invalid/inaccessible JIRA_CLOUD_ID, or
+			// a token not provisioned for gateway access).
+			return status.Errorf(codes.NotFound, "Jira API endpoint not found — check that JIRA_CLOUD_ID is correct and the token has gateway access: %s", err.Error())
+		case http.StatusBadRequest:
+			return status.Errorf(codes.InvalidArgument, "Jira rejected the request: %s", err.Error())
+		case http.StatusTooManyRequests:
+			return status.Errorf(codes.ResourceExhausted, "Jira rate limit exceeded: %s", err.Error())
+		}
+	}
+	return status.Errorf(codes.Internal, "failed to create Jira issue: %v", err)
 }
 
 // computeDueDate returns the SLA due date based on priority and resolved_at.

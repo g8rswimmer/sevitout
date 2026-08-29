@@ -39,6 +39,9 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       PAGERDUTY_API_KEY: ${PAGERDUTY_API_KEY}
+      JIRA_CLOUD_ID: ${JIRA_CLOUD_ID}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+      JIRA_SITE_URL: ${JIRA_SITE_URL}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       migrate:

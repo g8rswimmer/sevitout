@@ -54,6 +54,31 @@ type Config struct {
 	// cmd/server/main.go so this package has no dependency on the store
 	// layer.
 	EncryptionKey string
+
+	// JiraCloudID is JIRA_CLOUD_ID — the target Jira Cloud tenant's Cloud ID
+	// (a UUID, not its site name; see
+	// https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/
+	// for how to find it), and JiraAPIToken is JIRA_API_TOKEN, sent as a
+	// Bearer token — Jira Cloud's REST API v3 gateway (api.atlassian.com)
+	// accepts Bearer auth, not HTTP Basic Auth, so no account email is
+	// needed alongside it (see internal/integrations/tasktracker/jira). The
+	// Jira Issues integration is enabled only when both are non-empty;
+	// unlike GitHub's single GITHUB_TOKEN, a Cloud ID is required because
+	// Jira Cloud instances are tenant-specific, with no shared production
+	// API host to default to.
+	JiraCloudID  string
+	JiraAPIToken string
+
+	// JiraSiteURL is JIRA_SITE_URL (e.g. "https://acme.atlassian.net") —
+	// optional, and independent of whether the Jira integration itself is
+	// enabled (that's governed by JiraCloudID/JiraAPIToken alone). It's
+	// used purely to build human-facing "browse" links on created/fetched
+	// Jira issues (internal/integrations/tasktracker/jira.Client.NewClient's
+	// siteURL parameter) — the Cloud ID used for actual API calls doesn't
+	// determine the tenant's site host, so this has to be supplied
+	// separately if a clickable link is wanted. Left unset, issue links
+	// fall back to the API's own non-browsable resource URL.
+	JiraSiteURL string
 }
 
 // Load reads every environment variable cmd/server's main() needs into a
@@ -73,6 +98,9 @@ func Load() (*Config, error) {
 		PagerDutyAPIKey:        os.Getenv("PAGERDUTY_API_KEY"),
 		GitHubToken:            os.Getenv("GITHUB_TOKEN"),
 		EncryptionKey:          os.Getenv("ENCRYPTION_KEY"),
+		JiraCloudID:            os.Getenv("JIRA_CLOUD_ID"),
+		JiraAPIToken:           os.Getenv("JIRA_API_TOKEN"),
+		JiraSiteURL:            os.Getenv("JIRA_SITE_URL"),
 	}
 
 	if v := os.Getenv("JWT_TTL_HOURS"); v != "" {
