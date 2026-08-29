@@ -479,10 +479,31 @@ export const TASK_RELATIONSHIP_LABELS: Record<TaskRelationshipType, string> = {
 
 export type TaskPriority = 'critical' | 'non-critical'
 
+/** The external_system values TasksPanel/badges.tsx know how to label and
+ * badge distinctly. Not an enforced backend enum — external_system stays
+ * unvalidated free text server-side (LinkTask accepts anything), so
+ * TaskResponse.external_system below widens this with `(string & {})` rather
+ * than closing it: any value round-trips, only these three render specially. */
+export type KnownExternalSystem = 'github' | 'jira' | 'generic'
+
+export const EXTERNAL_SYSTEM_LABELS: Record<KnownExternalSystem, string> = {
+  github: 'GitHub',
+  jira: 'Jira',
+  generic: 'Link',
+}
+
+/** Badge color classes per tracker, same `className`-wins-via-cn() pattern
+ * as SEV_STATUS_BADGE_CLASS above. */
+export const EXTERNAL_SYSTEM_BADGE_CLASS: Record<KnownExternalSystem, string> = {
+  github: 'border-transparent bg-slate-700 text-white dark:bg-slate-600',
+  jira: 'border-transparent bg-blue-600 text-white dark:bg-blue-500',
+  generic: 'border-border text-foreground',
+}
+
 export interface TaskResponse {
   id: string
   sev_id: string
-  external_system: string
+  external_system: KnownExternalSystem | (string & {})
   task_id: string
   url: string
   title: string
@@ -511,6 +532,19 @@ export interface CreateGitHubIssueRequest {
   repo: string
   title: string
   body?: string
+  relationship_type: TaskRelationshipType
+  priority: TaskPriority
+}
+
+export interface CreateJiraIssueRequest {
+  /** project_key is the Jira project's key (e.g. "OPS"), not its numeric ID. */
+  project_key: string
+  /** issue_type is the target project's issue type name (e.g. "Task", "Bug")
+   * — it must already exist on that project. */
+  issue_type: string
+  /** summary is Jira's naming for the field GitHub calls "title". */
+  summary: string
+  description?: string
   relationship_type: TaskRelationshipType
   priority: TaskPriority
 }
