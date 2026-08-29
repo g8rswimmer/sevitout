@@ -119,6 +119,42 @@ with a value that isn't secret.
 
 **Frontend UI is out of scope for this phase** — see Known limitations.
 
+## Troubleshooting
+
+**`404`, message ends in a bare `jira: unexpected status 404` with no
+detail** (this is what a real run against a live Jira Cloud instance first
+surfaced): the client was swallowing the response body whenever it didn't
+match Jira's own `{errorMessages, errors}` JSON error shape — which the
+`api.atlassian.com` gateway's *own* 404s (a plain-text/HTML "not found"
+page, returned when the request never reaches Jira's handler at all) never
+do. Fixed: `newAPIError` now falls back to the raw response body when the
+structured fields are both empty, and the client's Warn log line includes
+it too — a `404` now always shows *something* concrete instead of a bare
+status code.
+
+Once the message is visible, a `404` specifically on `CreateJiraIssue`
+almost always means **the request never reached Jira's own API at all** —
+not "the project or issue type doesn't exist." Unlike GitHub's create-issue
+endpoint (whose URL embeds `owner/repo`, so a bad one really does 404 at
+GitHub's API), Jira's `POST /rest/api/3/issue` has a fixed path;
+`project_key`/`issue_type` are validated in the request *body*, and Jira
+returns `400`, not `404`, for an invalid one. So a `404` here points at the
+gateway routing layer instead — check, in order:
+
+1. **`JIRA_CLOUD_ID` is correct** — it must be the Cloud ID (a UUID, from
+   `admin.atlassian.com`), not the site name. A well-formed but wrong UUID
+   still 404s, since the gateway can't map it to any tenant.
+2. **The token actually supports gateway access.** The Bearer-token-via-
+   `api.atlassian.com` flow this client uses is specifically documented for
+   [organization-managed service-account API tokens](https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/) —
+   a personal API token created the traditional way (`id.atlassian.com` →
+   Basic Auth against `https://{site}.atlassian.net` directly) is a
+   different mechanism and may not resolve through this gateway path at
+   all, independent of whether `project_key`/`issue_type` are valid.
+3. Only once both of those check out is a genuinely bad `project_key` or
+   `issue_type` worth suspecting — and that will now show as a `400` with
+   Jira's own `errors` detail, not a `404`.
+
 ## Prerequisites
 
 - `go build ./... && go test ./...` passing
@@ -159,8 +195,11 @@ go build ./... && go vet ./... && gofmt -l . && go test ./... && go test -race .
 ```
 
 New coverage: `internal/integrations/tasktracker/jira/client_test.go` (client,
-82.2% — Error()/HTTPStatus() untested, matching the existing `github`
-package's own 78.7% baseline for the same trivial methods), `task_test.go`'s
+84.6% — Error()/HTTPStatus() untested, matching the existing `github`
+package's own 78.7% baseline for the same trivial methods; includes
+`TestCreateIssue_NonJSONErrorBody_SurfacedVerbatim` and
+`TestCreateIssue_EmptyErrorBody_NoMessages`, covering the raw-body fallback
+described in Troubleshooting above), `task_test.go`'s
 `TestCreateJiraIssue_*` suite (mirrors every `TestCreateGitHubIssue_*` case:
 valid creation, not-configured, API-error-to-status-code mapping, generic
 error, duplicate-link conflict, SEV-not-found, validation errors, event

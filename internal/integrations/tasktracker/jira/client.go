@@ -132,7 +132,7 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	if resp.StatusCode != http.StatusOK {
 		apiErr := newAPIError(resp)
-		slog.WarnContext(ctx, "jira api call returned error", "op", "Ping", "status", resp.StatusCode)
+		slog.WarnContext(ctx, "jira api call returned error", "op", "Ping", "status", resp.StatusCode, "messages", apiErr.Messages)
 		return apiErr
 	}
 	return nil
@@ -157,7 +157,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*Issue, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		apiErr := newAPIError(resp)
-		slog.WarnContext(ctx, "jira api call returned error", "op", "GetIssue", "status", resp.StatusCode)
+		slog.WarnContext(ctx, "jira api call returned error", "op", "GetIssue", "status", resp.StatusCode, "messages", apiErr.Messages)
 		return nil, apiErr
 	}
 	return decodeIssue(resp.Body)
@@ -207,7 +207,7 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 
 	if resp.StatusCode != http.StatusCreated {
 		apiErr := newAPIError(resp)
-		slog.WarnContext(ctx, "jira api call returned error", "op", "CreateIssue", "status", resp.StatusCode)
+		slog.WarnContext(ctx, "jira api call returned error", "op", "CreateIssue", "status", resp.StatusCode, "messages", apiErr.Messages)
 		return nil, apiErr
 	}
 
@@ -322,6 +322,19 @@ func adfToPlainText(node any) string {
 // extract Jira's own error messages so callers see the actual failure
 // reason (invalid project key, missing required field, permission denied)
 // rather than a bare status code.
+//
+// Jira's REST API always returns errorMessages/errors as JSON for a
+// business-logic failure (e.g. an unknown project key) — if that shape
+// isn't there, the response didn't come from Jira's own handler at all.
+// The api.atlassian.com gateway itself returns a 404 with a plain-text or
+// differently-shaped JSON body (not errorMessages/errors) when the request
+// never reaches Jira — e.g. an invalid Cloud ID, or a token/scope that
+// isn't provisioned for gateway access — which is a materially different
+// problem from "the project doesn't exist" and worth distinguishing. So
+// rather than silently falling back to a bare status code when the
+// structured fields are both empty, this includes the raw body (or a
+// literal marker if the body was itself empty) as the message, so a caller
+// always sees whatever the server actually said.
 func newAPIError(resp *http.Response) *APIError {
 	limited := io.LimitReader(resp.Body, maxErrorBodyLen)
 	raw, _ := io.ReadAll(limited)
@@ -335,6 +348,16 @@ func newAPIError(resp *http.Response) *APIError {
 	messages := body.ErrorMessages
 	for field, reason := range body.Errors {
 		messages = append(messages, fmt.Sprintf("%s: %s", field, reason))
+	}
+	if len(messages) == 0 {
+		if trimmed := strings.TrimSpace(string(raw)); trimmed != "" {
+			// Not Jira's structured error shape — likely a gateway-level
+			// response (an edge 404/403 page, an HTML error, etc.) rather
+			// than a Jira API business error. Surfaced verbatim (bounded by
+			// maxErrorBodyLen above) since guessing at its meaning here
+			// would just replace one uninformative message with another.
+			messages = []string{trimmed}
+		}
 	}
 	return &APIError{StatusCode: resp.StatusCode, Messages: messages}
 }

@@ -574,7 +574,16 @@ func jiraIssueError(err error) error {
 		case http.StatusForbidden:
 			return status.Errorf(codes.PermissionDenied, "Jira rejected the request: %s", err.Error())
 		case http.StatusNotFound:
-			return status.Errorf(codes.NotFound, "Jira project or issue type not found: %s", err.Error())
+			// Unlike GitHub's create-issue endpoint (whose URL path embeds
+			// owner/repo, so a bad one genuinely 404s at GitHub's API),
+			// Jira's POST /rest/api/3/issue has a fixed path — project_key
+			// and issue_type are validated in the request body, and an
+			// invalid one there is a 400 from Jira, not a 404. A 404 here
+			// essentially always means the request never reached Jira's
+			// own handler at all: the api.atlassian.com gateway itself
+			// couldn't route it (an invalid/inaccessible JIRA_CLOUD_ID, or
+			// a token not provisioned for gateway access).
+			return status.Errorf(codes.NotFound, "Jira API endpoint not found — check that JIRA_CLOUD_ID is correct and the token has gateway access: %s", err.Error())
 		case http.StatusBadRequest:
 			return status.Errorf(codes.InvalidArgument, "Jira rejected the request: %s", err.Error())
 		case http.StatusTooManyRequests:

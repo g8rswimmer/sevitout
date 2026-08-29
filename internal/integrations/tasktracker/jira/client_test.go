@@ -267,6 +267,53 @@ func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	}
 }
 
+func TestCreateIssue_NonJSONErrorBody_SurfacedVerbatim(t *testing.T) {
+	// The api.atlassian.com gateway returns a 404 with a plain-text/HTML
+	// body (not Jira's errorMessages/errors JSON shape) when a request
+	// never reaches Jira's own handler at all — e.g. an invalid Cloud ID.
+	// That's a materially different, more useful signal than a bare
+	// "unexpected status 404", so it must survive into APIError.Messages
+	// rather than being silently discarded by the JSON parse failing.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("<html><body>Not Found</body></html>"))
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
+
+	var apiErr *jira.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *jira.APIError, got %T: %v", err, err)
+	}
+	if len(apiErr.Messages) != 1 || apiErr.Messages[0] != "<html><body>Not Found</body></html>" {
+		t.Errorf("Messages = %v, want the raw body surfaced verbatim", apiErr.Messages)
+	}
+}
+
+func TestCreateIssue_EmptyErrorBody_NoMessages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
+
+	var apiErr *jira.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *jira.APIError, got %T: %v", err, err)
+	}
+	if len(apiErr.Messages) != 0 {
+		t.Errorf("Messages = %v, want empty for a genuinely empty body", apiErr.Messages)
+	}
+	if err.Error() != "jira: unexpected status 404" {
+		t.Errorf("Error() = %q, want the generic fallback", err.Error())
+	}
+}
+
 func TestCreateIssue_UnexpectedStatus_SurfacesAPIMessages(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
