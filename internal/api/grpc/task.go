@@ -98,7 +98,7 @@ func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	callerID := ""
@@ -139,7 +139,7 @@ func (s *TaskServer) LinkTask(ctx context.Context, req *pb.LinkTaskRequest) (*pb
 		if errors.Is(err, store.ErrConflict) {
 			return nil, status.Error(codes.AlreadyExists, "this task is already linked to the SEV")
 		}
-		return nil, status.Error(codes.Internal, "failed to create linked task")
+		return nil, internalError(ctx, "failed to create linked task", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -171,7 +171,7 @@ func (s *TaskServer) UnlinkTask(ctx context.Context, req *pb.UnlinkTaskRequest) 
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "task not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get task")
+		return nil, internalError(ctx, "failed to get task", err)
 	}
 	if task.SEVID != req.GetSevId() {
 		return nil, status.Error(codes.NotFound, "task not found")
@@ -187,7 +187,7 @@ func (s *TaskServer) UnlinkTask(ctx context.Context, req *pb.UnlinkTaskRequest) 
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "task not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to delete task")
+		return nil, internalError(ctx, "failed to delete task", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -221,7 +221,7 @@ func (s *TaskServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*
 
 	tasks, err := s.tasks.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list tasks")
+		return nil, internalError(ctx, "failed to list tasks", err)
 	}
 
 	callerID := ""
@@ -278,7 +278,7 @@ func (s *TaskServer) UpdateTaskDueDate(ctx context.Context, req *pb.UpdateTaskDu
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "task not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get task")
+		return nil, internalError(ctx, "failed to get task", err)
 	}
 	if task.SEVID != req.GetSevId() {
 		return nil, status.Error(codes.NotFound, "task not found")
@@ -294,7 +294,7 @@ func (s *TaskServer) UpdateTaskDueDate(ctx context.Context, req *pb.UpdateTaskDu
 	task.DueDate = &t
 
 	if err := s.tasks.Update(ctx, task); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update task")
+		return nil, internalError(ctx, "failed to update task", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -341,7 +341,7 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	priority := store.TaskPriority(req.GetPriority())
