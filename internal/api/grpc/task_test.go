@@ -16,6 +16,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
+	jiraint "github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/jira"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
@@ -51,6 +52,26 @@ func (f *fakeIssueClient) CreateIssue(_ context.Context, owner, repo, title, bod
 	return f.issue, f.err
 }
 
+// ── fake JiraIssueClient ─────────────────────────────────────────────────────
+
+// capturedCreateJiraIssue records one CreateIssue invocation on
+// fakeJiraIssueClient.
+type capturedCreateJiraIssue struct {
+	ProjectKey, IssueType, Summary, Description string
+	Labels                                      []string
+}
+
+type fakeJiraIssueClient struct {
+	issue *grpchandler.CreatedIssue
+	err   error
+	calls []capturedCreateJiraIssue
+}
+
+func (f *fakeJiraIssueClient) CreateIssue(_ context.Context, projectKey, issueType, summary, description string, labels []string) (*grpchandler.CreatedIssue, error) {
+	f.calls = append(f.calls, capturedCreateJiraIssue{projectKey, issueType, summary, description, labels})
+	return f.issue, f.err
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 type testTaskServer struct {
@@ -71,6 +92,28 @@ func newTestTaskServer(gh grpchandler.IssueClient) *testTaskServer {
 	return &testTaskServer{
 		server: grpchandler.NewTaskServer(grpchandler.TaskServerParams{
 			Tasks: tasks, SEVs: sevs, Access: access, Audit: audit, GitHub: gh, Publisher: pub,
+		}),
+		tasks:  tasks,
+		sevs:   sevs,
+		access: access,
+		audit:  audit,
+		pub:    pub,
+	}
+}
+
+// newTestTaskServerWithJira mirrors newTestTaskServer, wiring jira instead
+// of a GitHub IssueClient — kept as a separate helper rather than adding a
+// second parameter to newTestTaskServer itself, since that would touch every
+// one of its many existing (GitHub-only) call sites for no benefit to them.
+func newTestTaskServerWithJira(jira grpchandler.JiraIssueClient) *testTaskServer {
+	tasks := memory.NewTaskStore()
+	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
+	audit := memory.NewAuditStore()
+	pub := &fakePublisher{}
+	return &testTaskServer{
+		server: grpchandler.NewTaskServer(grpchandler.TaskServerParams{
+			Tasks: tasks, SEVs: sevs, Access: access, Audit: audit, Jira: jira, Publisher: pub,
 		}),
 		tasks:  tasks,
 		sevs:   sevs,
@@ -790,6 +833,206 @@ func TestCreateGitHubIssue_SEVNotFound(t *testing.T) {
 	}
 }
 
+// ── CreateJiraIssue ───────────────────────────────────────────────────────────
+
+func TestCreateJiraIssue_Valid(t *testing.T) {
+	jira := &fakeJiraIssueClient{
+		issue: &grpchandler.CreatedIssue{
+			Key:   "OPS-42",
+			Title: "SEV follow-up",
+			Body:  "details",
+			URL:   "https://acme.atlassian.net/browse/OPS-42",
+		},
+	}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+
+	resolved := time.Now().Add(-24 * time.Hour)
+	sevID := seedSEVForTask(t, ts, &resolved)
+
+	resp, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId:            sevID,
+		ProjectKey:       "OPS",
+		IssueType:        "Task",
+		Summary:          "SEV follow-up",
+		Description:      "details",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if err != nil {
+		t.Fatalf("CreateJiraIssue: %v", err)
+	}
+	if resp.GetExternalSystem() != "jira" {
+		t.Errorf("external_system: got %q, want jira", resp.GetExternalSystem())
+	}
+	if resp.GetTaskId() != "OPS-42" {
+		t.Errorf("task_id: got %q, want OPS-42", resp.GetTaskId())
+	}
+	if resp.GetUrl() != "https://acme.atlassian.net/browse/OPS-42" {
+		t.Errorf("url mismatch: got %q", resp.GetUrl())
+	}
+	// resolved 1 day ago + 30 day critical SLA = future → not overdue
+	if resp.GetOverdue() {
+		t.Error("task should not be overdue immediately after creation")
+	}
+	wantLabels := []string{sevID, "critical"}
+	if len(jira.calls) != 1 {
+		t.Fatalf("want 1 CreateIssue call, got %d", len(jira.calls))
+	}
+	if !reflect.DeepEqual(jira.calls[0].Labels, wantLabels) {
+		t.Errorf("labels: got %v, want %v", jira.calls[0].Labels, wantLabels)
+	}
+	if jira.calls[0].ProjectKey != "OPS" || jira.calls[0].IssueType != "Task" {
+		t.Errorf("project_key/issue_type: got (%q, %q), want (OPS, Task)", jira.calls[0].ProjectKey, jira.calls[0].IssueType)
+	}
+}
+
+func TestCreateJiraIssue_NotConfigured(t *testing.T) {
+	ts := newTestTaskServerWithJira(nil) // nil JiraIssueClient
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	_, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId:            sevID,
+		ProjectKey:       "OPS",
+		IssueType:        "Task",
+		Summary:          "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if grpcCode(err) != codes.Unavailable {
+		t.Errorf("want Unavailable when Jira not configured, got %v", grpcCode(err))
+	}
+}
+
+func TestCreateJiraIssue_JiraAPIError_MapsToStatusCode(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		want       codes.Code
+	}{
+		{"forbidden", http.StatusForbidden, codes.PermissionDenied},
+		{"unauthorized", http.StatusUnauthorized, codes.Unauthenticated},
+		{"not found", http.StatusNotFound, codes.NotFound},
+		{"bad request", http.StatusBadRequest, codes.InvalidArgument},
+		{"rate limited", http.StatusTooManyRequests, codes.ResourceExhausted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jira := &fakeJiraIssueClient{err: &jiraint.APIError{StatusCode: tt.statusCode, Messages: []string{"denied"}}}
+			ts := newTestTaskServerWithJira(jira)
+			ctx := context.Background()
+			sevID := seedSEVForTask(t, ts, nil)
+
+			_, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+				SevId:            sevID,
+				ProjectKey:       "OPS",
+				IssueType:        "Task",
+				Summary:          "issue",
+				RelationshipType: "action-item",
+				Priority:         "critical",
+			})
+			if grpcCode(err) != tt.want {
+				t.Errorf("status %d: want %v, got %v (%v)", tt.statusCode, tt.want, grpcCode(err), err)
+			}
+		})
+	}
+}
+
+func TestCreateJiraIssue_JiraError(t *testing.T) {
+	jira := &fakeJiraIssueClient{err: errors.New("500 internal server error")}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	_, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId:            sevID,
+		ProjectKey:       "OPS",
+		IssueType:        "Task",
+		Summary:          "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if grpcCode(err) != codes.Internal {
+		t.Errorf("want Internal on unmapped Jira error, got %v", grpcCode(err))
+	}
+}
+
+func TestCreateJiraIssue_DuplicateLinkReturnsAlreadyExists(t *testing.T) {
+	jira := &fakeJiraIssueClient{issue: &grpchandler.CreatedIssue{Key: "OPS-1", Title: "t", URL: "https://acme.atlassian.net/browse/OPS-1"}}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	// Pre-register the same (sev_id, "jira", "OPS-1") reference via LinkTask
+	// so CreateJiraIssue's Create call hits the same conflict
+	// memory.TaskStore already enforces for LinkTask.
+	if _, err := ts.server.LinkTask(ctx, &pb.LinkTaskRequest{
+		SevId:            sevID,
+		ExternalSystem:   "jira",
+		TaskId:           "OPS-1",
+		Url:              "https://acme.atlassian.net/browse/OPS-1",
+		Title:            "pre-existing",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	}); err != nil {
+		t.Fatalf("LinkTask: %v", err)
+	}
+
+	_, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId:            sevID,
+		ProjectKey:       "OPS",
+		IssueType:        "Task",
+		Summary:          "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if grpcCode(err) != codes.AlreadyExists {
+		t.Errorf("want AlreadyExists for duplicate (sev_id, external_system, task_id), got %v", grpcCode(err))
+	}
+}
+
+func TestCreateJiraIssue_SEVNotFound(t *testing.T) {
+	jira := &fakeJiraIssueClient{issue: &grpchandler.CreatedIssue{Key: "OPS-1", Title: "t", URL: "u"}}
+	ts := newTestTaskServerWithJira(jira)
+
+	_, err := ts.server.CreateJiraIssue(context.Background(), &pb.CreateJiraIssueRequest{
+		SevId:            "SEV-9999-0001",
+		ProjectKey:       "OPS",
+		IssueType:        "Task",
+		Summary:          "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+func TestCreateJiraIssue_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *pb.CreateJiraIssueRequest
+	}{
+		{"missing sev_id", &pb.CreateJiraIssueRequest{ProjectKey: "OPS", IssueType: "Task", Summary: "s", RelationshipType: "action-item", Priority: "critical"}},
+		{"missing project_key", &pb.CreateJiraIssueRequest{SevId: "x", IssueType: "Task", Summary: "s", RelationshipType: "action-item", Priority: "critical"}},
+		{"missing issue_type", &pb.CreateJiraIssueRequest{SevId: "x", ProjectKey: "OPS", Summary: "s", RelationshipType: "action-item", Priority: "critical"}},
+		{"missing summary", &pb.CreateJiraIssueRequest{SevId: "x", ProjectKey: "OPS", IssueType: "Task", RelationshipType: "action-item", Priority: "critical"}},
+		{"bad relationship_type", &pb.CreateJiraIssueRequest{SevId: "x", ProjectKey: "OPS", IssueType: "Task", Summary: "s", RelationshipType: "bogus", Priority: "critical"}},
+		{"bad priority", &pb.CreateJiraIssueRequest{SevId: "x", ProjectKey: "OPS", IssueType: "Task", Summary: "s", RelationshipType: "action-item", Priority: "bogus"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jira := &fakeJiraIssueClient{issue: &grpchandler.CreatedIssue{Key: "OPS-1"}}
+			ts := newTestTaskServerWithJira(jira)
+			_, err := ts.server.CreateJiraIssue(context.Background(), tt.req)
+			if grpcCode(err) != codes.InvalidArgument {
+				t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+			}
+		})
+	}
+}
+
 // ── ListTasks ─────────────────────────────────────────────────────────────────
 
 func TestListTasks_Empty(t *testing.T) {
@@ -966,6 +1209,39 @@ func TestCreateGitHubIssue_PublishesEvent(t *testing.T) {
 	}
 }
 
+func TestCreateJiraIssue_PublishesEvent(t *testing.T) {
+	jira := &fakeJiraIssueClient{
+		issue: &grpchandler.CreatedIssue{
+			Key: "OPS-42", Title: "SEV follow-up", Body: "details",
+			URL: "https://acme.atlassian.net/browse/OPS-42",
+		},
+	}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	_, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId:            sevID,
+		ProjectKey:       "OPS",
+		IssueType:        "Task",
+		Summary:          "SEV follow-up",
+		Description:      "details",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if err != nil {
+		t.Fatalf("CreateJiraIssue: %v", err)
+	}
+
+	events := ts.pub.All()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].sevID != sevID || events[0].eventType != "task.linked" {
+		t.Errorf("event = %+v, want sev_id=%q type=task.linked", events[0], sevID)
+	}
+}
+
 func seedSensitiveSEVForTask(t *testing.T, ts *testTaskServer) string {
 	t.Helper()
 	now := time.Now()
@@ -1051,6 +1327,30 @@ func TestCreateGitHubIssue_SensitiveSEVDoesNotPublish(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CreateGitHubIssue: %v", err)
+	}
+
+	if events := ts.pub.All(); len(events) != 0 {
+		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestCreateJiraIssue_SensitiveSEVDoesNotPublish(t *testing.T) {
+	jira := &fakeJiraIssueClient{
+		issue: &grpchandler.CreatedIssue{
+			Key: "OPS-42", Title: "SEV follow-up", Body: "details",
+			URL: "https://acme.atlassian.net/browse/OPS-42",
+		},
+	}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+	sevID := seedSensitiveSEVForTask(t, ts)
+
+	_, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId: sevID, ProjectKey: "OPS", IssueType: "Task", Summary: "SEV follow-up", Description: "details",
+		RelationshipType: "action-item", Priority: "critical",
+	})
+	if err != nil {
+		t.Fatalf("CreateJiraIssue: %v", err)
 	}
 
 	if events := ts.pub.All(); len(events) != 0 {

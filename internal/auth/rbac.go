@@ -59,6 +59,7 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.TaskService/ListTasks":         store.OrgRoleViewer,
 	"/sevitout.v1.TaskService/UpdateTaskDueDate": store.OrgRoleResponder,
 	"/sevitout.v1.TaskService/CreateGitHubIssue": store.OrgRoleResponder,
+	"/sevitout.v1.TaskService/CreateJiraIssue":   store.OrgRoleResponder,
 	// Search service
 	"/sevitout.v1.SearchService/SearchSEVs": store.OrgRoleViewer,
 	// Report service — dashboard/trends/export are all read-only, same Viewer
