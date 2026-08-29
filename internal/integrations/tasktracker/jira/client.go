@@ -22,13 +22,23 @@ const (
 	apiPath         = "/rest/api/3"
 	requestTimeout  = 10 * time.Second
 	maxErrorBodyLen = 4096
+
+	// gatewayBaseURL is Atlassian's API gateway host: every Jira Cloud
+	// tenant is reached at gatewayBaseURL + "/ex/jira/{cloudId}", not at
+	// the tenant's own https://{site}.atlassian.net host directly — see
+	// https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/.
+	gatewayBaseURL = "https://api.atlassian.com/ex/jira"
 )
 
-// Issue is a Jira issue as returned by the client. URL is the human-facing
-// "browse" link (https://{baseURL}/browse/{Key}) — the REST API's own "self"
-// link points at the machine-readable resource instead, which isn't useful
-// to hand back to a caller expecting something clickable (mirrors
-// github.Issue.HTMLURL for the same reason).
+// Issue is a Jira issue as returned by the client. URL is the REST API's own
+// "self" link (the machine-readable resource URL, e.g.
+// "https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/issue/10007") —
+// unlike github.Issue.HTMLURL, this isn't a human-clickable "browse" page:
+// with only a cloudId (not the tenant's own https://{site}.atlassian.net
+// host — the API gateway and the browsable web UI are different hosts, and
+// the site name isn't derivable from cloudId alone), there's no browse link
+// this client can construct. See CreateIssueRequest's caller
+// (internal/api/grpc/task.go's CreateJiraIssue) for how that's surfaced.
 type Issue struct {
 	Key         string
 	Summary     string
@@ -68,32 +78,39 @@ func (e *APIError) Error() string {
 // github.APIError.HTTPStatus.
 func (e *APIError) HTTPStatus() int { return e.StatusCode }
 
-// Client calls the Jira Cloud REST API v3 for one tenant instance.
+// Client calls the Jira Cloud REST API v3 for one tenant instance, via
+// Atlassian's api.atlassian.com gateway rather than the tenant's own
+// https://{site}.atlassian.net host directly.
 type Client struct {
 	baseURL  string
-	email    string
 	apiToken string
 	http     *http.Client
 }
 
-// NewClient returns a Client for the Jira Cloud instance at baseURL (e.g.
-// "https://acme.atlassian.net"), authenticating with HTTP Basic Auth using
-// email and apiToken — Jira Cloud's REST API v3 does not accept a bearer
-// token the way GitHub's and PagerDuty's APIs do. Unlike
-// github.NewClient/NewClientWithBaseURL, there is no separate
-// production-vs-test-server constructor: every Jira Cloud tenant has its own
-// host, so baseURL is always required, and a test can simply pass an
-// httptest.Server's URL here directly.
-func NewClient(baseURL, email, apiToken string) *Client {
+// NewClient returns a Client for the Jira Cloud tenant identified by
+// cloudID, authenticating with apiToken as a Bearer token in the
+// Authorization header. Per
+// https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/,
+// requests through the api.atlassian.com gateway use Bearer token auth, not
+// HTTP Basic Auth — no account email is needed alongside the token. cloudID
+// is the tenant's Cloud ID (a UUID, not its site name) — see that page for
+// how to find it under admin.atlassian.com.
+func NewClient(cloudID, apiToken string) *Client {
+	return NewClientWithBaseURL(gatewayBaseURL+"/"+cloudID, apiToken)
+}
+
+// NewClientWithBaseURL returns a Client that uses a custom base URL instead
+// of deriving one from a Cloud ID, intended for use in tests with
+// httptest.Server — mirrors github.NewClientWithBaseURL.
+func NewClientWithBaseURL(baseURL, apiToken string) *Client {
 	return &Client{
 		baseURL:  strings.TrimSuffix(baseURL, "/"),
-		email:    email,
 		apiToken: apiToken,
 		http:     &http.Client{Timeout: requestTimeout},
 	}
 }
 
-// Ping verifies that email/apiToken are accepted by Jira, by calling the
+// Ping verifies that apiToken is accepted by Jira, by calling the
 // lightweight "who am I" endpoint every authenticated Jira Cloud user can
 // reach regardless of project permissions. Used by the Configuration API's
 // integration health check (see internal/api/grpc/integrations_health.go),
@@ -143,12 +160,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*Issue, error) {
 		slog.WarnContext(ctx, "jira api call returned error", "op", "GetIssue", "status", resp.StatusCode)
 		return nil, apiErr
 	}
-	issue, err := decodeIssue(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	issue.URL = c.browseURL(issue.Key)
-	return issue, nil
+	return decodeIssue(resp.Body)
 }
 
 // CreateIssue creates a new Jira issue in the given project and returns the
@@ -200,7 +212,8 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 	}
 
 	var created struct {
-		Key string `json:"key"`
+		Key  string `json:"key"`
+		Self string `json:"self"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		return nil, fmt.Errorf("jira: decode response: %w", err)
@@ -210,18 +223,14 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 		Key:         created.Key,
 		Summary:     req.Summary,
 		Description: req.Description,
-		URL:         c.browseURL(created.Key),
+		URL:         created.Self,
 	}
 	slog.InfoContext(ctx, "jira issue created", "project_key", req.ProjectKey, "key", issue.Key, "url", issue.URL)
 	return issue, nil
 }
 
-func (c *Client) browseURL(key string) string {
-	return c.baseURL + "/browse/" + url.PathEscape(key)
-}
-
 func (c *Client) setHeaders(req *http.Request) {
-	req.SetBasicAuth(c.email, c.apiToken)
+	req.Header.Set("Authorization", "Bearer "+c.apiToken)
 	req.Header.Set("Accept", "application/json")
 }
 
@@ -229,6 +238,7 @@ func (c *Client) setHeaders(req *http.Request) {
 // this client reads.
 type issueDTO struct {
 	Key    string `json:"key"`
+	Self   string `json:"self"`
 	Fields struct {
 		Summary     string `json:"summary"`
 		Description any    `json:"description"` // Atlassian Document Format (ADF), or null.
@@ -248,6 +258,7 @@ func decodeIssue(r io.Reader) (*Issue, error) {
 		Summary:     dto.Fields.Summary,
 		Description: adfToPlainText(dto.Fields.Description),
 		Status:      dto.Fields.Status.Name,
+		URL:         dto.Self,
 	}, nil
 }
 

@@ -55,16 +55,18 @@ type Config struct {
 	// layer.
 	EncryptionKey string
 
-	// JiraBaseURL is JIRA_BASE_URL (e.g. "https://acme.atlassian.net"), and
-	// JiraEmail/JiraAPIToken are JIRA_EMAIL/JIRA_API_TOKEN — the Basic-Auth
-	// pair Jira Cloud's REST API v3 expects (an account email plus an API
-	// token, not a bearer token — see internal/integrations/tasktracker/jira).
-	// The Jira Issues integration is enabled only when all three are
-	// non-empty; unlike GitHub's single GITHUB_TOKEN, a base URL is required
-	// because Jira Cloud instances are tenant-specific, with no shared
-	// production API host to default to.
-	JiraBaseURL  string
-	JiraEmail    string
+	// JiraCloudID is JIRA_CLOUD_ID — the target Jira Cloud tenant's Cloud ID
+	// (a UUID, not its site name; see
+	// https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/
+	// for how to find it), and JiraAPIToken is JIRA_API_TOKEN, sent as a
+	// Bearer token — Jira Cloud's REST API v3 gateway (api.atlassian.com)
+	// accepts Bearer auth, not HTTP Basic Auth, so no account email is
+	// needed alongside it (see internal/integrations/tasktracker/jira). The
+	// Jira Issues integration is enabled only when both are non-empty;
+	// unlike GitHub's single GITHUB_TOKEN, a Cloud ID is required because
+	// Jira Cloud instances are tenant-specific, with no shared production
+	// API host to default to.
+	JiraCloudID  string
 	JiraAPIToken string
 }
 
@@ -85,8 +87,7 @@ func Load() (*Config, error) {
 		PagerDutyAPIKey:        os.Getenv("PAGERDUTY_API_KEY"),
 		GitHubToken:            os.Getenv("GITHUB_TOKEN"),
 		EncryptionKey:          os.Getenv("ENCRYPTION_KEY"),
-		JiraBaseURL:            os.Getenv("JIRA_BASE_URL"),
-		JiraEmail:              os.Getenv("JIRA_EMAIL"),
+		JiraCloudID:            os.Getenv("JIRA_CLOUD_ID"),
 		JiraAPIToken:           os.Getenv("JIRA_API_TOKEN"),
 	}
 

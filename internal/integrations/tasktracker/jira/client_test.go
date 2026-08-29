@@ -16,15 +16,14 @@ func TestPing_Success(t *testing.T) {
 		if r.URL.Path != "/rest/api/3/myself" {
 			t.Errorf("path = %q, want /rest/api/3/myself", r.URL.Path)
 		}
-		user, pass, ok := r.BasicAuth()
-		if !ok || user != "bot@acme.com" || pass != "test-token" {
-			t.Errorf("basic auth = (%q, %q, %v), want (bot@acme.com, test-token, true)", user, pass, ok)
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization header = %q, want %q", got, "Bearer test-token")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	if err := c.Ping(context.Background()); err != nil {
 		t.Errorf("Ping: %v", err)
 	}
@@ -36,7 +35,7 @@ func TestPing_ErrorOnNonOK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "bad-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "bad-token")
 	if err := c.Ping(context.Background()); err == nil {
 		t.Error("Ping should error on a non-200 response")
 	}
@@ -49,7 +48,8 @@ func TestGetIssue(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"key": "PROJ-42",
+			"key":  "PROJ-42",
+			"self": "https://api.atlassian.com/ex/jira/some-cloud-id/rest/api/3/issue/10042",
 			"fields": map[string]any{
 				"summary": "Test Issue",
 				"status":  map[string]any{"name": "In Progress"},
@@ -69,7 +69,7 @@ func TestGetIssue(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	issue, err := c.GetIssue(context.Background(), "PROJ-42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -86,8 +86,9 @@ func TestGetIssue(t *testing.T) {
 	if issue.Description != "issue body" {
 		t.Errorf("description: got %q, want %q", issue.Description, "issue body")
 	}
-	if issue.URL != srv.URL+"/browse/PROJ-42" {
-		t.Errorf("url: got %q, want %q", issue.URL, srv.URL+"/browse/PROJ-42")
+	wantURL := "https://api.atlassian.com/ex/jira/some-cloud-id/rest/api/3/issue/10042"
+	if issue.URL != wantURL {
+		t.Errorf("url: got %q, want the API's own self link %q", issue.URL, wantURL)
 	}
 }
 
@@ -101,7 +102,7 @@ func TestGetIssue_NullDescription(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	issue, err := c.GetIssue(context.Background(), "PROJ-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -111,13 +112,32 @@ func TestGetIssue_NullDescription(t *testing.T) {
 	}
 }
 
+func TestGetIssue_EscapesKey(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1", "fields": map[string]any{}})
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
+	if _, err := c.GetIssue(context.Background(), "PROJ-1/../evil"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "/rest/api/3/issue/PROJ-1%2F..%2Fevil"
+	if gotPath != want {
+		t.Errorf("request path: got %q, want %q (issue key must be escaped, not interpreted as path separators)", gotPath, want)
+	}
+}
+
 func TestGetIssue_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	_, err := c.GetIssue(context.Background(), "PROJ-999")
 	if err == nil {
 		t.Fatal("expected error for 404, got nil")
@@ -133,6 +153,9 @@ func TestCreateIssue(t *testing.T) {
 		if r.URL.Path != "/rest/api/3/issue" {
 			t.Errorf("path: got %q, want /rest/api/3/issue", r.URL.Path)
 		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization header = %q, want %q", got, "Bearer test-token")
+		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode request body: %v", err)
 		}
@@ -140,12 +163,12 @@ func TestCreateIssue(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "10007", "key": "PROJ-7", "self": srv2URL(),
+			"id": "10007", "key": "PROJ-7", "self": selfURL(),
 		})
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	issue, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{
 		ProjectKey: "PROJ", IssueType: "Task", Summary: "SEV follow-up", Description: "details",
 	})
@@ -155,8 +178,8 @@ func TestCreateIssue(t *testing.T) {
 	if issue.Key != "PROJ-7" {
 		t.Errorf("key: got %q, want PROJ-7", issue.Key)
 	}
-	if issue.URL != srv.URL+"/browse/PROJ-7" {
-		t.Errorf("url: got %q, want %q", issue.URL, srv.URL+"/browse/PROJ-7")
+	if issue.URL != selfURL() {
+		t.Errorf("url: got %q, want the response's own self link %q", issue.URL, selfURL())
 	}
 	if issue.Summary != "SEV follow-up" {
 		t.Errorf("summary: got %q, want the request's own summary (Jira's create response doesn't echo it)", issue.Summary)
@@ -190,7 +213,7 @@ func TestCreateIssue_OmitsDescriptionWhenEmpty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{
 		ProjectKey: "PROJ", IssueType: "Task", Summary: "no description",
 	})
@@ -215,7 +238,7 @@ func TestCreateIssue_SendsLabels(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{
 		ProjectKey: "PROJ", IssueType: "Task", Summary: "s",
 		Labels: []string{"SEV-2026-0009", "critical"},
@@ -237,7 +260,7 @@ func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
 	if err == nil {
 		t.Fatal("expected error for non-201 status, got nil")
@@ -255,7 +278,7 @@ func TestCreateIssue_UnexpectedStatus_SurfacesAPIMessages(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token")
 	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{Summary: "s"})
 
 	var apiErr *jira.APIError
@@ -270,27 +293,11 @@ func TestCreateIssue_UnexpectedStatus_SurfacesAPIMessages(t *testing.T) {
 	}
 }
 
-func TestCreateIssue_EscapesProjectAndIssueKey(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1/../evil"})
-	}))
-	defer srv.Close()
-
-	c := jira.NewClient(srv.URL, "bot@acme.com", "test-token")
-	issue, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := srv.URL + "/browse/PROJ-1%2F..%2Fevil"
-	if issue.URL != want {
-		t.Errorf("url: got %q, want %q (issue key must be escaped, not interpreted as path separators)", issue.URL, want)
-	}
+// selfURL is a fixed "self" link value used by TestCreateIssue's mock
+// server response — CreateIssue now reads this field directly as the
+// returned Issue.URL (see Issue's doc comment: with only a cloudId, this
+// client can't construct a human "browse" link the way it could when a
+// full site base URL was configured directly).
+func selfURL() string {
+	return "https://api.atlassian.com/ex/jira/some-cloud-id/rest/api/3/issue/10007"
 }
-
-// srv2URL is a placeholder "self" link value for CreateIssue's response —
-// the client never reads it (see Issue.URL's doc comment), so its exact
-// value doesn't matter to the test; only that decoding the response
-// succeeds regardless of what a real Jira instance would send there.
-func srv2URL() string { return "https://acme.atlassian.net/rest/api/3/issue/10007" }

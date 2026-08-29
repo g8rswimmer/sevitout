@@ -69,7 +69,7 @@ type TaskServer struct {
 	access    store.SEVAccessStore
 	audit     store.AuditStore
 	github    IssueClient     // nil when GITHUB_TOKEN is not set
-	jira      JiraIssueClient // nil when JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN are not all set
+	jira      JiraIssueClient // nil when JIRA_CLOUD_ID/JIRA_API_TOKEN are not both set
 	publisher Publisher       // nil when WebSocket support is not wired up
 }
 
@@ -437,7 +437,7 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssueRequest) (*pb.TaskResponse, error) {
 	if s.jira == nil {
 		return nil, status.Error(codes.Unavailable,
-			"Jira integration is not configured (JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN not set)")
+			"Jira integration is not configured (JIRA_CLOUD_ID/JIRA_API_TOKEN not set)")
 	}
 	if req.GetSevId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")

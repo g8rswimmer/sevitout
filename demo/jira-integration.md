@@ -9,17 +9,24 @@ tracker, closing §13.3's "v2 fast-follow" — mirroring
 that the new handler code reads almost identically to its GitHub sibling.
 
 - **`internal/integrations/tasktracker/jira`** (new package) — `Client`
-  authenticating with HTTP Basic Auth (account email + API token, per Jira
-  Cloud REST API v3 — not a bearer token like GitHub's), against a
-  caller-supplied `baseURL` (every Jira Cloud tenant has its own host, so
-  unlike `github.NewClient`, there's no fixed production API host to
-  default to). `Ping`/`GetIssue`/`CreateIssue`, an `APIError` type — same
-  shape as `github.Client`, down to the `HTTPStatus()` method
-  `internal/api/grpc/task.go`'s shared `httpStatusError` interface expects.
-  Handles Jira's REST v3 quirk that `description` must be Atlassian Document
-  Format (ADF) JSON, not a plain string — `plainTextToADF`/`adfToPlainText`
-  convert both ways (write side exact, read side best-effort — see the
-  package's doc comments).
+  authenticating with a Bearer token (the API token, in the `Authorization`
+  header — Jira Cloud's `api.atlassian.com` gateway accepts Bearer auth, not
+  HTTP Basic Auth, so no account email is needed alongside it). `NewClient`
+  takes a Cloud ID and builds the gateway URL
+  (`https://api.atlassian.com/ex/jira/{cloudId}`) internally; a tenant's
+  Cloud ID is a UUID, not its `https://{site}.atlassian.net` name — see
+  [Atlassian's API token docs](https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/)
+  for both of these (an earlier version of this client got both wrong:
+  Basic Auth with an email, and a caller-supplied site URL as the base — see
+  Design notes below for the correction). `NewClientWithBaseURL` is the
+  test-only escape hatch for pointing at an `httptest.Server`, mirroring
+  `github.NewClientWithBaseURL`. `Ping`/`GetIssue`/`CreateIssue`, an
+  `APIError` type — same shape as `github.Client`, down to the
+  `HTTPStatus()` method `internal/api/grpc/task.go`'s shared
+  `httpStatusError` interface expects. Handles Jira's REST v3 quirk that
+  `description` must be Atlassian Document Format (ADF) JSON, not a plain
+  string — `plainTextToADF`/`adfToPlainText` convert both ways (write side
+  exact, read side best-effort — see the package's doc comments).
 - **`grpchandler.JiraIssueClient`** (new interface, `internal/api/grpc/task.go`)
   — declared alongside the existing `IssueClient`, not as a generalization of
   it: Jira's create-issue call has no owner/repo concept (a project key and
@@ -43,24 +50,44 @@ that the new handler code reads almost identically to its GitHub sibling.
   `rpcMinRole` table, without which the RPC would be unreachable by anyone,
   admins included, since a method absent from that map is denied to all
   callers by design).
-- **`internal/config`**: `JIRA_BASE_URL`/`JIRA_EMAIL`/`JIRA_API_TOKEN` — all
-  three required together (unlike GitHub's single `GITHUB_TOKEN`); partial
-  configuration is treated the same as none (`cmd/server/main.go` only
-  builds a client when all three are non-empty) rather than starting with a
-  client that would fail every call.
+- **`internal/config`**: `JIRA_CLOUD_ID`/`JIRA_API_TOKEN` — both required
+  together (unlike GitHub's single `GITHUB_TOKEN`); partial configuration is
+  treated the same as none (`cmd/server/main.go` only builds a client when
+  both are non-empty) rather than starting with a client that would fail
+  every call.
 - **`cmd/server/main.go`**: `jiraIssueClient` (adapts `*jira.Client` to
   `grpchandler.JiraIssueClient`, mirroring `githubIssueClient`) and
   `jiraHealthChecker` (adapts it to `grpchandler.HealthChecker`, registered
   under `"jira"` in the `GET /admin/integrations/health` checker map,
   mirroring `githubHealthChecker`/`pagerdutyHealthChecker`) — the latter
-  reads its Jira tenant's `base_url` from the Config API's per-integration
+  reads its Jira tenant's `cloud_id` from the Config API's per-integration
   *settings*, not credentials, since it identifies which tenant to call
   rather than authenticating to it.
 - `README.md`, `.env.example`, `deploy/docker-compose.yml` updated with the
-  three new env vars, matching every existing optional-integration's
+  two new env vars, matching every existing optional-integration's
   documentation pattern.
 
 ## Design notes
+
+**Correction after initial review: Bearer token + Cloud ID, not Basic Auth +
+site URL.** The first version of this client got Jira Cloud's actual
+authentication contract wrong — it used HTTP Basic Auth (email + API token)
+against a caller-supplied site base URL
+(`https://{site}.atlassian.net`), which happens to also accept Basic Auth
+directly for some legacy endpoints but is not what
+[Atlassian's own service-account API token docs](https://support.atlassian.com/user-management/docs/manage-api-tokens-for-service-accounts/)
+describe: requests through the `api.atlassian.com` gateway (the
+supported, forward-looking integration path) use a Bearer token in the
+`Authorization` header, addressed by Cloud ID
+(`https://api.atlassian.com/ex/jira/{cloudId}`), not the tenant's site name,
+and no account email is needed alongside the token at all. Fixed by
+reworking `NewClient` to take `(cloudID, apiToken)` and build the gateway
+URL internally, dropping `email` from `Client` and `Config` entirely, and
+switching `setHeaders` from `SetBasicAuth` to a literal `Bearer ` prefix.
+One side effect: with only a Cloud ID (not the site's browsable host), this
+client can no longer construct a human "browse" link for a created issue —
+see `Issue.URL`'s doc comment for what it returns instead (the API's own
+`self` resource link).
 
 **Second interface + second RPC, not a generalized `IssueClient` + a
 `taskTrackerFactory`** — the roadmap named both as options going in. The
@@ -82,13 +109,13 @@ create new ones). Jira Cloud auto-creates unrecognized labels on the issue
 instead of rejecting the request, so that failure mode doesn't exist there;
 porting the retry loop anyway would be dead code exercised by nothing real.
 
-**`base_url` lives in Config API `settings`, not `credentials`.** Every
+**`cloud_id` lives in Config API `settings`, not `credentials`.** Every
 other integration's per-service config here is pure credentials (a token, a
 key). Jira is the first to need a piece of *non-secret* per-tenant
-configuration alongside the credential pair — `jiraHealthChecker.Check`
-reads it from `settings["base_url"]` accordingly, following
-`IntegrationConfig`'s existing credentials-vs-settings split rather than
-overloading credentials with a value that isn't secret.
+configuration alongside the credential — `jiraHealthChecker.Check` reads it
+from `settings["cloud_id"]` accordingly, following `IntegrationConfig`'s
+existing credentials-vs-settings split rather than overloading credentials
+with a value that isn't secret.
 
 **Frontend UI is out of scope for this phase** — see Known limitations.
 
@@ -101,12 +128,13 @@ overloading credentials with a value that isn't secret.
 ## Walkthrough
 
 ```bash
-export JIRA_BASE_URL=https://acme.atlassian.net
-export JIRA_EMAIL=bot@acme.com
+# JIRA_CLOUD_ID: find it under admin.atlassian.com (see the linked docs
+# above) — it's a UUID, not the site name.
+export JIRA_CLOUD_ID=1a11d016-8984-4c3e-b9ab-142dd06acb1b
 export JIRA_API_TOKEN=...
 make up
 # "Jira integration enabled" in the api container's log, vs. "...DISABLED"
-# when any of the three is unset.
+# when either is unset.
 
 TOKEN=$(curl -s -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"changeme123"}' | jq -r .token)
@@ -116,10 +144,12 @@ curl -s -X POST "http://localhost:8080/v1/sevs/SEV-2026-0001/jira-issues" \
   -d '{"project_key":"OPS","issue_type":"Task","summary":"Investigate root cause",
        "description":"Follow-up from SEV-2026-0001","relationship_type":"action-item","priority":"critical"}'
 # {"id":..., "external_system":"jira", "task_id":"OPS-7",
-#  "url":"https://acme.atlassian.net/browse/OPS-7", ...}
+#  "url":"https://api.atlassian.com/ex/jira/1a11d016.../rest/api/3/issue/10007", ...}
+# (the API's own resource link, not a browsable page — see Issue.URL's doc
+# comment)
 
 # Without JIRA_* set, the same call returns 503:
-# {"code":14, "message":"Jira integration is not configured (JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN not set)"}
+# {"code":14, "message":"Jira integration is not configured (JIRA_CLOUD_ID/JIRA_API_TOKEN not set)"}
 ```
 
 ## Verify tests pass
@@ -129,14 +159,14 @@ go build ./... && go vet ./... && gofmt -l . && go test ./... && go test -race .
 ```
 
 New coverage: `internal/integrations/tasktracker/jira/client_test.go` (client,
-82.9% — Error()/HTTPStatus() untested, matching the existing `github`
+82.2% — Error()/HTTPStatus() untested, matching the existing `github`
 package's own 78.7% baseline for the same trivial methods), `task_test.go`'s
 `TestCreateJiraIssue_*` suite (mirrors every `TestCreateGitHubIssue_*` case:
 valid creation, not-configured, API-error-to-status-code mapping, generic
 error, duplicate-link conflict, SEV-not-found, validation errors, event
 publish, sensitive-SEV suppresses publish), `internal/auth/rbac_test.go`
 (the new `CreateJiraIssue` RBAC floor), `internal/config/config_test.go`
-(the three new env vars).
+(the two new env vars).
 
 Live-verified end-to-end against a running server (in-memory store): route
 registered and reachable (confirmed via the generated swagger — `grep jira
@@ -150,6 +180,14 @@ missing entry; the live retest after the fix confirmed the correct `503`.
 
 ## Known limitations
 
+- **No human-clickable issue link** — `Issue.URL` (and the `url` field on
+  the resulting `TaskResponse`) is the Jira REST API's own `self` resource
+  link, not a `https://{site}.atlassian.net/browse/{key}` page a person can
+  open in a browser. With only a Cloud ID configured, this client has no way
+  to know the tenant's site name to construct one. If a clickable link
+  becomes a real requirement, the fix is adding an optional site-name
+  setting alongside `cloud_id` purely for building browse links — not
+  reverting to the site URL as the base for API calls.
 - **No frontend UI** — `TasksPanel.tsx`'s "Create GitHub Issue" action has
   no Jira sibling yet. The API is fully functional and independently usable
   (per `CLAUDE.md`'s API-first principle) via `curl`, the Slack bot, or a

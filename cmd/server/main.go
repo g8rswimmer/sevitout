@@ -92,14 +92,14 @@ func main() {
 		log.Info("GitHub Issues integration DISABLED")
 	}
 
-	// --- Jira client (optional) --- all three of JIRA_BASE_URL/JIRA_EMAIL/
-	// JIRA_API_TOKEN are required together (unlike GitHub's single
-	// GITHUB_TOKEN — see config.Config.JiraBaseURL's doc comment for why);
-	// partial configuration is treated the same as none rather than
-	// starting with a client that would fail every call.
+	// --- Jira client (optional) --- both JIRA_CLOUD_ID and JIRA_API_TOKEN
+	// are required together (unlike GitHub's single GITHUB_TOKEN — see
+	// config.Config.JiraCloudID's doc comment for why); partial
+	// configuration is treated the same as none rather than starting with a
+	// client that would fail every call.
 	var jiraClient grpchandler.JiraIssueClient
-	if cfg.JiraBaseURL != "" && cfg.JiraEmail != "" && cfg.JiraAPIToken != "" {
-		jiraClient = &jiraIssueClient{c: jira.NewClient(cfg.JiraBaseURL, cfg.JiraEmail, cfg.JiraAPIToken)}
+	if cfg.JiraCloudID != "" && cfg.JiraAPIToken != "" {
+		jiraClient = &jiraIssueClient{c: jira.NewClient(cfg.JiraCloudID, cfg.JiraAPIToken)}
 		log.Info("Jira integration enabled")
 	} else {
 		log.Info("Jira integration DISABLED")
@@ -599,24 +599,24 @@ func (githubHealthChecker) Check(ctx context.Context, credentials map[string]str
 
 // jiraHealthChecker adapts jira.Client to grpchandler.HealthChecker; see
 // pagerdutyHealthChecker for why a fresh client is built per check. Unlike
-// pagerduty/github's single-credential Check, this needs three config-API-
-// managed values (base_url, email, api_token) — settings, not credentials,
-// for base_url specifically, since it identifies which Jira tenant to call
-// rather than authenticating to it, mirroring how internal/config.Config's
-// JIRA_BASE_URL is a required companion to the credential pair at the
+// pagerduty/github's single-credential Check, this needs two config-API-
+// managed values (cloud_id, api_token) — cloud_id lives in settings, not
+// credentials, since it identifies which Jira tenant to call rather than
+// authenticating to it, mirroring how internal/config.Config's
+// JIRA_CLOUD_ID is a required companion to the credential at the
 // process-level integration too.
 type jiraHealthChecker struct{}
 
 func (jiraHealthChecker) Check(ctx context.Context, credentials map[string]string, settings map[string]any) error {
-	email, apiToken := credentials["email"], credentials["api_token"]
-	if email == "" || apiToken == "" {
-		return fmt.Errorf("jira: no email/api_token configured")
+	apiToken := credentials["api_token"]
+	if apiToken == "" {
+		return fmt.Errorf("jira: no api_token configured")
 	}
-	baseURL, _ := settings["base_url"].(string)
-	if baseURL == "" {
-		return fmt.Errorf("jira: no base_url configured")
+	cloudID, _ := settings["cloud_id"].(string)
+	if cloudID == "" {
+		return fmt.Errorf("jira: no cloud_id configured")
 	}
-	return jira.NewClient(baseURL, email, apiToken).Ping(ctx)
+	return jira.NewClient(cloudID, apiToken).Ping(ctx)
 }
 
 // slackHealthChecker adapts slack.Client to grpchandler.HealthChecker. Its
