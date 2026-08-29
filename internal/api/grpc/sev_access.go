@@ -46,7 +46,7 @@ func (s *SEVAccessServer) GrantAccess(ctx context.Context, req *pb.GrantAccessRe
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	callerID := ""
@@ -65,7 +65,7 @@ func (s *SEVAccessServer) GrantAccess(ctx context.Context, req *pb.GrantAccessRe
 		if errors.Is(err, store.ErrConflict) {
 			return nil, status.Error(codes.AlreadyExists, "access already granted")
 		}
-		return nil, status.Error(codes.Internal, "failed to grant access")
+		return nil, internalError(ctx, "failed to grant access", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -91,7 +91,7 @@ func (s *SEVAccessServer) RevokeAccess(ctx context.Context, req *pb.RevokeAccess
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	callerID := ""
@@ -103,7 +103,7 @@ func (s *SEVAccessServer) RevokeAccess(ctx context.Context, req *pb.RevokeAccess
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "access grant not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to revoke access")
+		return nil, internalError(ctx, "failed to revoke access", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -126,7 +126,7 @@ func (s *SEVAccessServer) ListAccess(ctx context.Context, req *pb.ListAccessRequ
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	// Unlike Grant/Revoke, listing the grants themselves reveals who can see
@@ -136,7 +136,7 @@ func (s *SEVAccessServer) ListAccess(ctx context.Context, req *pb.ListAccessRequ
 	// otherwise see.
 	visible, err := sensitiveSEVVisible(ctx, s.access, sevRecord)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+		return nil, internalError(ctx, "failed to check SEV visibility", err)
 	}
 	if !visible {
 		return nil, status.Error(codes.NotFound, "SEV not found")
@@ -144,7 +144,7 @@ func (s *SEVAccessServer) ListAccess(ctx context.Context, req *pb.ListAccessRequ
 
 	grants, err := s.access.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list access grants")
+		return nil, internalError(ctx, "failed to list access grants", err)
 	}
 
 	resp := &pb.ListAccessResponse{}
