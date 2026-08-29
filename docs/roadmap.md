@@ -215,7 +215,7 @@ each ≤30 line-level changes, independently revertable):
 
 ## Phase 4 — `GET /healthz`
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/healthz.md`](../demo/healthz.md)
 
 An unauthenticated liveness/readiness endpoint, checking DB reachability only
 (`Stores.Ping`, a new thin method — no-ops for the in-memory-store dev fallback).
