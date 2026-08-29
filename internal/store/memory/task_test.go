@@ -114,3 +114,19 @@ func TestTaskStore_SetDueDateIfUnset_NotFound(t *testing.T) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
 }
+
+func TestTaskStore_Update_NotFound(t *testing.T) {
+	s := memory.NewTaskStore()
+	ghost := newLinkedTask("SEV-1", "github", "owner/repo#1")
+	ghost.ID = 999
+	if err := s.Update(context.Background(), ghost); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestTaskStore_Delete_NotFound(t *testing.T) {
+	s := memory.NewTaskStore()
+	if err := s.Delete(context.Background(), 999); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}

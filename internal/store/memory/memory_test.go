@@ -108,6 +108,18 @@ func TestSEVStore(t *testing.T) {
 		}
 	})
 
+	t.Run("ListFilterBySeverity_Match", func(t *testing.T) {
+		// sev's severity is 2; the allowlist must match it against one of
+		// several candidate values, not just the exact single value above.
+		items, err := s.List(ctx, store.SEVFilter{SeverityLevels: []int16{1, 2}})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 1 || items[0].ID != sev.ID {
+			t.Fatalf("want [%s], got %v", sev.ID, items)
+		}
+	})
+
 	t.Run("ListFilterByStatus", func(t *testing.T) {
 		items, _ := s.List(ctx, store.SEVFilter{Statuses: []store.SEVStatus{store.SEVStatusOpen}})
 		if len(items) != 0 {
@@ -338,6 +350,26 @@ func TestSEVStore_FilterAndSort(t *testing.T) {
 		}
 	})
 
+	t.Run("Limit_TruncatesResults", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{Limit: 2})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("want 2 (truncated by Limit), got %d", len(got))
+		}
+	})
+
+	t.Run("Offset_PastEndReturnsEmpty", func(t *testing.T) {
+		got, err := s.List(ctx, store.SEVFilter{Offset: 100})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("want 0, got %d", len(got))
+		}
+	})
+
 	t.Run("Sort_DefaultIsDescendingByCreatedAt", func(t *testing.T) {
 		got, err := s.List(ctx, store.SEVFilter{})
 		if err != nil {
@@ -401,6 +433,68 @@ func severities(records []*store.SEV) []int16 {
 	return out
 }
 
+// ── StatusHistoryStore ───────────────────────────────────────────────────────
+
+func TestStatusHistoryStore(t *testing.T) {
+	s := memory.NewStatusHistoryStore()
+
+	investigating := store.SEVStatusInvestigating
+	h := &store.SEVStatusHistory{
+		SEVID:          "SEV-2026-0001",
+		FromStatus:     &investigating,
+		ToStatus:       store.SEVStatusResolved,
+		UserID:         "user-1",
+		TransitionedAt: time.Now(),
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, h); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if h.ID == 0 {
+			t.Fatal("ID should be set after Create")
+		}
+	})
+
+	t.Run("CreateFromOpen_NilFromStatus", func(t *testing.T) {
+		// The very first transition on a SEV (Open, set at creation, is never
+		// itself the result of a recorded transition) has no prior status to
+		// record — FromStatus is nil rather than a zero-value SEVStatus.
+		h2 := &store.SEVStatusHistory{
+			SEVID:          "SEV-2026-0001",
+			ToStatus:       store.SEVStatusInvestigating,
+			UserID:         "user-1",
+			TransitionedAt: time.Now(),
+		}
+		if err := s.Create(ctx, h2); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if h2.ID == h.ID {
+			t.Fatal("expected a distinct assigned ID")
+		}
+	})
+
+	t.Run("ListBySEVID", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-0001")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2, got %d", len(items))
+		}
+	})
+
+	t.Run("ListBySEVID_OtherSEV", func(t *testing.T) {
+		items, err := s.ListBySEVID(ctx, "SEV-2026-9999")
+		if err != nil {
+			t.Fatalf("ListBySEVID: %v", err)
+		}
+		if len(items) != 0 {
+			t.Fatal("expected empty for unknown SEV")
+		}
+	})
+}
+
 // ── PostmortemStore ───────────────────────────────────────────────────────────
 
 func TestPostmortemStore(t *testing.T) {
@@ -453,6 +547,13 @@ func TestPostmortemStore(t *testing.T) {
 		got, _ := s.GetBySEVID(ctx, pm.SEVID)
 		if got.Status != store.PostmortemStatusInReview {
 			t.Fatal("status not updated")
+		}
+	})
+
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		ghost := &store.Postmortem{SEVID: "SEV-missing", Status: store.PostmortemStatusDraft}
+		if err := s.Update(ctx, ghost); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
 		}
 	})
 
@@ -909,6 +1010,13 @@ func TestUserStore(t *testing.T) {
 		}
 	})
 
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		ghost := &store.User{ID: "usr-missing", Email: "ghost@example.com"}
+		if err := s.Update(ctx, ghost); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
 	t.Run("List", func(t *testing.T) {
 		users, err := s.List(ctx)
 		if err != nil {
@@ -916,6 +1024,27 @@ func TestUserStore(t *testing.T) {
 		}
 		if len(users) != 1 {
 			t.Fatalf("want 1, got %d", len(users))
+		}
+	})
+
+	t.Run("Count", func(t *testing.T) {
+		n, err := s.Count(ctx)
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("want 1, got %d", n)
+		}
+	})
+
+	t.Run("UpdateEmailConflict_DifferentUser", func(t *testing.T) {
+		other := &store.User{ID: "usr-other", Email: "other@example.com", OrgRole: store.OrgRoleResponder}
+		if err := s.Create(ctx, other); err != nil {
+			t.Fatalf("Create other: %v", err)
+		}
+		other.Email = user.Email // collide with the already-updated user's email
+		if err := s.Update(ctx, other); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict, got %v", err)
 		}
 	})
 }
@@ -943,6 +1072,13 @@ func TestServiceStore(t *testing.T) {
 		}
 	})
 
+	t.Run("CreateNameConflict_DifferentID", func(t *testing.T) {
+		dup := &store.Service{ID: "svc-api-2", Name: svc.Name, Active: true}
+		if err := s.Create(ctx, dup); err != store.ErrConflict {
+			t.Fatalf("want ErrConflict on name dup, got %v", err)
+		}
+	})
+
 	t.Run("Get", func(t *testing.T) {
 		got, err := s.Get(ctx, svc.ID)
 		if err != nil {
@@ -961,6 +1097,13 @@ func TestServiceStore(t *testing.T) {
 		got, _ := s.Get(ctx, svc.ID)
 		if got.Active {
 			t.Fatal("active should be false")
+		}
+	})
+
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		ghost := &store.Service{ID: "svc-missing"}
+		if err := s.Update(ctx, ghost); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
 		}
 	})
 
@@ -984,6 +1127,12 @@ func TestServiceStore(t *testing.T) {
 		}
 		if _, err := s.Get(ctx, svc.ID); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound after delete, got %v", err)
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		if err := s.Delete(ctx, svc.ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound on second delete, got %v", err)
 		}
 	})
 }
@@ -1055,12 +1204,96 @@ func TestOnCallStore(t *testing.T) {
 		}
 	})
 
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		ghost := &store.OnCallRotation{ID: 9999}
+		if err := s.Update(ctx, ghost); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
 	t.Run("Delete", func(t *testing.T) {
 		if err := s.Delete(ctx, r.ID); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 		if _, err := s.Get(ctx, r.ID); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound after delete, got %v", err)
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		if err := s.Delete(ctx, r.ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound on second delete, got %v", err)
+		}
+	})
+}
+
+// GetCurrentOnCall's override-precedence logic (an active full override wins,
+// an expired one is skipped and falls back to a normal rotation, and a
+// rotation for a different service is ignored entirely) needs its own
+// multi-rotation setup, distinct from TestOnCallStore's single-rotation,
+// shared-state walk through the rest of the interface above.
+func TestOnCallStore_GetCurrentOnCall_OverridePrecedence(t *testing.T) {
+	s := memory.NewOnCallStore()
+	svcID := "svc-api"
+	otherSvcID := "svc-other"
+
+	normal := &store.OnCallRotation{Name: "normal rotation", ServiceID: &svcID}
+	if err := s.Create(ctx, normal); err != nil {
+		t.Fatalf("Create normal: %v", err)
+	}
+	unrelated := &store.OnCallRotation{Name: "other service", ServiceID: &otherSvcID}
+	if err := s.Create(ctx, unrelated); err != nil {
+		t.Fatalf("Create unrelated: %v", err)
+	}
+
+	t.Run("NoOverride_FallsBackToNormalRotation", func(t *testing.T) {
+		got, err := s.GetCurrentOnCall(ctx, svcID)
+		if err != nil {
+			t.Fatalf("GetCurrentOnCall: %v", err)
+		}
+		if got.ID != normal.ID {
+			t.Fatalf("want the normal rotation as fallback, got %+v", got)
+		}
+	})
+
+	manualUser := "user-alice"
+	expiredStart := time.Now().Add(-2 * time.Hour)
+	expiredEnd := time.Now().Add(-1 * time.Hour)
+	expired := &store.OnCallRotation{
+		Name: "expired override", ServiceID: &svcID, ManualUserID: &manualUser,
+		OverrideStart: &expiredStart, OverrideEnd: &expiredEnd,
+	}
+	if err := s.Create(ctx, expired); err != nil {
+		t.Fatalf("Create expired: %v", err)
+	}
+
+	t.Run("ExpiredOverride_SkippedFallsBackToNormalRotation", func(t *testing.T) {
+		got, err := s.GetCurrentOnCall(ctx, svcID)
+		if err != nil {
+			t.Fatalf("GetCurrentOnCall: %v", err)
+		}
+		if got.ID != normal.ID {
+			t.Fatalf("want the normal rotation (expired override must not win), got %+v", got)
+		}
+	})
+
+	activeStart := time.Now().Add(-30 * time.Minute)
+	activeEnd := time.Now().Add(30 * time.Minute)
+	active := &store.OnCallRotation{
+		Name: "active override", ServiceID: &svcID, ManualUserID: &manualUser,
+		OverrideStart: &activeStart, OverrideEnd: &activeEnd,
+	}
+	if err := s.Create(ctx, active); err != nil {
+		t.Fatalf("Create active: %v", err)
+	}
+
+	t.Run("ActiveOverride_TakesPrecedenceOverNormalRotation", func(t *testing.T) {
+		got, err := s.GetCurrentOnCall(ctx, svcID)
+		if err != nil {
+			t.Fatalf("GetCurrentOnCall: %v", err)
+		}
+		if got.ID != active.ID {
+			t.Fatalf("want the active override, got %+v", got)
 		}
 	})
 }
@@ -1100,6 +1333,12 @@ func TestAIPluginStore(t *testing.T) {
 		}
 	})
 
+	t.Run("GetNotFound", func(t *testing.T) {
+		if _, err := s.Get(ctx, 9999); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
 	t.Run("Update", func(t *testing.T) {
 		plugin.Enabled = true
 		if err := s.Update(ctx, plugin); err != nil {
@@ -1108,6 +1347,13 @@ func TestAIPluginStore(t *testing.T) {
 		got, _ := s.Get(ctx, plugin.ID)
 		if !got.Enabled {
 			t.Fatal("enabled not updated")
+		}
+	})
+
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		ghost := &store.AIPlugin{ID: 9999}
+		if err := s.Update(ctx, ghost); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
 		}
 	})
 
@@ -1128,6 +1374,12 @@ func TestAIPluginStore(t *testing.T) {
 		items, _ := s.List(ctx)
 		if len(items) != 0 {
 			t.Fatal("expected empty after delete")
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		if err := s.Delete(ctx, plugin.ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound on second delete, got %v", err)
 		}
 	})
 }
@@ -1545,6 +1797,19 @@ func TestShareStore(t *testing.T) {
 		}
 		if got.RevokedBy == nil || *got.RevokedBy != "user-1" {
 			t.Fatal("revoked_by not set")
+		}
+	})
+
+	t.Run("RevokeAlreadyRevoked_NoOp", func(t *testing.T) {
+		// A second Revoke call on an already-revoked link must succeed
+		// silently rather than overwrite revoked_by/revoked_at with whoever
+		// called it the second time.
+		if err := s.Revoke(ctx, "tok-abc123", "user-2"); err != nil {
+			t.Fatalf("Revoke (already revoked): %v", err)
+		}
+		got, _ := s.GetByToken(ctx, "tok-abc123")
+		if got.RevokedBy == nil || *got.RevokedBy != "user-1" {
+			t.Fatalf("revoked_by should remain the original revoker, got %v", got.RevokedBy)
 		}
 	})
 
