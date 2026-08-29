@@ -318,6 +318,60 @@ phase (including Phase 6a; the two can land in either order).
 
 ---
 
+## Phase 7 — Linked Issues frontend
+
+**Status**: not started
+
+Phase 6a shipped `CreateJiraIssue` on the backend (`POST
+/v1/sevs/{sev_id}/jira-issues`) with no frontend caller — flagged as an explicit
+Known limitation there. Reviewing the running `TasksPanel.tsx` ("Linked tasks"
+panel) surfaced a second, independent gap: `TaskResponse.external_system` is
+fetched but never rendered, so a GitHub issue, a Jira issue, and a plain
+manually-linked URL are visually indistinguishable in the list — same generic
+hyperlink, same generic `ExternalLink` icon, no per-tracker badge or color.
+
+**7a. Create Jira issue from the UI**
+
+- `web/src/types/api.ts`: add `CreateJiraIssueRequest` (`project_key`,
+  `issue_type`, `summary`, `description?`, `relationship_type`, `priority`),
+  mirroring `CreateGitHubIssueRequest`'s shape and the backend proto exactly.
+- `web/src/lib/api.ts`: add `tasks.createJiraIssue(sevId, req)` calling `POST
+  /v1/sevs/{sevId}/jira-issues`, mirroring `tasks.createGitHubIssue`.
+- `web/src/components/sev/TasksPanel.tsx`: extend `Mode` to `'link' | 'github' |
+  'jira'`, add a "Create Jira issue" button alongside "Create GitHub issue", and a
+  third form (`project_key`, `issue_type`, `summary`, `description`,
+  relationship-type/priority selects reused as-is from the existing forms).
+  There's no SEV-level field to pre-fill a default project key the way
+  `github_repo`/`parseRepo()` does for GitHub — the field starts empty. Adding a
+  `jira_project_key`-equivalent SEV field is a schema/proto change, explicitly
+  **out of scope for this phase**; note it as a follow-up rather than scope-creep
+  this one.
+
+**7b. Distinguish github / jira / generic in the list**
+
+- `web/src/types/api.ts`: tighten `TaskResponse.external_system` from a bare
+  `string` to a union with a fallback (`'github' | 'jira' | 'generic' | string`)
+  so display logic has something to switch on while still tolerating any value
+  the backend accepts today (it's unvalidated free text server-side).
+- `web/src/components/sev/badges.tsx` already holds this exact pattern for other
+  fields — `SeverityBadge`/`StatusBadge`, each a thin `<Badge>` wrapper backed by
+  a variant/label lookup (`severityVariant()`, `SEV_STATUS_LABELS`/
+  `SEV_STATUS_BADGE_CLASS` in `web/src/types/api.ts`). Add an
+  `ExternalSystemBadge({ system })` there the same way, backed by a new
+  `external_system → { label, badgeClass }` map, and use it in `TasksPanel.tsx`'s
+  list render next to each entry's title. No new icon dependency required,
+  consistent with how relationship-type/priority/overdue are already communicated
+  purely through `Badge` color+text, not icons, everywhere else in this panel. A
+  branded-logo treatment (e.g. via `react-icons/si`) is a nicer-to-have,
+  explicitly deferred rather than bundled in — the badge approach alone fully
+  resolves the reported "hard to tell apart" problem without a new dependency.
+
+**Estimate**: ~1.5-2.5 days (7a the larger half — a third inline form plus request
+plumbing; 7b is a typing tighten-up plus a lookup table and one render change).
+**Depends on**: Phase 6a (the backend RPC this calls already shipped).
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -330,11 +384,13 @@ phase (including Phase 6a; the two can land in either order).
 | 5 | Test coverage + CI gate | — | 2-4 days |
 | 6a | Jira integration | — | 2-3 days |
 | 6b | Structured monitoring-tool metadata | — | 1-2 days |
+| 7 | Linked Issues frontend (create-Jira UI + tracker badges) | 6a | 1.5-2.5 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
 each other — run them as a parallel workstream, or sequence after, depending on
-team size.
+team size. Phase 7 is likewise independent of the observability core, but — unlike
+6a/6b — it specifically depends on Phase 6a's backend RPC.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
