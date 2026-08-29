@@ -52,7 +52,7 @@ func (s *ConfigServer) CreateOnCallRotation(ctx context.Context, req *pb.CreateO
 	}
 
 	if err := s.oncall.Create(ctx, r); err != nil {
-		return nil, status.Error(codes.Internal, "failed to create on-call rotation")
+		return nil, internalError(ctx, "failed to create on-call rotation", err)
 	}
 	return onCallToProto(r), nil
 }
@@ -66,7 +66,7 @@ func (s *ConfigServer) GetOnCallRotation(ctx context.Context, req *pb.GetOnCallR
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "on-call rotation not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get on-call rotation")
+		return nil, internalError(ctx, "failed to get on-call rotation", err)
 	}
 	return onCallToProto(r), nil
 }
@@ -81,7 +81,7 @@ func (s *ConfigServer) UpdateOnCallRotation(ctx context.Context, req *pb.UpdateO
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "on-call rotation not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get on-call rotation")
+		return nil, internalError(ctx, "failed to get on-call rotation", err)
 	}
 
 	if v := req.GetName(); v != "" {
@@ -120,7 +120,7 @@ func (s *ConfigServer) UpdateOnCallRotation(ctx context.Context, req *pb.UpdateO
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "on-call rotation not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to update on-call rotation")
+		return nil, internalError(ctx, "failed to update on-call rotation", err)
 	}
 	return onCallToProto(r), nil
 }
@@ -133,7 +133,7 @@ func (s *ConfigServer) DeleteOnCallRotation(ctx context.Context, req *pb.DeleteO
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "on-call rotation not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to delete on-call rotation")
+		return nil, internalError(ctx, "failed to delete on-call rotation", err)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -141,7 +141,7 @@ func (s *ConfigServer) DeleteOnCallRotation(ctx context.Context, req *pb.DeleteO
 func (s *ConfigServer) ListOnCallRotations(ctx context.Context, _ *pb.ListOnCallRotationsRequest) (*pb.ListOnCallRotationsResponse, error) {
 	rotations, err := s.oncall.List(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list on-call rotations")
+		return nil, internalError(ctx, "failed to list on-call rotations", err)
 	}
 	resp := &pb.ListOnCallRotationsResponse{}
 	for _, r := range rotations {

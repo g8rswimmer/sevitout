@@ -53,7 +53,7 @@ func (s *ConfigServer) CreateAIPlugin(ctx context.Context, req *pb.CreateAIPlugi
 		plugin.Model = &v
 	}
 	if req.GetApiKey() != "" {
-		sealed, err := s.encryptAPIKey(req.GetApiKey())
+		sealed, err := s.encryptAPIKey(ctx, req.GetApiKey())
 		if err != nil {
 			return nil, err
 		}
@@ -64,7 +64,7 @@ func (s *ConfigServer) CreateAIPlugin(ctx context.Context, req *pb.CreateAIPlugi
 		if errors.Is(err, store.ErrConflict) {
 			return nil, status.Error(codes.AlreadyExists, "an AI plugin with this name already exists")
 		}
-		return nil, status.Error(codes.Internal, "failed to create AI plugin")
+		return nil, internalError(ctx, "failed to create AI plugin", err)
 	}
 	return aiPluginToProto(plugin), nil
 }
@@ -75,7 +75,7 @@ func (s *ConfigServer) GetAIPlugin(ctx context.Context, req *pb.GetAIPluginReque
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "AI plugin not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get AI plugin")
+		return nil, internalError(ctx, "failed to get AI plugin", err)
 	}
 	return aiPluginToProto(plugin), nil
 }
@@ -86,7 +86,7 @@ func (s *ConfigServer) UpdateAIPlugin(ctx context.Context, req *pb.UpdateAIPlugi
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "AI plugin not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get AI plugin")
+		return nil, internalError(ctx, "failed to get AI plugin", err)
 	}
 
 	if v := req.GetName(); v != "" {
@@ -115,7 +115,7 @@ func (s *ConfigServer) UpdateAIPlugin(ctx context.Context, req *pb.UpdateAIPlugi
 		plugin.Model = &v
 	}
 	if req.GetApiKey() != "" {
-		sealed, err := s.encryptAPIKey(req.GetApiKey())
+		sealed, err := s.encryptAPIKey(ctx, req.GetApiKey())
 		if err != nil {
 			return nil, err
 		}
@@ -142,7 +142,7 @@ func (s *ConfigServer) UpdateAIPlugin(ctx context.Context, req *pb.UpdateAIPlugi
 	plugin.UpdatedAt = time.Now()
 
 	if err := s.aiPlugins.Update(ctx, plugin); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update AI plugin")
+		return nil, internalError(ctx, "failed to update AI plugin", err)
 	}
 	return aiPluginToProto(plugin), nil
 }
@@ -152,7 +152,7 @@ func (s *ConfigServer) DeleteAIPlugin(ctx context.Context, req *pb.DeleteAIPlugi
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "AI plugin not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to delete AI plugin")
+		return nil, internalError(ctx, "failed to delete AI plugin", err)
 	}
 	if s.rateLimits != nil {
 		s.rateLimits.EvictRateLimit(req.GetId())
@@ -163,7 +163,7 @@ func (s *ConfigServer) DeleteAIPlugin(ctx context.Context, req *pb.DeleteAIPlugi
 func (s *ConfigServer) ListAIPlugins(ctx context.Context, _ *pb.ListAIPluginsRequest) (*pb.ListAIPluginsResponse, error) {
 	plugins, err := s.aiPlugins.List(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list AI plugins")
+		return nil, internalError(ctx, "failed to list AI plugins", err)
 	}
 	resp := &pb.ListAIPluginsResponse{}
 	for _, p := range plugins {
@@ -172,14 +172,14 @@ func (s *ConfigServer) ListAIPlugins(ctx context.Context, _ *pb.ListAIPluginsReq
 	return resp, nil
 }
 
-func (s *ConfigServer) encryptAPIKey(apiKey string) ([]byte, error) {
+func (s *ConfigServer) encryptAPIKey(ctx context.Context, apiKey string) ([]byte, error) {
 	if s.crypto == nil {
 		return nil, status.Error(codes.FailedPrecondition,
 			"credential encryption is not configured (ENCRYPTION_KEY not set)")
 	}
 	sealed, err := s.crypto.Encrypt([]byte(apiKey))
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to encrypt api_key")
+		return nil, internalError(ctx, "failed to encrypt api_key", err)
 	}
 	return sealed, nil
 }

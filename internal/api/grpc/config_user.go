@@ -20,7 +20,7 @@ import (
 func (s *ConfigServer) ListUsers(ctx context.Context, req *pb.ListUsersRequest) (*pb.ListUsersResponse, error) {
 	users, err := s.users.List(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list users")
+		return nil, internalError(ctx, "failed to list users", err)
 	}
 	q := strings.ToLower(req.GetQuery())
 	resp := &pb.ListUsersResponse{}
@@ -46,14 +46,14 @@ func (s *ConfigServer) UpdateUserRole(ctx context.Context, req *pb.UpdateUserRol
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "user not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get user")
+		return nil, internalError(ctx, "failed to get user", err)
 	}
 
 	oldRole := u.OrgRole
 	u.OrgRole = store.OrgRole(req.GetOrgRole())
 	u.UpdatedAt = time.Now()
 	if err := s.users.Update(ctx, u); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update user")
+		return nil, internalError(ctx, "failed to update user", err)
 	}
 
 	// Permission changes must be logged (docs/requirements.md §14, §18.2).
@@ -80,12 +80,12 @@ func (s *ConfigServer) setUserActive(ctx context.Context, id string, active bool
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "user not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get user")
+		return nil, internalError(ctx, "failed to get user", err)
 	}
 	u.Active = active
 	u.UpdatedAt = time.Now()
 	if err := s.users.Update(ctx, u); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update user")
+		return nil, internalError(ctx, "failed to update user", err)
 	}
 
 	action := "deactivated"
