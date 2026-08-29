@@ -262,41 +262,59 @@ run as a parallel workstream.
 
 ---
 
-## Phase 6 — New features
+## Phase 6a — Jira integration
+
+**Status**: ✅ shipped, see [`demo/jira-integration.md`](../demo/jira-integration.md)
+
+Highest value, lowest risk of the new-feature candidates — the closest fit to an
+existing pattern already in the codebase. Mirrors
+`internal/integrations/tasktracker/github/client.go`'s shape almost exactly —
+`Client{baseURL, http}`, `NewClient`/`NewClientWithBaseURL`, an `APIError` type —
+against Jira's REST API v3, using basic-auth-via-API-token instead of a bearer
+token.
+
+- `internal/api/grpc/task.go`'s `IssueClient` interface likely needs generalizing
+  (or a second, Jira-specific interface alongside it — `internal/integrations/`
+  clients are declared behind interfaces owned by their consumer, per
+  `CLAUDE.md`'s Design principles, so this is a design choice made when the
+  concrete shape of Jira's create-issue response is in hand, not before).
+- A `taskTrackerFactory` mirroring `internal/ai/factory.go`'s provider-switch
+  pattern, so `ConfigService` can pick GitHub vs. Jira per service.
+- Closes `docs/requirements.md` §13.3's "v2 fast-follow" (Linear can follow the
+  same shape later, reusing whatever `IssueClient` generalization this phase
+  lands on).
+
+**Estimate**: ~2-3 days. **Depends on**: nothing — independent of every other
+phase.
+
+---
+
+## Phase 6b — Structured monitoring-tool metadata
 
 **Status**: not started
 
-Ranked by value and how closely an existing pattern in the codebase can be
-followed:
+The base of `docs/requirements.md` §13.4, not the "Future" chart-embed part.
+Today a SEV's detection metadata is free-text alert name + tool name + link. Add
+a `monitoring_tool` enum (`datadog`/`prometheus`/`cloudwatch`/`other`) plus
+structured `dashboard_url`/`query` fields — a schema + proto + frontend form
+change, no new integration client, no live health-check or chart embedding (that
+stays "Future" per requirements).
 
-1. **Jira integration** (highest value, lowest risk). Mirrors
-   `internal/integrations/tasktracker/github/client.go`'s shape almost exactly —
-   `Client{baseURL, http}`, `NewClient`/`NewClientWithBaseURL`, an `APIError` type
-   — against Jira's REST API v3, using basic-auth-via-API-token instead of a
-   bearer token. `internal/api/grpc/task.go`'s `IssueClient` interface likely needs
-   generalizing (or a second interface), plus a `taskTrackerFactory` mirroring
-   `internal/ai/factory.go`'s provider-switch pattern so `ConfigService` can pick
-   GitHub vs. Jira per service. Closes `docs/requirements.md` §13.3's "v2
-   fast-follow" (Linear can follow the same shape later). Estimate: ~2-3 days.
-2. **Structured monitoring-tool metadata** (the base of §13.4, not the "Future"
-   chart-embed part). Today a SEV's detection metadata is free-text alert name +
-   tool name + link. Add a `monitoring_tool` enum (`datadog`/`prometheus`/
-   `cloudwatch`/`other`) plus structured `dashboard_url`/`query` fields — a schema
-   + proto + frontend form change, no new integration client, no live health-check
-   or chart embedding (that stays "Future" per requirements). Estimate: ~1-2 days.
-3. *(Optional, lower priority)* Recurring/scheduled CSV export (§17 already has
-   one-off export from M13). Not recommended for this round — the codebase has no
-   existing scheduler/cron precedent to extend, disproportionate effort for a
-   hardening phase.
+**Also considered and explicitly deferred**, noted here rather than given their
+own phase since neither is recommended yet:
 
-**Explicitly not recommended for this phase**: live GitHub Issue status polling
-(§8) and AI semantic search (§12) — both need a new surface (a webhook receiver, or
-non-trivial `SearchService` integration work) with no existing pattern to build on,
-out of proportion with "hardening phase" scope. Revisit once the observability core
-(Phases 0-4) is in place and there's real usage data to justify them.
+- *(Optional, lower priority)* Recurring/scheduled CSV export (§17 already has
+  one-off export from M13). Not recommended for this round — the codebase has no
+  existing scheduler/cron precedent to extend, disproportionate effort for a
+  hardening phase.
+- Live GitHub Issue status polling (§8) and AI semantic search (§12) — both need
+  a new surface (a webhook receiver, or non-trivial `SearchService` integration
+  work) with no existing pattern to build on, out of proportion with "hardening
+  phase" scope. Revisit once the observability core (Phases 0-4) is in place and
+  there's real usage data to justify them.
 
-**Estimate**: Jira ~2-3 days, monitoring metadata ~1-2 days. **Depends on**:
-nothing — independent of every other phase.
+**Estimate**: ~1-2 days. **Depends on**: nothing — independent of every other
+phase (including Phase 6a; the two can land in either order).
 
 ---
 
@@ -310,12 +328,13 @@ nothing — independent of every other phase.
 | 3 | `codes.Internal` cleanup (6 sub-PRs) | 1 | ~1 day per sub-PR |
 | 4 | `GET /healthz` | — (batch with 2) | 0.5 day |
 | 5 | Test coverage + CI gate | — | 2-4 days |
-| 6 | Jira integration + monitoring metadata | — | 3-5 days |
+| 6a | Jira integration | — | 2-3 days |
+| 6b | Structured monitoring-tool metadata | — | 1-2 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
-that order. Phases 5 and 6 are independent of the observability core and of each
-other — run them as a parallel workstream, or sequence after, depending on team
-size.
+that order. Phases 5, 6a, and 6b are independent of the observability core and of
+each other — run them as a parallel workstream, or sequence after, depending on
+team size.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
