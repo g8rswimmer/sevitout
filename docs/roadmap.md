@@ -320,7 +320,7 @@ phase (including Phase 6a; the two can land in either order).
 
 ## Phase 7 — Linked Issues frontend
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/linked-issues-frontend.md`](../demo/linked-issues-frontend.md)
 
 Phase 6a shipped `CreateJiraIssue` on the backend (`POST
 /v1/sevs/{sev_id}/jira-issues`) with no frontend caller — flagged as an explicit
