@@ -15,8 +15,10 @@ import { recordToTagRows, tagRowsToRecord, TagRowsEditor, type TagRow } from '@/
 import { DetectionFields, SnapshotPreview, type DetectionFieldsValue } from '@/components/sev/DetectionFields'
 import {
   DETECTION_METHOD_LABELS,
+  MONITORING_TOOL_LABELS,
   ROOT_CAUSE_CATEGORY_LABELS,
   type DetectionMethod,
+  type MonitoringTool,
   type RootCauseCategory,
   type SEVResponse,
 } from '@/types/api'
@@ -57,7 +59,8 @@ function toFormState(sev: SEVResponse): FormState {
       monitoringTool: sev.monitoring_tool ?? '',
       alertName: sev.alert_name ?? '',
       alertUrl: sev.alert_url ?? '',
-      metricLink: sev.metric_link ?? '',
+      dashboardUrl: sev.dashboard_url ?? '',
+      query: sev.query ?? '',
       snapshotUrl: sev.snapshot_url ?? '',
     },
     githubRepo: sev.github_repo ?? '',
@@ -106,7 +109,8 @@ export function DetailsPanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bool
         alert_name: form.detection.alertName,
         monitoring_tool: form.detection.monitoringTool,
         alert_url: form.detection.alertUrl,
-        metric_link: form.detection.metricLink,
+        dashboard_url: form.detection.dashboardUrl,
+        query: form.detection.query,
         snapshot_url: form.detection.snapshotUrl,
         github_repo: form.githubRepo,
         right_people_present: form.rightPeoplePresent,
@@ -309,16 +313,20 @@ export function DetailsPanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bool
               label="Detection method"
               value={sev.detection_method && DETECTION_METHOD_LABELS[sev.detection_method as DetectionMethod]}
             />
-            <ReadField label="Monitoring tool" value={sev.monitoring_tool} />
+            <ReadField
+              label="Monitoring tool"
+              value={sev.monitoring_tool && MONITORING_TOOL_LABELS[sev.monitoring_tool as MonitoringTool]}
+            />
           </div>
           <ReadField label="Alert name" value={sev.alert_name} />
           <ReadLinkField label="Alert link" href={sev.alert_url} />
-          {(sev.metric_link || sev.snapshot_url) && (
+          {(sev.dashboard_url || sev.snapshot_url) && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <ReadLinkField label="Metric / dashboard link" href={sev.metric_link} />
+              <ReadLinkField label="Dashboard link" href={sev.dashboard_url} />
               <ReadLinkField label="Snapshot link" href={sev.snapshot_url} />
             </div>
           )}
+          <ReadField label="Saved query" value={sev.query} />
           {sev.snapshot_url && <SnapshotPreview url={sev.snapshot_url} />}
           <div>
             <div className="text-xs text-muted-foreground">Repository</div>

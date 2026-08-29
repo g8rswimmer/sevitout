@@ -14,35 +14,25 @@ const DETECTION_METHODS = Object.keys(DETECTION_METHOD_LABELS) as DetectionMetho
 const MONITORING_TOOLS = Object.keys(MONITORING_TOOL_LABELS) as MonitoringTool[]
 
 const MONITORING_SELECT_NONE = 'none'
-const MONITORING_SELECT_OTHER = 'other'
-
-/** monitoring_tool is free text on the wire (see types/api.ts) — this derives
- * which dropdown option that text corresponds to: one of the named tools,
- * "None" for empty, or "Other" for anything else (shown via a companion
- * free-text input rather than lost). */
-function monitoringSelectValue(monitoringTool: string): string {
-  if (monitoringTool === '') return MONITORING_SELECT_NONE
-  if ((MONITORING_TOOLS as string[]).includes(monitoringTool)) return monitoringTool
-  return MONITORING_SELECT_OTHER
-}
 
 export interface DetectionFieldsValue {
   detectionMethod: DetectionMethod | ''
-  monitoringTool: string
+  monitoringTool: MonitoringTool | ''
   alertName: string
   alertUrl: string
-  metricLink: string
+  dashboardUrl: string
+  query: string
   snapshotUrl: string
 }
 
 /** The detection-metadata form fragment shared by SevCreatePage and
  * DetailsPanel's edit mode: the detection-method and monitoring-tool
  * dropdowns, the alert name directly above its link (the two describe the
- * same alert), and the two remaining supporting links (with a snapshot
- * preview). Lifecycle timestamps (started_at/detected_at) are deliberately
- * not part of this — they're LifecyclePanel's responsibility on the detail
- * page, and SevCreatePage renders its own started_at/detected_at inputs
- * directly. */
+ * same alert), the dashboard/snapshot links, and a saved-query field (with a
+ * snapshot preview). Lifecycle timestamps (started_at/detected_at) are
+ * deliberately not part of this — they're LifecyclePanel's responsibility on
+ * the detail page, and SevCreatePage renders its own started_at/detected_at
+ * inputs directly. */
 export function DetectionFields({
   value,
   onChange,
@@ -50,14 +40,7 @@ export function DetectionFields({
   value: DetectionFieldsValue
   onChange: (value: DetectionFieldsValue) => void
 }) {
-  // "Other" plus an empty custom name is indistinguishable from "None" by
-  // looking at monitoringTool alone (both are ""), so which one the select
-  // shows while the user is mid-typing needs its own bit of state rather
-  // than being re-derived from value.monitoringTool on every render.
-  const [otherSelected, setOtherSelected] = useState(
-    () => monitoringSelectValue(value.monitoringTool) === MONITORING_SELECT_OTHER,
-  )
-  const monitoringSelect = otherSelected ? MONITORING_SELECT_OTHER : monitoringSelectValue(value.monitoringTool)
+  const monitoringSelect = value.monitoringTool === '' ? MONITORING_SELECT_NONE : value.monitoringTool
 
   return (
     <div className="flex flex-col gap-4">
@@ -85,16 +68,10 @@ export function DetectionFields({
             value={monitoringSelect}
             onChange={(e) => {
               const v = e.target.value
-              if (v === MONITORING_SELECT_NONE) {
-                setOtherSelected(false)
-                onChange({ ...value, monitoringTool: '' })
-              } else if (v === MONITORING_SELECT_OTHER) {
-                setOtherSelected(true)
-                onChange({ ...value, monitoringTool: '' })
-              } else {
-                setOtherSelected(false)
-                onChange({ ...value, monitoringTool: v })
-              }
+              onChange({
+                ...value,
+                monitoringTool: v === MONITORING_SELECT_NONE ? '' : (v as MonitoringTool),
+              })
             }}
           >
             <option value={MONITORING_SELECT_NONE}>None</option>
@@ -103,16 +80,7 @@ export function DetectionFields({
                 {MONITORING_TOOL_LABELS[t]}
               </option>
             ))}
-            <option value={MONITORING_SELECT_OTHER}>Other…</option>
           </Select>
-          {monitoringSelect === MONITORING_SELECT_OTHER && (
-            <Input
-              aria-label="Custom monitoring tool name"
-              placeholder="Name the tool"
-              value={value.monitoringTool}
-              onChange={(e) => onChange({ ...value, monitoringTool: e.target.value })}
-            />
-          )}
         </div>
       </div>
 
@@ -139,13 +107,13 @@ export function DetectionFields({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="df-metric-link">Metric / dashboard link</Label>
+          <Label htmlFor="df-dashboard-url">Dashboard link</Label>
           <Input
-            id="df-metric-link"
+            id="df-dashboard-url"
             type="url"
             placeholder="https://…"
-            value={value.metricLink}
-            onChange={(e) => onChange({ ...value, metricLink: e.target.value })}
+            value={value.dashboardUrl}
+            onChange={(e) => onChange({ ...value, dashboardUrl: e.target.value })}
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -158,6 +126,16 @@ export function DetectionFields({
             onChange={(e) => onChange({ ...value, snapshotUrl: e.target.value })}
           />
         </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="df-query">Saved query</Label>
+        <Input
+          id="df-query"
+          placeholder="e.g. a PromQL or Datadog query string"
+          value={value.query}
+          onChange={(e) => onChange({ ...value, query: e.target.value })}
+        />
       </div>
 
       {value.snapshotUrl && <SnapshotPreview url={value.snapshotUrl} />}

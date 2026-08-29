@@ -18,7 +18,8 @@ const EMPTY_DETECTION: DetectionFieldsValue = {
   monitoringTool: '',
   alertName: '',
   alertUrl: '',
-  metricLink: '',
+  dashboardUrl: '',
+  query: '',
   snapshotUrl: '',
 }
 
@@ -52,7 +53,8 @@ export function SevCreatePage() {
         alert_name: detection.alertName || undefined,
         monitoring_tool: detection.monitoringTool || undefined,
         alert_url: detection.alertUrl || undefined,
-        metric_link: detection.metricLink || undefined,
+        dashboard_url: detection.dashboardUrl || undefined,
+        query: detection.query || undefined,
         snapshot_url: detection.snapshotUrl || undefined,
         started_at: startedAt ? new Date(startedAt).toISOString() : undefined,
         detected_at: detectedAt ? new Date(detectedAt).toISOString() : undefined,

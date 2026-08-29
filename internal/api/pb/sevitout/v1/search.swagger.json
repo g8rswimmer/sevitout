@@ -305,9 +305,9 @@
           "type": "string",
           "description": "alert_url links to the alert that fired (e.g. a PagerDuty incident or\nDatadog monitor URL)."
         },
-        "metricLink": {
+        "dashboardUrl": {
           "type": "string",
-          "description": "metric_link links to the monitoring dashboard, metric, or saved query\nreferenced by monitoring_tool (§13.4)."
+          "description": "dashboard_url links to the monitoring dashboard referenced by\nmonitoring_tool (§13.4)."
         },
         "snapshotUrl": {
           "type": "string",
@@ -320,6 +320,10 @@
         "rootCauseReferenceUrl": {
           "type": "string",
           "description": "root_cause_reference_url links to the concrete change that caused the\nincident — e.g. a PR/commit diff or a config-management change —\nalongside root_cause_category/root_cause_description's classification\nand narrative. Set via UpdateSEV, not at creation."
+        },
+        "query": {
+          "type": "string",
+          "description": "query is a saved query/expression (e.g. PromQL or a Datadog query\nstring) run against monitoring_tool — a separate concept from\ndashboard_url, not a URL (§13.4)."
         }
       }
     },

@@ -24,7 +24,7 @@ const SEV: SEVResponse = {
   detection_method: 'monitoring-dashboard',
   monitoring_tool: 'datadog',
   alert_url: 'https://alerts.example.com/1',
-  metric_link: 'https://metrics.example.com/q/1',
+  dashboard_url: 'https://metrics.example.com/q/1',
   snapshot_url: 'https://img.example.com/1.png',
   github_repo: 'acme-corp/checkout-service',
   started_at: '2026-08-23T20:00:00Z',
@@ -115,7 +115,7 @@ describe('SevDetailPage', () => {
     // the three supporting links render as clickable external links plus a
     // snapshot preview image.
     expect(screen.getByText('Monitoring Dashboard')).toBeInTheDocument()
-    expect(screen.getByText('datadog')).toBeInTheDocument()
+    expect(screen.getByText('Datadog')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /alerts\.example\.com/ })).toHaveAttribute(
       'href',
       'https://alerts.example.com/1',
