@@ -291,7 +291,7 @@ phase.
 
 ## Phase 6b — Structured monitoring-tool metadata
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/monitoring-metadata.md`](../demo/monitoring-metadata.md)
 
 The base of `docs/requirements.md` §13.4, not the "Future" chart-embed part.
 Today a SEV's detection metadata is free-text alert name + tool name + link. Add
