@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
@@ -83,5 +86,37 @@ func TestUnaryInterceptor_RejectsAndLogs_IncludesRequestID(t *testing.T) {
 	fields := lastLogFields(t, buf)
 	if fields["request_id"] != "req-rejected-123" {
 		t.Errorf("request_id = %v, want req-rejected-123", fields["request_id"])
+	}
+}
+
+// TestUnaryInterceptor_RejectsAndLogs_RecordsRPCMetrics guards the other
+// half of the same gap: a rejection never reaches
+// grpchandler.LoggingUnaryInterceptor, which is where
+// telemetry.RPCRequestsTotal/RPCDurationSeconds are normally recorded — so
+// without authenticate recording them itself, every auth failure would be
+// invisible on a metrics dashboard, not just in logs. Uses a method name
+// unique to this test so its before/after delta can't be perturbed by
+// another test hitting the same method+code label combination.
+func TestUnaryInterceptor_RejectsAndLogs_RecordsRPCMetrics(t *testing.T) {
+	_ = withCapturedDefaultLog(t) // silence the rejection's Warn log for this test's output
+	signer := auth.NewJWTSigner("test-secret-key-32-chars-long!!", 24)
+	interceptor := auth.UnaryInterceptor(signer, memory.NewUserStore())
+
+	const method = "/test.Metrics/AuthRejection"
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{})
+	info := &grpc.UnaryServerInfo{FullMethod: method}
+
+	before := testutil.ToFloat64(telemetry.RPCRequestsTotal.WithLabelValues(method, codes.Unauthenticated.String()))
+	beforeSamples := testutil.CollectAndCount(telemetry.RPCDurationSeconds)
+
+	if _, err := interceptor(ctx, nil, info, noopUnaryHandler); err == nil {
+		t.Fatal("expected an error for a request with no authorization header")
+	}
+
+	if got := testutil.ToFloat64(telemetry.RPCRequestsTotal.WithLabelValues(method, codes.Unauthenticated.String())); got != before+1 {
+		t.Errorf("RPCRequestsTotal[%s,Unauthenticated] = %v, want %v", method, got, before+1)
+	}
+	if got := testutil.CollectAndCount(telemetry.RPCDurationSeconds); got != beforeSamples+1 {
+		t.Errorf("RPCDurationSeconds sample count = %d, want %d", got, beforeSamples+1)
 	}
 }

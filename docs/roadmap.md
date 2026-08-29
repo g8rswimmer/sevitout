@@ -124,7 +124,7 @@ ambiguous.
 
 ## Phase 2 — Metrics
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/metrics.md`](../demo/metrics.md)
 
 Zero metrics exist today: no `prometheus/client_golang` in `go.mod`, no
 OpenTelemetry code (OTel packages are present only transitively in `go.sum`, unused
