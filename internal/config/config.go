@@ -54,6 +54,18 @@ type Config struct {
 	// cmd/server/main.go so this package has no dependency on the store
 	// layer.
 	EncryptionKey string
+
+	// JiraBaseURL is JIRA_BASE_URL (e.g. "https://acme.atlassian.net"), and
+	// JiraEmail/JiraAPIToken are JIRA_EMAIL/JIRA_API_TOKEN — the Basic-Auth
+	// pair Jira Cloud's REST API v3 expects (an account email plus an API
+	// token, not a bearer token — see internal/integrations/tasktracker/jira).
+	// The Jira Issues integration is enabled only when all three are
+	// non-empty; unlike GitHub's single GITHUB_TOKEN, a base URL is required
+	// because Jira Cloud instances are tenant-specific, with no shared
+	// production API host to default to.
+	JiraBaseURL  string
+	JiraEmail    string
+	JiraAPIToken string
 }
 
 // Load reads every environment variable cmd/server's main() needs into a
@@ -73,6 +85,9 @@ func Load() (*Config, error) {
 		PagerDutyAPIKey:        os.Getenv("PAGERDUTY_API_KEY"),
 		GitHubToken:            os.Getenv("GITHUB_TOKEN"),
 		EncryptionKey:          os.Getenv("ENCRYPTION_KEY"),
+		JiraBaseURL:            os.Getenv("JIRA_BASE_URL"),
+		JiraEmail:              os.Getenv("JIRA_EMAIL"),
+		JiraAPIToken:           os.Getenv("JIRA_API_TOKEN"),
 	}
 
 	if v := os.Getenv("JWT_TTL_HOURS"); v != "" {

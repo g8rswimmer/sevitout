@@ -19,6 +19,9 @@ func clearEnv(t *testing.T) {
 		"PAGERDUTY_API_KEY",
 		"GITHUB_TOKEN",
 		"ENCRYPTION_KEY",
+		"JIRA_BASE_URL",
+		"JIRA_EMAIL",
+		"JIRA_API_TOKEN",
 	} {
 		t.Setenv(k, "")
 	}
@@ -50,6 +53,9 @@ func TestLoad_ReadsEveryField(t *testing.T) {
 	t.Setenv("PAGERDUTY_API_KEY", "pd-key")
 	t.Setenv("GITHUB_TOKEN", "gh-token")
 	t.Setenv("ENCRYPTION_KEY", "enc-key")
+	t.Setenv("JIRA_BASE_URL", "https://acme.atlassian.net")
+	t.Setenv("JIRA_EMAIL", "bot@acme.com")
+	t.Setenv("JIRA_API_TOKEN", "jira-token")
 
 	cfg, err := Load()
 	if err != nil {
@@ -64,6 +70,9 @@ func TestLoad_ReadsEveryField(t *testing.T) {
 		PagerDutyAPIKey:        "pd-key",
 		GitHubToken:            "gh-token",
 		EncryptionKey:          "enc-key",
+		JiraBaseURL:            "https://acme.atlassian.net",
+		JiraEmail:              "bot@acme.com",
+		JiraAPIToken:           "jira-token",
 	}
 	if *cfg != *want {
 		t.Errorf("Load() = %+v, want %+v", *cfg, *want)
