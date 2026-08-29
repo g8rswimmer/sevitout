@@ -86,7 +86,7 @@ func (s *AIServer) ListOutputs(ctx context.Context, req *pb.ListAIOutputsRequest
 	}
 	outs, err := s.outputs.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list AI outputs")
+		return nil, internalError(ctx, "failed to list AI outputs", err)
 	}
 	resp := &pb.ListAIOutputsResponse{}
 	for _, o := range outs {
@@ -98,7 +98,7 @@ func (s *AIServer) ListOutputs(ctx context.Context, req *pb.ListAIOutputsRequest
 func (s *AIServer) ListPlugins(ctx context.Context, _ *pb.ListPluginsRequest) (*pb.ListPluginsResponse, error) {
 	plugins, err := s.plugins.List(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list AI plugins")
+		return nil, internalError(ctx, "failed to list AI plugins", err)
 	}
 	resp := &pb.ListPluginsResponse{}
 	for _, p := range plugins {

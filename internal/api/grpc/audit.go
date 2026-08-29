@@ -35,7 +35,7 @@ func (s *AuditServer) ListAuditEntries(ctx context.Context, req *pb.ListAuditEnt
 
 	entries, err := s.audit.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list audit entries")
+		return nil, internalError(ctx, "failed to list audit entries", err)
 	}
 
 	resp := &pb.ListAuditEntriesResponse{}

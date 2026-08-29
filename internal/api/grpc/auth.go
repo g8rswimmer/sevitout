@@ -30,7 +30,7 @@ func (s *AuthServer) WhoAmI(ctx context.Context, _ *pb.WhoAmIRequest) (*pb.WhoAm
 	}
 	user, err := s.users.Get(ctx, uc.UserID)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to get user")
+		return nil, internalError(ctx, "failed to get user", err)
 	}
 	resp := &pb.WhoAmIResponse{
 		Id:      user.ID,
