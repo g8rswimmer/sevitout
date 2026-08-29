@@ -7,9 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/g8rswimmer/sevitout/internal/ai"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // fakeProvider records every call it receives and returns canned results, so
@@ -283,6 +286,58 @@ func TestEvictRateLimit_ResetsPluginWindow(t *testing.T) {
 	// expired.
 	if _, err := h.dispatch.Run(context.Background(), sev.ID, ai.ActionSummarize, plugin.ID); err != nil {
 		t.Fatalf("Run after EvictRateLimit: want allowed, got %v", err)
+	}
+}
+
+// The three tests below guard telemetry.AIActionsTotal's outcome labels.
+// Each reads its own before/after delta (rather than asserting an absolute
+// value) since AIActionsTotal is a process-wide metric other tests in this
+// same test binary also increment.
+
+func TestRun_ManualTriggerSuccess_RecordsSuccessMetric(t *testing.T) {
+	h := newHarness(t)
+	sev := mustCreateSEV(t, h, &store.SEV{Title: "x", SeverityLevel: 3})
+	plugin := mustCreatePlugin(t, h, &store.AIPlugin{Name: "p1", HandlerType: store.AIHandlerBuiltin, Enabled: true})
+
+	before := testutil.ToFloat64(telemetry.AIActionsTotal.WithLabelValues("success"))
+	if _, err := h.dispatch.Run(context.Background(), sev.ID, ai.ActionSummarize, plugin.ID); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := testutil.ToFloat64(telemetry.AIActionsTotal.WithLabelValues("success")); got != before+1 {
+		t.Errorf("AIActionsTotal[success] = %v, want %v", got, before+1)
+	}
+}
+
+func TestRun_RateLimited_RecordsErrorMetric(t *testing.T) {
+	h := newHarness(t)
+	sev := mustCreateSEV(t, h, &store.SEV{Title: "x", SeverityLevel: 3})
+	plugin := mustCreatePlugin(t, h, &store.AIPlugin{Name: "p1", HandlerType: store.AIHandlerBuiltin, Enabled: true, RateLimitPerMinute: 1})
+
+	if _, err := h.dispatch.Run(context.Background(), sev.ID, ai.ActionSummarize, plugin.ID); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	before := testutil.ToFloat64(telemetry.AIActionsTotal.WithLabelValues("error"))
+	if _, err := h.dispatch.Run(context.Background(), sev.ID, ai.ActionSummarize, plugin.ID); err != ai.ErrRateLimited {
+		t.Fatalf("second Run: want ErrRateLimited, got %v", err)
+	}
+	if got := testutil.ToFloat64(telemetry.AIActionsTotal.WithLabelValues("error")); got != before+1 {
+		t.Errorf("AIActionsTotal[error] = %v, want %v (rate-limited counts as run()'s error outcome, same as any other failure inside it)", got, before+1)
+	}
+}
+
+func TestDispatch_SeverityTooLowSkip_RecordsSkippedMetric(t *testing.T) {
+	h := newHarness(t)
+	mustCreatePlugin(t, h, &store.AIPlugin{Name: "p1", HandlerType: store.AIHandlerBuiltin, Enabled: true, TriggerOnOpen: true})
+	sev3 := mustCreateSEV(t, h, &store.SEV{Title: "minor", SeverityLevel: 3})
+
+	before := testutil.ToFloat64(telemetry.AIActionsTotal.WithLabelValues("skipped"))
+	h.dispatch.Dispatch(ai.TriggerSEVOpened, sev3.ID)
+	waitFor(t, time.Second, func() bool {
+		return testutil.ToFloat64(telemetry.AIActionsTotal.WithLabelValues("skipped")) == before+1
+	})
+	if h.provider.callCount() != 0 {
+		t.Fatal("SEV-3 open should not have reached the provider")
 	}
 }
 

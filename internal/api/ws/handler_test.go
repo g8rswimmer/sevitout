@@ -8,12 +8,33 @@ import (
 	"time"
 
 	gorillaws "github.com/gorilla/websocket"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/g8rswimmer/sevitout/internal/api/ws"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
+
+// waitForGaugeValue polls g every 10ms for up to 2s until it reads want —
+// Handler.ServeHTTP updates telemetry.WSConnections from its own goroutine,
+// asynchronously relative to a test's dial/close calls, so a bare assertion
+// immediately after either would be racy.
+func waitForGaugeValue(t *testing.T, g prometheus.Gauge, want float64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got := testutil.ToFloat64(g); got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("gauge did not reach %v within timeout (last value %v)", want, testutil.ToFloat64(g))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 // testServer bundles everything needed to dial the WebSocket handler under test.
 type testServer struct {
@@ -283,5 +304,35 @@ func TestHandler_MalformedControlFrame_ConnectionSurvives(t *testing.T) {
 	evt := readEvent(t, conn)
 	if evt.SEVID != "SEV-2026-0005" {
 		t.Errorf("connection should have survived the malformed frame and kept its original subscription, got %+v", evt)
+	}
+}
+
+func TestHandler_WSConnectionsGauge_IncDecOnConnectDisconnect(t *testing.T) {
+	ts := newTestServer(t)
+	token := ts.seedActiveUser(t, "user-1")
+	before := testutil.ToFloat64(telemetry.WSConnections)
+
+	conn := ts.dial(t, token)
+	waitForGaugeValue(t, telemetry.WSConnections, before+1)
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	waitForGaugeValue(t, telemetry.WSConnections, before)
+}
+
+func TestHandler_WSConnectionsGauge_RejectedConnectionNotCounted(t *testing.T) {
+	ts := newTestServer(t)
+	before := testutil.ToFloat64(telemetry.WSConnections)
+
+	req := httptest.NewRequest("GET", ts.srv.URL, nil) // no bearer token
+	w := httptest.NewRecorder()
+	ws.NewHandler(ts.hub, ts.signer, ts.users).ServeHTTP(w, req)
+	if w.Code != 401 {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+
+	if got := testutil.ToFloat64(telemetry.WSConnections); got != before {
+		t.Errorf("WSConnections = %v, want %v (a rejected connection should never increment it)", got, before)
 	}
 }

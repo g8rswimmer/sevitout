@@ -8,10 +8,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -354,6 +357,16 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(openAPISpec)
 	})
+	// GET /metrics: Prometheus scrape target. Deliberately unauthenticated
+	// and un-logged (a scraper polls this every few seconds; an access-log
+	// line per scrape would be pure noise), matching /openapi.json's
+	// treatment above and standard Prometheus scrape convention.
+	httpMux.Handle("/metrics", promhttp.Handler())
+
+	// --- Background metrics refresher: sevitout_open_sevs and (when
+	// running against real Postgres) sevitout_db_pool_* — see
+	// startMetricsRefresher's doc comment.
+	go startMetricsRefresher(ctx, log, stores.SEV, stores.Pool)
 
 	// --- cmux: gRPC and HTTP/1.1 on the same TCP port ---
 	lis, err := net.Listen("tcp", addr)
@@ -406,6 +419,13 @@ type Stores struct {
 	AIOutput          store.AIOutputStore
 	Share             store.ShareStore
 	SEVAccess         store.SEVAccessStore
+
+	// Pool is the underlying PostgreSQL connection pool, or nil when running
+	// against the in-memory dev fallback (DATABASE_URL unset). Exposed
+	// alongside the store interfaces above so main() can read
+	// pgxpool.Pool.Stat() for the sevitout_db_pool_* metrics without every
+	// caller needing it threaded through separately.
+	Pool *pgxpool.Pool
 }
 
 // buildStores selects the store backend: in-memory when dsn is empty,
@@ -444,6 +464,7 @@ func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, er
 	}
 	log.Info("using postgres store")
 	return &Stores{
+		Pool:              pool,
 		SEV:               postgres.NewSEVStore(pool),
 		Audit:             postgres.NewAuditStore(pool),
 		StatusHistory:     postgres.NewStatusHistoryStore(pool),
@@ -531,6 +552,72 @@ func (slackHealthChecker) Check(ctx context.Context, credentials map[string]stri
 		return fmt.Errorf("slack: no bot_token configured")
 	}
 	return slack.NewClient(token).Ping(ctx)
+}
+
+// openSEVSeverityLevels are the fixed SEV-1..SEV-4 severities
+// (docs/requirements.md §3) refreshMetrics reports telemetry.OpenSEVs for,
+// each cycle, even when a level currently has zero open SEVs — so a
+// severity that just emptied out reads 0 on the next scrape instead of
+// silently keeping its last nonzero value forever.
+var openSEVSeverityLevels = [...]int16{1, 2, 3, 4}
+
+// metricsRefreshInterval governs startMetricsRefresher: frequent enough for
+// a dashboard to feel current, infrequent enough that the periodic SEV list
+// query is negligible load. This is a gauge for humans looking at a
+// dashboard, not something anything alerts on with sub-refresh latency
+// requirements.
+const metricsRefreshInterval = 30 * time.Second
+
+// startMetricsRefresher runs until ctx is done, calling refreshMetrics
+// immediately and then every metricsRefreshInterval. It's launched as its
+// own goroutine from main() rather than folded into any request path, since
+// neither of the metrics it maintains (telemetry.OpenSEVs,
+// telemetry.DBPoolIdleConns/UsedConns/MaxConns) has a natural per-request
+// call site to update from — they're periodic snapshots of store/pool
+// state, not counters of things that happen.
+func startMetricsRefresher(ctx context.Context, log *slog.Logger, sevs store.SEVStore, pool *pgxpool.Pool) {
+	refreshMetrics(ctx, log, sevs, pool)
+	ticker := time.NewTicker(metricsRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refreshMetrics(ctx, log, sevs, pool)
+		}
+	}
+}
+
+// refreshMetrics recomputes telemetry.OpenSEVs (by severity, using the same
+// "open" status set — Open, Investigating, Mitigated — as SearchService's
+// "open" quick-view preset in internal/api/grpc/search.go) and, when pool is
+// non-nil (i.e. running against real Postgres, not the in-memory dev
+// fallback), telemetry.DBPoolIdleConns/UsedConns/MaxConns from
+// pgxpool.Pool.Stat().
+func refreshMetrics(ctx context.Context, log *slog.Logger, sevs store.SEVStore, pool *pgxpool.Pool) {
+	open, err := sevs.List(ctx, store.SEVFilter{
+		Statuses:         []store.SEVStatus{store.SEVStatusOpen, store.SEVStatusInvestigating, store.SEVStatusMitigated},
+		ExcludeSensitive: true,
+	})
+	if err != nil {
+		log.ErrorContext(ctx, "metrics refresh: list open SEVs failed", "err", err)
+	} else {
+		counts := make(map[int16]int, len(openSEVSeverityLevels))
+		for _, sv := range open {
+			counts[sv.SeverityLevel]++
+		}
+		for _, level := range openSEVSeverityLevels {
+			telemetry.OpenSEVs.WithLabelValues(strconv.Itoa(int(level))).Set(float64(counts[level]))
+		}
+	}
+
+	if pool != nil {
+		stat := pool.Stat()
+		telemetry.DBPoolIdleConns.Set(float64(stat.IdleConns()))
+		telemetry.DBPoolUsedConns.Set(float64(stat.AcquiredConns()))
+		telemetry.DBPoolMaxConns.Set(float64(stat.MaxConns()))
+	}
 }
 
 // gatewayMetadata builds the gRPC metadata grpc-gateway attaches to every

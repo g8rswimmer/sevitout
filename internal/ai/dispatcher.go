@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/g8rswimmer/sevitout/internal/store"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // Publisher broadcasts a typed event to WebSocket clients subscribed to a
@@ -219,6 +220,7 @@ func (d *Dispatcher) runTrigger(ctx context.Context, event TriggerEvent, sevID s
 	}
 	if err := aiEligible(sv); err != nil {
 		d.log.DebugContext(ctx, "ai dispatch: skipped, SEV not eligible", "sev_id", sevID, "event", event, "reason", err)
+		telemetry.AIActionsTotal.WithLabelValues("skipped").Inc()
 		return
 	}
 	// SEV opened only proactively triggers AI for SEV-1/SEV-2 (§11.1); the
@@ -226,6 +228,7 @@ func (d *Dispatcher) runTrigger(ctx context.Context, event TriggerEvent, sevID s
 	if event == TriggerSEVOpened && sv.SeverityLevel > 2 {
 		d.log.DebugContext(ctx, "ai dispatch: skipped, severity too low for sev.opened trigger",
 			"sev_id", sevID, "severity_level", sv.SeverityLevel)
+		telemetry.AIActionsTotal.WithLabelValues("skipped").Inc()
 		return
 	}
 
@@ -336,9 +339,21 @@ func (d *Dispatcher) StreamOne(ctx context.Context, sevID string, action Action,
 // run is the shared core: build context, decrypt the key, construct the
 // provider, rate-limit, call the action, persist, and publish. Both the
 // async worker (runTrigger) and the synchronous Run path funnel through it.
-func (d *Dispatcher) run(ctx context.Context, sv *store.SEV, event TriggerEvent, action Action, plugin *store.AIPlugin) (*store.AIOutput, error) {
+// Named returns so the deferred outcome-metric recording below observes the
+// actual result of whichever return statement fires, regardless of which
+// internal step (rate limit, provider build, context build, the action
+// itself, or the store write) produced it — one observation point per call,
+// the same principle internal/api/grpc's logRPC uses for its own metrics.
+func (d *Dispatcher) run(ctx context.Context, sv *store.SEV, event TriggerEvent, action Action, plugin *store.AIPlugin) (out *store.AIOutput, err error) {
 	d.log.InfoContext(ctx, "ai dispatch: running action",
 		"sev_id", sv.ID, "event", event, "action", action, "plugin_id", plugin.ID)
+	defer func() {
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		}
+		telemetry.AIActionsTotal.WithLabelValues(outcome).Inc()
+	}()
 
 	if !d.limiter.Allow(plugin.ID, plugin.RateLimitPerMinute) {
 		d.log.WarnContext(ctx, "ai dispatch: rate limited",
@@ -361,7 +376,7 @@ func (d *Dispatcher) run(ctx context.Context, sv *store.SEV, event TriggerEvent,
 		return nil, fmt.Errorf("provider action %s: %w", action, err)
 	}
 
-	out := &store.AIOutput{
+	out = &store.AIOutput{
 		SEVID:        sv.ID,
 		PluginID:     plugin.ID,
 		TriggerEvent: string(event),

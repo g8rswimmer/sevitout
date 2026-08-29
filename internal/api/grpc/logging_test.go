@@ -17,6 +17,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
@@ -149,6 +151,34 @@ func TestLoggingUnaryInterceptor_UnauthenticatedRequest_LogsWithoutUserID(t *tes
 	}
 	if fields["code"] != codes.Unauthenticated.String() {
 		t.Errorf("code = %v, want %s", fields["code"], codes.Unauthenticated.String())
+	}
+}
+
+// TestLoggingUnaryInterceptor_RecordsRPCMetrics uses a method name unique to
+// this test (not shared with any other test in this package's test binary)
+// so its before/after Prometheus assertions can't be perturbed by another
+// test incrementing the same method+code label combination.
+func TestLoggingUnaryInterceptor_RecordsRPCMetrics(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	interceptor := grpchandler.LoggingUnaryInterceptor(log)
+
+	const method = "/test.Metrics/RecordsRPCMetrics"
+	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
+	info := &grpclib.UnaryServerInfo{FullMethod: method}
+
+	beforeCount := testutil.ToFloat64(telemetry.RPCRequestsTotal.WithLabelValues(method, codes.OK.String()))
+	beforeSamples := testutil.CollectAndCount(telemetry.RPCDurationSeconds)
+
+	if _, err := interceptor(context.Background(), nil, info, handler); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := testutil.ToFloat64(telemetry.RPCRequestsTotal.WithLabelValues(method, codes.OK.String())); got != beforeCount+1 {
+		t.Errorf("RPCRequestsTotal[%s,OK] = %v, want %v", method, got, beforeCount+1)
+	}
+	if got := testutil.CollectAndCount(telemetry.RPCDurationSeconds); got != beforeSamples+1 {
+		t.Errorf("RPCDurationSeconds sample count = %d, want %d", got, beforeSamples+1)
 	}
 }
 

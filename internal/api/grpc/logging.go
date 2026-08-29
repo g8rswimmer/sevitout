@@ -87,8 +87,21 @@ func bindLogger(ctx context.Context, log *slog.Logger) context.Context {
 // logs through telemetry.LoggerFromContext(ctx) — the logger bindLogger
 // attached above — so method/duration/code join whatever request_id/user_id
 // fields are already bound to it.
+//
+// It also records telemetry.RPCRequestsTotal/RPCDurationSeconds here, in the
+// one place that already resolves method/code/dur exactly once per call,
+// rather than a second interceptor that would redundantly recompute
+// status.Code(err).
 func logRPC(ctx context.Context, method string, dur time.Duration, err error) {
 	log := telemetry.LoggerFromContext(ctx)
+
+	code := codes.OK
+	if err != nil {
+		code = status.Code(err)
+	}
+	telemetry.RPCRequestsTotal.WithLabelValues(method, code.String()).Inc()
+	telemetry.RPCDurationSeconds.WithLabelValues(method, code.String()).Observe(dur.Seconds())
+
 	attrs := []any{"method", method, "duration_ms", dur.Milliseconds()}
 
 	if err == nil {
@@ -96,7 +109,6 @@ func logRPC(ctx context.Context, method string, dur time.Duration, err error) {
 		return
 	}
 
-	code := status.Code(err)
 	attrs = append(attrs, "code", code.String(), "err", err)
 	switch code {
 	case codes.Internal, codes.Unknown, codes.DataLoss, codes.Unavailable:

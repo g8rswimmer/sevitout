@@ -10,6 +10,7 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // upgrader has no origin restriction: sevitout is a self-hosted, single-org
@@ -114,6 +115,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	slog.InfoContext(r.Context(), "websocket connected", "user_id", user.ID, "sev_ids", sevIDs)
+	telemetry.WSConnections.Inc()
 
 	writeDone := make(chan struct{})
 	go func() {
@@ -126,6 +128,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = conn.Close()
 	h.hub.Close(client)
 	<-writeDone
+	telemetry.WSConnections.Dec()
 	slog.InfoContext(r.Context(), "websocket disconnected", "user_id", user.ID)
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -43,13 +44,18 @@ func StreamInterceptor(signer *JWTSigner, users store.UserStore) grpc.StreamServ
 // outside LoggingUnaryInterceptor — see cmd/server/main.go — specifically so
 // a successful call's logRPC entry can read the *UserContext this function
 // attaches to ctx). That means a rejection here would otherwise vanish
-// entirely, so every failure branch below logs for itself at Warn: these
-// are exactly the "why can't I log in / why is this call failing" cases the
-// whole point of this work is to make visible. Each line also carries
+// entirely — from metrics as well as logs, since logRPC is also where
+// telemetry.RPCRequestsTotal/RPCDurationSeconds are recorded — so every
+// failure branch below both logs for itself at Warn (these are exactly the
+// "why can't I log in / why is this call failing" cases the whole point of
+// Phase 1 was to make visible) and records the same two metrics via reject
+// below, so a spike in auth failures shows up on a dashboard exactly like a
+// spike in any other error code would. Each log line also carries
 // request_id when RequestIDUnaryInterceptor ran first (it does in the real
 // chain, being outermost), so a rejected call can still be correlated with
 // whatever else that request touched.
 func authenticate(ctx context.Context, signer *JWTSigner, users store.UserStore, method string) (context.Context, error) {
+	start := time.Now()
 	attrs := []any{"method", method}
 	if reqID, ok := telemetry.RequestIDFromContext(ctx); ok {
 		attrs = append(attrs, "request_id", reqID)
@@ -57,34 +63,39 @@ func authenticate(ctx context.Context, signer *JWTSigner, users store.UserStore,
 	warn := func(msg string, extra ...any) {
 		slog.WarnContext(ctx, msg, append(attrs, extra...)...)
 	}
+	reject := func(code codes.Code, statusMsg string) error {
+		telemetry.RPCRequestsTotal.WithLabelValues(method, code.String()).Inc()
+		telemetry.RPCDurationSeconds.WithLabelValues(method, code.String()).Observe(time.Since(start).Seconds())
+		return status.Error(code, statusMsg)
+	}
 
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		warn("rpc rejected: missing metadata")
-		return nil, status.Error(codes.Unauthenticated, "missing metadata")
+		return nil, reject(codes.Unauthenticated, "missing metadata")
 	}
 	values := md.Get("authorization")
 	if len(values) == 0 {
 		warn("rpc rejected: missing authorization header")
-		return nil, status.Error(codes.Unauthenticated, "missing authorization header")
+		return nil, reject(codes.Unauthenticated, "missing authorization header")
 	}
 	raw := values[0]
 	if !strings.HasPrefix(raw, "Bearer ") {
 		warn("rpc rejected: malformed authorization header")
-		return nil, status.Error(codes.Unauthenticated, "malformed authorization header")
+		return nil, reject(codes.Unauthenticated, "malformed authorization header")
 	}
 	tokenStr := raw[len("Bearer "):]
 
 	claims, err := signer.Validate(tokenStr)
 	if err != nil {
 		warn("rpc rejected: invalid or expired token", "err", err)
-		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
+		return nil, reject(codes.Unauthenticated, "invalid or expired token")
 	}
 
 	user, err := users.Get(ctx, claims.Subject)
 	if err != nil || !user.Active {
 		warn("rpc rejected: unknown or inactive user", "user_id", claims.Subject)
-		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
+		return nil, reject(codes.Unauthenticated, "invalid or expired token")
 	}
 
 	uc := &UserContext{
@@ -95,7 +106,7 @@ func authenticate(ctx context.Context, signer *JWTSigner, users store.UserStore,
 
 	if !HasPermission(uc.OrgRole, method) {
 		warn("rpc rejected: insufficient permissions", "user_id", uc.UserID, "org_role", string(uc.OrgRole))
-		return nil, status.Error(codes.PermissionDenied, "insufficient permissions for "+method)
+		return nil, reject(codes.PermissionDenied, "insufficient permissions for "+method)
 	}
 
 	return WithUser(ctx, uc), nil
