@@ -22,6 +22,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // lastLogLine returns the fields of the last JSON log line written to buf,
@@ -151,14 +152,81 @@ func TestLoggingUnaryInterceptor_UnauthenticatedRequest_LogsWithoutUserID(t *tes
 	}
 }
 
-// TestLoggingAndAuthInterceptorsChained_EndToEnd guards the exact ordering
-// bug this pair of interceptors is prone to: auth.UnaryInterceptor attaches
-// *auth.UserContext to a *new* context.Context value (context.Context is
-// immutable), so LoggingUnaryInterceptor can only observe it via
-// auth.UserFromContext if auth runs before it in the chain — swap the order
-// in cmd/server/main.go's grpc.ChainUnaryInterceptor and this test catches
-// it by asserting user_id actually appears on a real authenticated call.
-func TestLoggingAndAuthInterceptorsChained_EndToEnd(t *testing.T) {
+// TestLoggingUnaryInterceptor_IncludesRequestID mirrors
+// TestLoggingUnaryInterceptor_IncludesAuthenticatedUserID for the request-ID
+// half of bindLogger — a ctx carrying a request ID (as
+// RequestIDUnaryInterceptor would attach it, if chained ahead of this one)
+// should show up on the logged line.
+func TestLoggingUnaryInterceptor_IncludesRequestID(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	interceptor := grpchandler.LoggingUnaryInterceptor(log)
+
+	ctx := telemetry.WithRequestID(context.Background(), "req-42")
+	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
+	info := &grpclib.UnaryServerInfo{FullMethod: "/sevitout.v1.SEVService/GetSEV"}
+
+	if _, err := interceptor(ctx, nil, info, handler); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	fields := lastLogLine(t, &buf)
+	if fields["request_id"] != "req-42" {
+		t.Errorf("request_id = %v, want req-42", fields["request_id"])
+	}
+}
+
+// TestLoggingUnaryInterceptor_HandlerCanRetrieveBoundLogger exercises the
+// core point of bindLogger: handler code should be able to pull a
+// pre-enriched logger out of ctx via telemetry.LoggerFromContext instead of
+// re-deriving request_id/user_id by hand.
+func TestLoggingUnaryInterceptor_HandlerCanRetrieveBoundLogger(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	interceptor := grpchandler.LoggingUnaryInterceptor(log)
+
+	ctx := telemetry.WithRequestID(context.Background(), "req-99")
+	ctx = auth.WithUser(ctx, &auth.UserContext{UserID: "user-7", OrgRole: store.OrgRoleAdmin})
+	handler := func(ctx context.Context, req any) (any, error) {
+		telemetry.LoggerFromContext(ctx).Info("handler-internal event")
+		return "ok", nil
+	}
+	info := &grpclib.UnaryServerInfo{FullMethod: "/sevitout.v1.SEVService/GetSEV"}
+
+	if _, err := interceptor(ctx, nil, info, handler); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d log lines, want 2 (handler's own + the interceptor's rpc-completed line): %q", len(lines), buf.String())
+	}
+	var handlerLine map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &handlerLine); err != nil {
+		t.Fatalf("handler's log line is not valid JSON: %v", err)
+	}
+	if handlerLine["msg"] != "handler-internal event" {
+		t.Fatalf("first log line msg = %v, want %q", handlerLine["msg"], "handler-internal event")
+	}
+	if handlerLine["request_id"] != "req-99" {
+		t.Errorf("handler's logger: request_id = %v, want req-99 (bound logger wasn't retrieved)", handlerLine["request_id"])
+	}
+	if handlerLine["user_id"] != "user-7" {
+		t.Errorf("handler's logger: user_id = %v, want user-7 (bound logger wasn't retrieved)", handlerLine["user_id"])
+	}
+}
+
+// TestLoggingAndAuthAndRequestIDInterceptorsChained_EndToEnd guards the
+// exact three-deep ordering this chain depends on: RequestIDUnaryInterceptor
+// outermost, then auth.UnaryInterceptor, then LoggingUnaryInterceptor
+// innermost. auth.UnaryInterceptor attaches *auth.UserContext to a *new*
+// context.Context value (context.Context is immutable), so
+// LoggingUnaryInterceptor can only observe it — and the request ID
+// RequestIDUnaryInterceptor attached — if both ran before it in the chain.
+// Swap the order in cmd/server/main.go's grpc.ChainUnaryInterceptor and this
+// test catches it by asserting request_id and user_id both actually appear
+// on a real authenticated call.
+func TestLoggingAndAuthAndRequestIDInterceptorsChained_EndToEnd(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
 
@@ -174,9 +242,14 @@ func TestLoggingAndAuthInterceptorsChained_EndToEnd(t *testing.T) {
 	}
 
 	srv := grpclib.NewServer(
-		// Mirrors cmd/server/main.go's ordering exactly: auth outermost, so
-		// its enriched context reaches the logging interceptor beneath it.
-		grpclib.ChainUnaryInterceptor(auth.UnaryInterceptor(signer, users), grpchandler.LoggingUnaryInterceptor(log)),
+		// Mirrors cmd/server/main.go's ordering exactly: request-ID
+		// outermost, then auth, then logging innermost, so each layer's
+		// enriched context reaches the ones nested inside it.
+		grpclib.ChainUnaryInterceptor(
+			grpchandler.RequestIDUnaryInterceptor(),
+			auth.UnaryInterceptor(signer, users),
+			grpchandler.LoggingUnaryInterceptor(log),
+		),
 	)
 	pb.RegisterAuthServiceServer(srv, grpchandler.NewAuthServer(users))
 
@@ -198,7 +271,8 @@ func TestLoggingAndAuthInterceptorsChained_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
 	}
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
+	md := metadata.Pairs("authorization", "Bearer "+token, grpchandler.RequestIDMetadataKey, "client-supplied-req-id")
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
 
 	if _, err := client.WhoAmI(ctx, &pb.WhoAmIRequest{}); err != nil {
 		t.Fatalf("WhoAmI: %v", err)
@@ -210,5 +284,8 @@ func TestLoggingAndAuthInterceptorsChained_EndToEnd(t *testing.T) {
 	}
 	if fields["user_id"] != seedUser.ID {
 		t.Errorf("user_id = %v, want %s — the logging interceptor isn't seeing auth's enriched context", fields["user_id"], seedUser.ID)
+	}
+	if fields["request_id"] != "client-supplied-req-id" {
+		t.Errorf("request_id = %v, want %s — the logging interceptor isn't seeing the request-ID interceptor's context, or the client-supplied ID wasn't reused", fields["request_id"], "client-supplied-req-id")
 	}
 }

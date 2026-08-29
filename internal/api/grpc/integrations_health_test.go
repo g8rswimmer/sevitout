@@ -14,6 +14,19 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
 
+// erroringIntegrationConfigStore wraps *memory.IntegrationConfigStore,
+// returning err from List instead of delegating — used to exercise
+// IntegrationsHealthHandler's internal-error (500) logging path, which the
+// in-memory store can't otherwise trigger.
+type erroringIntegrationConfigStore struct {
+	*memory.IntegrationConfigStore
+	err error
+}
+
+func (e *erroringIntegrationConfigStore) List(_ context.Context) ([]*store.IntegrationConfig, error) {
+	return nil, e.err
+}
+
 // fakeChecker is a scripted grpchandler.HealthChecker for tests.
 type fakeChecker struct {
 	err error
@@ -203,6 +216,93 @@ func TestIntegrationsHealth_ChecksRunConcurrently(t *testing.T) {
 	}
 	if !strings.Contains(body, `"status":"connected"`) {
 		t.Errorf("body = %s, want at least one connected status", body)
+	}
+}
+
+// The three tests below guard IntegrationsHealthHandler's own request-level
+// logging — added because, as a plain http.Handler bypassing the gRPC auth
+// interceptor entirely, it previously had no accompanying slog call on
+// either its auth-rejection or its internal-error path.
+
+func TestIntegrationsHealth_MissingToken_LogsWarn(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	h := newTestHealthHandler(nil, nil)
+
+	req := httptest.NewRequest("GET", "/admin/integrations/health", nil)
+	w := httptest.NewRecorder()
+	h.handler.ServeHTTP(w, req)
+	if w.Code != 401 {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+
+	fields := lastLogLine(t, buf)
+	if fields["level"] != "WARN" {
+		t.Errorf("level = %v, want WARN", fields["level"])
+	}
+	if fields["msg"] != "integrations health rejected: missing bearer token" {
+		t.Errorf("msg = %v, want %q", fields["msg"], "integrations health rejected: missing bearer token")
+	}
+}
+
+func TestIntegrationsHealth_InsufficientRole_LogsWarn(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	h := newTestHealthHandler(nil, nil)
+	token := h.seedUser(t, "viewer-1", store.OrgRoleViewer)
+
+	req := httptest.NewRequest("GET", "/admin/integrations/health", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	h.handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+
+	fields := lastLogLine(t, buf)
+	if fields["level"] != "WARN" {
+		t.Errorf("level = %v, want WARN", fields["level"])
+	}
+	if fields["msg"] != "integrations health rejected: insufficient permissions" {
+		t.Errorf("msg = %v, want %q", fields["msg"], "integrations health rejected: insufficient permissions")
+	}
+	if fields["user_id"] != "viewer-1" {
+		t.Errorf("user_id = %v, want viewer-1", fields["user_id"])
+	}
+}
+
+func TestIntegrationsHealth_ListFailure_LogsError(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	signer := auth.NewJWTSigner("test-secret-key-32-chars-long!!", 24)
+	users := memory.NewUserStore()
+	boom := errors.New("db exploded")
+	handler := grpchandler.NewIntegrationsHealthHandler(grpchandler.IntegrationsHealthHandlerParams{
+		Integrations: &erroringIntegrationConfigStore{IntegrationConfigStore: memory.NewIntegrationConfigStore(), err: boom},
+		Signer:       signer,
+		Users:        users,
+	})
+	now := time.Now()
+	u := &store.User{ID: "admin-1", Email: "admin-1@example.com", Name: "Admin", OrgRole: store.OrgRoleAdmin, Active: true, CreatedAt: now, UpdatedAt: now}
+	if err := users.Create(context.Background(), u); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	token, err := signer.Sign(u.ID, u.Email, string(u.OrgRole))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/admin/integrations/health", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 500 {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+
+	fields := lastLogLine(t, buf)
+	if fields["level"] != "ERROR" {
+		t.Errorf("level = %v, want ERROR", fields["level"])
+	}
+	if fields["msg"] != "integrations health: failed to list integration configs" {
+		t.Errorf("msg = %v, want %q", fields["msg"], "integrations health: failed to list integration configs")
 	}
 }
 

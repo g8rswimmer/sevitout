@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/g8rswimmer/sevitout/internal/store"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // UnaryInterceptor returns a gRPC unary interceptor that validates JWT tokens,
@@ -38,39 +39,51 @@ func StreamInterceptor(signer *JWTSigner, users store.UserStore) grpc.StreamServ
 }
 
 // authenticate rejects a call before grpchandler.LoggingUnaryInterceptor ever
-// sees it (auth.UnaryInterceptor runs outermost — see cmd/server/main.go —
-// specifically so a successful call's logRPC entry can read the *UserContext
-// this function attaches to ctx). That means a rejection here would
-// otherwise vanish entirely, so every failure branch below logs for itself
-// at Warn: these are exactly the "why can't I log in / why is this call
-// failing" cases the whole point of this work is to make visible.
+// sees it (auth.UnaryInterceptor runs inside RequestIDUnaryInterceptor but
+// outside LoggingUnaryInterceptor — see cmd/server/main.go — specifically so
+// a successful call's logRPC entry can read the *UserContext this function
+// attaches to ctx). That means a rejection here would otherwise vanish
+// entirely, so every failure branch below logs for itself at Warn: these
+// are exactly the "why can't I log in / why is this call failing" cases the
+// whole point of this work is to make visible. Each line also carries
+// request_id when RequestIDUnaryInterceptor ran first (it does in the real
+// chain, being outermost), so a rejected call can still be correlated with
+// whatever else that request touched.
 func authenticate(ctx context.Context, signer *JWTSigner, users store.UserStore, method string) (context.Context, error) {
+	attrs := []any{"method", method}
+	if reqID, ok := telemetry.RequestIDFromContext(ctx); ok {
+		attrs = append(attrs, "request_id", reqID)
+	}
+	warn := func(msg string, extra ...any) {
+		slog.WarnContext(ctx, msg, append(attrs, extra...)...)
+	}
+
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		slog.WarnContext(ctx, "rpc rejected: missing metadata", "method", method)
+		warn("rpc rejected: missing metadata")
 		return nil, status.Error(codes.Unauthenticated, "missing metadata")
 	}
 	values := md.Get("authorization")
 	if len(values) == 0 {
-		slog.WarnContext(ctx, "rpc rejected: missing authorization header", "method", method)
+		warn("rpc rejected: missing authorization header")
 		return nil, status.Error(codes.Unauthenticated, "missing authorization header")
 	}
 	raw := values[0]
 	if !strings.HasPrefix(raw, "Bearer ") {
-		slog.WarnContext(ctx, "rpc rejected: malformed authorization header", "method", method)
+		warn("rpc rejected: malformed authorization header")
 		return nil, status.Error(codes.Unauthenticated, "malformed authorization header")
 	}
 	tokenStr := raw[len("Bearer "):]
 
 	claims, err := signer.Validate(tokenStr)
 	if err != nil {
-		slog.WarnContext(ctx, "rpc rejected: invalid or expired token", "method", method, "err", err)
+		warn("rpc rejected: invalid or expired token", "err", err)
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
 	}
 
 	user, err := users.Get(ctx, claims.Subject)
 	if err != nil || !user.Active {
-		slog.WarnContext(ctx, "rpc rejected: unknown or inactive user", "method", method, "user_id", claims.Subject)
+		warn("rpc rejected: unknown or inactive user", "user_id", claims.Subject)
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
 	}
 
@@ -81,7 +94,7 @@ func authenticate(ctx context.Context, signer *JWTSigner, users store.UserStore,
 	}
 
 	if !HasPermission(uc.OrgRole, method) {
-		slog.WarnContext(ctx, "rpc rejected: insufficient permissions", "method", method, "user_id", uc.UserID, "org_role", string(uc.OrgRole))
+		warn("rpc rejected: insufficient permissions", "user_id", uc.UserID, "org_role", string(uc.OrgRole))
 		return nil, status.Error(codes.PermissionDenied, "insufficient permissions for "+method)
 	}
 

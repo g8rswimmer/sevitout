@@ -57,7 +57,7 @@ touching the same `os.Getenv` scatter pattern twice.
 
 ## Phase 1 — Request-scoped logging
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/request-scoped-logging.md`](../demo/request-scoped-logging.md)
 
 Today, structured logging (`log/slog`, JSON, one `LoggingUnaryInterceptor` in
 `internal/api/grpc/logging.go` covering every gRPC call *and* the entire REST

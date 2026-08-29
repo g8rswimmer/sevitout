@@ -9,6 +9,7 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
+	"github.com/g8rswimmer/sevitout/internal/telemetry"
 )
 
 // noopUnaryHandler stands in for a real RPC handler; the tests below only
@@ -57,5 +58,30 @@ func TestUnaryInterceptor_RejectsAndLogs_InvalidToken(t *testing.T) {
 	fields := lastLogFields(t, buf)
 	if fields["msg"] != "rpc rejected: invalid or expired token" {
 		t.Errorf("msg = %v, want %q", fields["msg"], "rpc rejected: invalid or expired token")
+	}
+}
+
+// TestUnaryInterceptor_RejectsAndLogs_IncludesRequestID guards the point of
+// threading request_id through authenticate at all: a rejection is exactly
+// the case where LoggingUnaryInterceptor never runs (see authenticate's doc
+// comment), so if this interceptor didn't read the request ID back out of
+// ctx itself, a rejected call would be the one kind of log line with no
+// correlation ID on it.
+func TestUnaryInterceptor_RejectsAndLogs_IncludesRequestID(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	signer := auth.NewJWTSigner("test-secret-key-32-chars-long!!", 24)
+	interceptor := auth.UnaryInterceptor(signer, memory.NewUserStore())
+
+	ctx := telemetry.WithRequestID(context.Background(), "req-rejected-123")
+	ctx = metadata.NewIncomingContext(ctx, metadata.MD{})
+	info := &grpc.UnaryServerInfo{FullMethod: "/sevitout.v1.SEVService/GetSEV"}
+
+	if _, err := interceptor(ctx, nil, info, noopUnaryHandler); err == nil {
+		t.Fatal("expected an error for a request with no authorization header")
+	}
+
+	fields := lastLogFields(t, buf)
+	if fields["request_id"] != "req-rejected-123" {
+		t.Errorf("request_id = %v, want req-rejected-123", fields["request_id"])
 	}
 }
