@@ -36,6 +36,39 @@ func waitForGaugeValue(t *testing.T, g prometheus.Gauge, want float64) {
 	}
 }
 
+// waitForGaugeStable polls g until it reads the same value on 5 consecutive
+// polls (10ms apart) and returns that value. telemetry.WSConnections is a
+// process-wide metric shared with every other test in this file — a prior
+// test's t.Cleanup(func() { conn.Close() }) closes the client side
+// immediately but doesn't wait for the server to notice and run its own
+// Dec() (which only fires once readPump's blocking read finally errors), so
+// capturing a "before" baseline without waiting for that straggler to
+// settle first can under- or over-count it, making an exact before+1/before
+// assertion flaky. This is that wait.
+func waitForGaugeStable(t *testing.T, g prometheus.Gauge) float64 {
+	t.Helper()
+	const stableReadsRequired = 5
+	deadline := time.Now().Add(3 * time.Second)
+	last := testutil.ToFloat64(g)
+	stableReads := 1
+	for {
+		time.Sleep(10 * time.Millisecond)
+		v := testutil.ToFloat64(g)
+		if v == last {
+			stableReads++
+			if stableReads >= stableReadsRequired {
+				return v
+			}
+		} else {
+			last = v
+			stableReads = 1
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("gauge never stabilized within timeout (last value %v)", last)
+		}
+	}
+}
+
 // testServer bundles everything needed to dial the WebSocket handler under test.
 type testServer struct {
 	hub    *ws.Hub
@@ -310,7 +343,7 @@ func TestHandler_MalformedControlFrame_ConnectionSurvives(t *testing.T) {
 func TestHandler_WSConnectionsGauge_IncDecOnConnectDisconnect(t *testing.T) {
 	ts := newTestServer(t)
 	token := ts.seedActiveUser(t, "user-1")
-	before := testutil.ToFloat64(telemetry.WSConnections)
+	before := waitForGaugeStable(t, telemetry.WSConnections)
 
 	conn := ts.dial(t, token)
 	waitForGaugeValue(t, telemetry.WSConnections, before+1)
@@ -323,7 +356,7 @@ func TestHandler_WSConnectionsGauge_IncDecOnConnectDisconnect(t *testing.T) {
 
 func TestHandler_WSConnectionsGauge_RejectedConnectionNotCounted(t *testing.T) {
 	ts := newTestServer(t)
-	before := testutil.ToFloat64(telemetry.WSConnections)
+	before := waitForGaugeStable(t, telemetry.WSConnections)
 
 	req := httptest.NewRequest("GET", ts.srv.URL, nil) // no bearer token
 	w := httptest.NewRecorder()
