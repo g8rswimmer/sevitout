@@ -64,7 +64,18 @@ jobs:
         run: go test ./...
 
       - name: Test (race detector, with coverage)
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: |
+          # internal/api/pb (generated gRPC/protobuf code) and
+          # internal/store/postgres + internal/store/queries (the sqlc-
+          # generated glue and its hand-written wrapper, exercised only by
+          # the separate, DB-backed integration-test job below) can't be
+          # meaningfully covered by this unit-test run — they'd sit at a
+          # permanent 0% and dilute the total into a number that doesn't
+          # track real regressions. Excluded here (and in the gate step
+          # below) for the same reason `make test-integration` is a
+          # separate target rather than folded into this one.
+          PKGS=$(go list ./... | grep -v -E '/internal/api/pb$|/internal/store/postgres$|/internal/store/queries$')
+          go test -race -coverprofile=coverage.out -covermode=atomic $PKGS
 
       - name: Coverage summary
         if: always()
@@ -72,6 +83,20 @@ jobs:
           if [ -f coverage.out ]; then
             go tool cover -func=coverage.out | tail -1
           fi
+
+      - name: Coverage gate
+        run: |
+          # Threshold set at roadmap Phase 5's baseline (~79.5% aggregate
+          # across the packages coverage.out actually covers — see
+          # demo/test-coverage-ci-gate.md) minus a couple points of buffer
+          # against normal fluctuation, not chosen to just barely pass
+          # today. Ratchet upward in a follow-up once there's more headroom
+          # above it than below.
+          THRESHOLD=78.0
+          ACTUAL=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
+          echo "Coverage: ${ACTUAL}% (threshold: ${THRESHOLD}%)"
+          awk -v actual="$ACTUAL" -v threshold="$THRESHOLD" 'BEGIN { exit !(actual >= threshold) }' \
+            || { echo "::error::Coverage ${ACTUAL}% is below the ${THRESHOLD}% gate"; exit 1; }
 
       - name: Upload coverage report
         if: always()
