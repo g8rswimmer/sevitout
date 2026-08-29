@@ -97,6 +97,7 @@ refuses to run without one.
 | `LOG_LEVEL` | No (default `info`) | One of `debug`, `info`, `warn`, `error` (case-insensitive). `debug` additionally logs every outbound PagerDuty/GitHub/Slack call and every WebSocket event fan-out |
 | `PAGERDUTY_API_KEY` | No | Enables PagerDuty on-call auto-population. Read-only — Sevitout never triggers pages |
 | `GITHUB_TOKEN` | No | GitHub PAT with `repo` scope. Enables linking/creating GitHub Issues; without it, those endpoints return `503` and everything else still works |
+| `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` | No, but all three are required together | Jira Cloud instance URL (e.g. `https://acme.atlassian.net`), account email, and API token (Basic Auth, not a bearer token). Enables linking/creating Jira issues; without all three set, those endpoints return `503` and everything else still works |
 | `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` | No, but all five Slack vars are required together | Socket Mode app-level token and bot OAuth token for the `slackbot` service |
 | `API_GRPC_ADDR` | No, but required together with the other Slack vars | gRPC address of the API server as seen by the `slackbot` container (e.g. `api:8080`) |
 | `SLACKBOT_SERVICE_EMAIL` / `SLACKBOT_SERVICE_PASSWORD` | No, but required together with the other Slack vars | Login credentials for the bot's own service-account user (an ordinary registered user, promoted to Admin) — the bot logs itself in and refreshes its own token, so there's no JWT to generate or rotate by hand |
