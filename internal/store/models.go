@@ -91,10 +91,8 @@ const (
 )
 
 // DetectionMethod is how a SEV was first identified (docs/requirements.md §4.2).
-// Unlike MonitoringTool (free text — "Datadog", "Prometheus", "CloudWatch" aren't
-// exhaustive, and a caller can always name something new), this vocabulary is
-// closed and validated in internal/api/grpc/sev.go the same way role.go validates
-// SEVRoleType.
+// This vocabulary is closed and validated in internal/api/grpc/sev.go the same
+// way role.go validates SEVRoleType — as is MonitoringTool below.
 type DetectionMethod string
 
 const (
@@ -104,6 +102,21 @@ const (
 	DetectionMethodSyntheticTest       DetectionMethod = "synthetic-test"
 	DetectionMethodManualDiscovery     DetectionMethod = "manual-discovery"
 	DetectionMethodSlackEscalation     DetectionMethod = "slack-escalation"
+)
+
+// MonitoringTool identifies which monitoring platform detected/tracks a SEV
+// (docs/requirements.md §13.4). Closed and validated in internal/api/grpc/sev.go
+// via validateMonitoringTool, the same pattern DetectionMethod uses above —
+// "other" is itself a valid closed value (there's no companion free-text label
+// for it; a caller that needs to name a specific tool outside this list can
+// still say so in AlertName or the SEV description).
+type MonitoringTool string
+
+const (
+	MonitoringToolDatadog    MonitoringTool = "datadog"
+	MonitoringToolPrometheus MonitoringTool = "prometheus"
+	MonitoringToolCloudWatch MonitoringTool = "cloudwatch"
+	MonitoringToolOther      MonitoringTool = "other"
 )
 
 // SEV is the central incident record.
@@ -122,14 +135,19 @@ type SEV struct {
 	DetectionMethod      *string
 	AlertName            *string
 	MonitoringTool       *string
-	// AlertURL, MetricLink, and SnapshotURL are optional supporting links for
-	// the detection metadata above — the alert that fired, the monitoring
-	// dashboard/metric query, and a snapshot image of it, respectively. All
-	// three are plain URLs (no file upload/blob storage — see
-	// docs/requirements.md §13.4's "link a dashboard URL" framing).
-	AlertURL    *string
-	MetricLink  *string
-	SnapshotURL *string
+	// AlertURL, DashboardURL, Query, and SnapshotURL are optional supporting
+	// detail for the detection metadata above — the alert that fired, a link
+	// to the monitoring dashboard, a saved query/expression run against
+	// MonitoringTool (e.g. a PromQL or Datadog query string — deliberately
+	// not a URL), and a snapshot image of the chart, respectively.
+	// AlertURL/DashboardURL/SnapshotURL are plain URLs (no file upload/blob
+	// storage — see docs/requirements.md §13.4's "link a dashboard URL or
+	// saved query" framing, which is exactly the two concepts DashboardURL
+	// and Query split apart).
+	AlertURL     *string
+	DashboardURL *string
+	Query        *string
+	SnapshotURL  *string
 	// GitHubRepo is the "owner/repo" this SEV's code lives in (e.g.
 	// "acme-corp/checkout-service") — shown as a link in the Details panel,
 	// and used to pre-fill TaskService.CreateGitHubIssue's owner/repo fields

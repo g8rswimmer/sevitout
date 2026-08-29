@@ -171,6 +171,24 @@ func validateDetectionMethod(v string) error {
 	}
 }
 
+// validateMonitoringTool rejects a non-empty monitoring_tool that isn't one
+// of docs/requirements.md §13.4's fixed vocabulary — same pattern as
+// validateDetectionMethod above. An empty value is allowed (monitoring tool
+// just wasn't recorded); "other" is itself a valid value, not an escape
+// hatch requiring a companion free-text field.
+func validateMonitoringTool(v string) error {
+	if v == "" {
+		return nil
+	}
+	switch store.MonitoringTool(v) {
+	case store.MonitoringToolDatadog, store.MonitoringToolPrometheus,
+		store.MonitoringToolCloudWatch, store.MonitoringToolOther:
+		return nil
+	default:
+		return status.Error(codes.InvalidArgument, "unknown monitoring_tool")
+	}
+}
+
 // newSEVFromCreateRequest builds a *store.SEV from req's fields, callerID,
 // and now. Split out of CreateSEV so that handler reads as validation +
 // construction + persistence + side effects, rather than burying the field
@@ -202,8 +220,11 @@ func newSEVFromCreateRequest(req *pb.CreateSEVRequest, callerID string, now time
 	if v := req.GetAlertUrl(); v != "" {
 		record.AlertURL = &v
 	}
-	if v := req.GetMetricLink(); v != "" {
-		record.MetricLink = &v
+	if v := req.GetDashboardUrl(); v != "" {
+		record.DashboardURL = &v
+	}
+	if v := req.GetQuery(); v != "" {
+		record.Query = &v
 	}
 	if v := req.GetSnapshotUrl(); v != "" {
 		record.SnapshotURL = &v
@@ -232,6 +253,9 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		return nil, status.Error(codes.InvalidArgument, "severity_level must be between 1 and 4")
 	}
 	if err := validateDetectionMethod(req.GetDetectionMethod()); err != nil {
+		return nil, err
+	}
+	if err := validateMonitoringTool(req.GetMonitoringTool()); err != nil {
 		return nil, err
 	}
 
@@ -387,6 +411,9 @@ func applySEVUpdate(record *store.SEV, req *pb.UpdateSEVRequest) (rootCauseCateg
 	if err := validateDetectionMethod(req.GetDetectionMethod()); err != nil {
 		return false, false, err
 	}
+	if err := validateMonitoringTool(req.GetMonitoringTool()); err != nil {
+		return false, false, err
+	}
 	if v := req.GetDetectionMethod(); v != "" {
 		record.DetectionMethod = &v
 	}
@@ -399,8 +426,11 @@ func applySEVUpdate(record *store.SEV, req *pb.UpdateSEVRequest) (rootCauseCateg
 	if v := req.GetAlertUrl(); v != "" {
 		record.AlertURL = &v
 	}
-	if v := req.GetMetricLink(); v != "" {
-		record.MetricLink = &v
+	if v := req.GetDashboardUrl(); v != "" {
+		record.DashboardURL = &v
+	}
+	if v := req.GetQuery(); v != "" {
+		record.Query = &v
 	}
 	if v := req.GetSnapshotUrl(); v != "" {
 		record.SnapshotURL = &v
@@ -826,8 +856,11 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 	if s.AlertURL != nil {
 		resp.AlertUrl = *s.AlertURL
 	}
-	if s.MetricLink != nil {
-		resp.MetricLink = *s.MetricLink
+	if s.DashboardURL != nil {
+		resp.DashboardUrl = *s.DashboardURL
+	}
+	if s.Query != nil {
+		resp.Query = *s.Query
 	}
 	if s.SnapshotURL != nil {
 		resp.SnapshotUrl = *s.SnapshotURL

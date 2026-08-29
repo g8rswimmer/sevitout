@@ -147,10 +147,11 @@ type Sev struct {
 	SearchVector          interface{}        `json:"search_vector"`
 	AiDisabled            bool               `json:"ai_disabled"`
 	AlertUrl              *string            `json:"alert_url"`
-	MetricLink            *string            `json:"metric_link"`
+	DashboardUrl          *string            `json:"dashboard_url"`
 	SnapshotUrl           *string            `json:"snapshot_url"`
 	GithubRepo            *string            `json:"github_repo"`
 	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
+	Query                 *string            `json:"query"`
 }
 
 type SevAccess struct {

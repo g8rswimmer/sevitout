@@ -65,7 +65,8 @@ func (s *SEVStore) Create(ctx context.Context, sv *store.SEV) error {
 		AlertName:             sv.AlertName,
 		MonitoringTool:        sv.MonitoringTool,
 		AlertUrl:              sv.AlertURL,
-		MetricLink:            sv.MetricLink,
+		DashboardUrl:          sv.DashboardURL,
+		Query:                 sv.Query,
 		SnapshotUrl:           sv.SnapshotURL,
 		GithubRepo:            sv.GitHubRepo,
 		RootCauseReferenceUrl: sv.RootCauseReferenceURL,
@@ -142,7 +143,8 @@ func (s *SEVStore) Update(ctx context.Context, sv *store.SEV) error {
 		AlertName:             sv.AlertName,
 		MonitoringTool:        sv.MonitoringTool,
 		AlertUrl:              sv.AlertURL,
-		MetricLink:            sv.MetricLink,
+		DashboardUrl:          sv.DashboardURL,
+		Query:                 sv.Query,
 		SnapshotUrl:           sv.SnapshotURL,
 		GithubRepo:            sv.GitHubRepo,
 		RootCauseReferenceUrl: sv.RootCauseReferenceURL,
@@ -333,7 +335,7 @@ func isUniqueViolation(err error) bool {
 const sevSelectCols = `SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
        business_impact, affected_services, detection_method, alert_name,
-       monitoring_tool, alert_url, metric_link, snapshot_url, github_repo,
+       monitoring_tool, alert_url, dashboard_url, query, snapshot_url, github_repo,
        root_cause_reference_url,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
@@ -451,8 +453,8 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		rootCateg, rootDesc, mitigation       *string
 		prevention, bizImpact                 *string
 		detMethod, alertName, monTool         *string
-		alertURL, metricLink, snapshotURL     *string
-		githubRepo                            *string
+		alertURL, dashboardURL, query         *string
+		snapshotURL, githubRepo               *string
 		rootCauseReferenceURL                 *string
 		rightPeopleNotes                      *string
 		rightPeoplePresent                    *bool
@@ -471,7 +473,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		&id, &title, &desc, &severityLevel, &status,
 		&rootCateg, &rootDesc, &mitigation, &prevention,
 		&bizImpact, &affectedServices, &detMethod, &alertName,
-		&monTool, &alertURL, &metricLink, &snapshotURL, &githubRepo,
+		&monTool, &alertURL, &dashboardURL, &query, &snapshotURL, &githubRepo,
 		&rootCauseReferenceURL,
 		&rightPeoplePresent, &rightPeopleNotes, &tags,
 		&startedAt, &detectedAt, &mitigatedAt, &resolvedAt, &postmortemCompletedAt,
@@ -500,7 +502,8 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		AlertName:             alertName,
 		MonitoringTool:        monTool,
 		AlertURL:              alertURL,
-		MetricLink:            metricLink,
+		DashboardURL:          dashboardURL,
+		Query:                 query,
 		SnapshotURL:           snapshotURL,
 		GitHubRepo:            githubRepo,
 		RootCauseReferenceURL: rootCauseReferenceURL,
@@ -546,7 +549,8 @@ func mapGetSEVRow(r queries.GetSEVRow) (*store.SEV, error) {
 		AlertName:             r.AlertName,
 		MonitoringTool:        r.MonitoringTool,
 		AlertURL:              r.AlertUrl,
-		MetricLink:            r.MetricLink,
+		DashboardURL:          r.DashboardUrl,
+		Query:                 r.Query,
 		SnapshotURL:           r.SnapshotUrl,
 		GitHubRepo:            r.GithubRepo,
 		RootCauseReferenceURL: r.RootCauseReferenceUrl,

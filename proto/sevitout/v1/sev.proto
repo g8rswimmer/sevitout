@@ -78,9 +78,9 @@ message SEVResponse {
   // alert_url links to the alert that fired (e.g. a PagerDuty incident or
   // Datadog monitor URL).
   string alert_url = 33;
-  // metric_link links to the monitoring dashboard, metric, or saved query
-  // referenced by monitoring_tool (§13.4).
-  string metric_link = 34;
+  // dashboard_url links to the monitoring dashboard referenced by
+  // monitoring_tool (§13.4).
+  string dashboard_url = 34;
   // snapshot_url links to an already-hosted image of the monitoring chart at
   // detection time; rendered as an inline preview in the UI. No file upload
   // is supported — this is a URL to an image hosted elsewhere.
@@ -94,6 +94,10 @@ message SEVResponse {
   // alongside root_cause_category/root_cause_description's classification
   // and narrative. Set via UpdateSEV, not at creation.
   string root_cause_reference_url = 37;
+  // query is a saved query/expression (e.g. PromQL or a Datadog query
+  // string) run against monitoring_tool — a separate concept from
+  // dashboard_url, not a URL (§13.4).
+  string query = 38;
 }
 
 message CreateSEVRequest {
@@ -111,8 +115,9 @@ message CreateSEVRequest {
   bool sensitive = 12;
   bool ai_disabled = 13;
   string alert_url = 14;
-  string metric_link = 15;
+  string dashboard_url = 15;
   string snapshot_url = 16;
+  string query = 17;
 }
 
 message GetSEVRequest {
@@ -144,10 +149,11 @@ message UpdateSEVRequest {
   string unlock_token = 21;
   google.protobuf.BoolValue ai_disabled = 22;
   string alert_url = 23;
-  string metric_link = 24;
+  string dashboard_url = 24;
   string snapshot_url = 25;
   string github_repo = 26;
   string root_cause_reference_url = 27;
+  string query = 28;
 }
 
 message ListSEVsRequest {

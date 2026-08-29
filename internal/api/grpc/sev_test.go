@@ -267,7 +267,8 @@ func TestCreateSEV_DetectionMetadataAndLinks(t *testing.T) {
 		DetectionMethod: string(store.DetectionMethodMonitoringDashboard),
 		MonitoringTool:  "datadog",
 		AlertUrl:        "https://pagerduty.example.com/incidents/1",
-		MetricLink:      "https://app.datadoghq.com/dashboard/abc",
+		DashboardUrl:    "https://app.datadoghq.com/dashboard/abc",
+		Query:           "sum:trace.express.request.errors{service:checkout}",
 		SnapshotUrl:     "https://img.example.com/snapshot.png",
 	})
 	if err != nil {
@@ -279,11 +280,31 @@ func TestCreateSEV_DetectionMetadataAndLinks(t *testing.T) {
 	if got, want := resp.GetAlertUrl(), "https://pagerduty.example.com/incidents/1"; got != want {
 		t.Errorf("AlertUrl = %q, want %q", got, want)
 	}
-	if got, want := resp.GetMetricLink(), "https://app.datadoghq.com/dashboard/abc"; got != want {
-		t.Errorf("MetricLink = %q, want %q", got, want)
+	if got, want := resp.GetDashboardUrl(), "https://app.datadoghq.com/dashboard/abc"; got != want {
+		t.Errorf("DashboardUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetQuery(), "sum:trace.express.request.errors{service:checkout}"; got != want {
+		t.Errorf("Query = %q, want %q", got, want)
 	}
 	if got, want := resp.GetSnapshotUrl(), "https://img.example.com/snapshot.png"; got != want {
 		t.Errorf("SnapshotUrl = %q, want %q", got, want)
+	}
+}
+
+func TestCreateSEV_UnknownMonitoringTool_Rejected(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	_, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title:          "Checkout errors",
+		SeverityLevel:  2,
+		MonitoringTool: "new-relic",
+	})
+	if err == nil {
+		t.Fatal("CreateSEV: want error for unknown monitoring_tool, got nil")
+	}
+	if code := grpcCode(err); code != codes.InvalidArgument {
+		t.Errorf("error code = %v, want InvalidArgument", code)
 	}
 }
 
@@ -463,9 +484,10 @@ func TestUpdateSEV_DetectionMetadataAndLinks(t *testing.T) {
 	resp, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
 		Id:              sevID,
 		DetectionMethod: string(store.DetectionMethodSlackEscalation),
-		MonitoringTool:  "Custom in-house tool",
+		MonitoringTool:  "other",
 		AlertUrl:        "https://alerts.example.com/1",
-		MetricLink:      "https://metrics.example.com/q/1",
+		DashboardUrl:    "https://metrics.example.com/q/1",
+		Query:           "up{job=\"checkout\"} == 0",
 		SnapshotUrl:     "https://img.example.com/2.png",
 		GithubRepo:      "acme-corp/checkout-service",
 	})
@@ -475,14 +497,17 @@ func TestUpdateSEV_DetectionMetadataAndLinks(t *testing.T) {
 	if got, want := resp.GetDetectionMethod(), string(store.DetectionMethodSlackEscalation); got != want {
 		t.Errorf("DetectionMethod = %q, want %q", got, want)
 	}
-	if got, want := resp.GetMonitoringTool(), "Custom in-house tool"; got != want {
+	if got, want := resp.GetMonitoringTool(), "other"; got != want {
 		t.Errorf("MonitoringTool = %q, want %q", got, want)
 	}
 	if got, want := resp.GetAlertUrl(), "https://alerts.example.com/1"; got != want {
 		t.Errorf("AlertUrl = %q, want %q", got, want)
 	}
-	if got, want := resp.GetMetricLink(), "https://metrics.example.com/q/1"; got != want {
-		t.Errorf("MetricLink = %q, want %q", got, want)
+	if got, want := resp.GetDashboardUrl(), "https://metrics.example.com/q/1"; got != want {
+		t.Errorf("DashboardUrl = %q, want %q", got, want)
+	}
+	if got, want := resp.GetQuery(), "up{job=\"checkout\"} == 0"; got != want {
+		t.Errorf("Query = %q, want %q", got, want)
 	}
 	if got, want := resp.GetSnapshotUrl(), "https://img.example.com/2.png"; got != want {
 		t.Errorf("SnapshotUrl = %q, want %q", got, want)
@@ -531,6 +556,23 @@ func TestUpdateSEV_UnknownDetectionMethod(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("UpdateSEV: want error for unknown detection_method, got nil")
+	}
+	if code := grpcCode(err); code != codes.InvalidArgument {
+		t.Errorf("error code = %v, want InvalidArgument", code)
+	}
+}
+
+func TestUpdateSEV_UnknownMonitoringTool_Rejected(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+	sevID := seedSEV(t, ts)
+
+	_, err := ts.server.UpdateSEV(ctx, &pb.UpdateSEVRequest{
+		Id:             sevID,
+		MonitoringTool: "new-relic",
+	})
+	if err == nil {
+		t.Fatal("UpdateSEV: want error for unknown monitoring_tool, got nil")
 	}
 	if code := grpcCode(err); code != codes.InvalidArgument {
 		t.Errorf("error code = %v, want InvalidArgument", code)
