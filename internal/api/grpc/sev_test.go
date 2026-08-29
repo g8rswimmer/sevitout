@@ -2,6 +2,7 @@ package grpc_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -342,6 +343,42 @@ func TestGetSEV_UnknownID(t *testing.T) {
 	}
 	if code := grpcCode(err); code != codes.NotFound {
 		t.Errorf("error code = %v, want NotFound", code)
+	}
+}
+
+// TestGetSEV_StoreError_LogsUnderlyingError is representative of the
+// internalError conversion applied across internal/api/grpc/*.go (roadmap
+// Phase 3): before, a store failure here surfaced only as a generic
+// "failed to get SEV" — the underlying err was discarded entirely, so
+// LoggingUnaryInterceptor's own log line never saw more than code=Internal
+// either. Uses the erroringSEVStore fault injector already defined in
+// share_view_test.go (same package) — the in-memory store's own Get only
+// ever fails with store.ErrNotFound, which GetSEV handles as an expected
+// 404, so a wrapper is needed to exercise the 500 path at all.
+func TestGetSEV_StoreError_LogsUnderlyingError(t *testing.T) {
+	buf := withCapturedDefaultLog(t)
+	boom := errors.New("db exploded")
+	server := grpchandler.NewSEVServer(grpchandler.SEVServerParams{
+		SEVs: &erroringSEVStore{SEVStore: memory.NewSEVStore(), err: boom},
+	})
+
+	_, err := server.GetSEV(context.Background(), &pb.GetSEVRequest{Id: "sev-1"})
+	if code := grpcCode(err); code != codes.Internal {
+		t.Fatalf("error code = %v, want Internal", code)
+	}
+	if err.Error() != status.Error(codes.Internal, "failed to get SEV").Error() {
+		t.Errorf("returned error = %v, want the generic message only (no leaked detail)", err)
+	}
+
+	fields := lastLogLine(t, buf)
+	if fields["level"] != "ERROR" {
+		t.Errorf("level = %v, want ERROR", fields["level"])
+	}
+	if fields["msg"] != "failed to get SEV" {
+		t.Errorf("msg = %v, want %q", fields["msg"], "failed to get SEV")
+	}
+	if fields["err"] != "db exploded" {
+		t.Errorf("err = %v, want the underlying store error to be logged", fields["err"])
 	}
 }
 

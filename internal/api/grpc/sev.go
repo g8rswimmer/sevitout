@@ -245,7 +245,7 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 	sev.ComputeMetrics(record)
 
 	if err := s.sevs.Create(ctx, record); err != nil {
-		return nil, status.Error(codes.Internal, "failed to create SEV")
+		return nil, internalError(ctx, "failed to create SEV", err)
 	}
 
 	// Auto-grant the creator visibility into their own Sensitive SEV (§14) —
@@ -274,7 +274,7 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		CreatedAt: now,
 		UpdatedAt: now,
 	}); err != nil {
-		return nil, status.Error(codes.Internal, "failed to create postmortem for SEV")
+		return nil, internalError(ctx, "failed to create postmortem for SEV", err)
 	}
 
 	// Best-effort on-call auto-population. Never blocks or fails the response.
@@ -327,11 +327,11 @@ func (s *SEVServer) GetSEV(ctx context.Context, req *pb.GetSEVRequest) (*pb.SEVR
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 	visible, err := sensitiveSEVVisible(ctx, s.access, record)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+		return nil, internalError(ctx, "failed to check SEV visibility", err)
 	}
 	if !visible {
 		return nil, status.Error(codes.NotFound, "SEV not found")
@@ -453,11 +453,11 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 	visible, err := sensitiveSEVVisible(ctx, s.access, record)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+		return nil, internalError(ctx, "failed to check SEV visibility", err)
 	}
 	if !visible {
 		return nil, status.Error(codes.NotFound, "SEV not found")
@@ -478,7 +478,7 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	sev.ComputeMetrics(record)
 
 	if err := s.sevs.Update(ctx, record); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update SEV")
+		return nil, internalError(ctx, "failed to update SEV", err)
 	}
 
 	updaterID := req.GetUserId()
@@ -559,11 +559,11 @@ func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.
 	if ok && (uc.OrgRole == store.OrgRoleAdmin || uc.OrgRole == store.OrgRoleIncidentCommander) {
 		total, err := s.sevs.Count(ctx, filter)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to count SEVs")
+			return nil, internalError(ctx, "failed to count SEVs", err)
 		}
 		records, err := s.sevs.List(ctx, filter)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to list SEVs")
+			return nil, internalError(ctx, "failed to list SEVs", err)
 		}
 		resp := &pb.ListSEVsResponse{Total: int32(total)}
 		for _, r := range records {
@@ -609,7 +609,7 @@ func (s *SEVServer) visibleSEVsForNonPrivileged(ctx context.Context, filter stor
 	unpaginated.Limit, unpaginated.Offset = sevListFanoutLimit, 0
 	all, err := s.sevs.List(ctx, unpaginated)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list SEVs")
+		return nil, internalError(ctx, "failed to list SEVs", err)
 	}
 	if len(all) >= sevListFanoutLimit {
 		return nil, status.Error(codes.ResourceExhausted, "matched too many SEVs to enforce visibility reliably; narrow the filter")
@@ -619,7 +619,7 @@ func (s *SEVServer) visibleSEVsForNonPrivileged(ctx context.Context, filter stor
 	if uc != nil {
 		ids, err := s.access.ListSEVIDsByUser(ctx, uc.UserID)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to resolve sensitive SEV access")
+			return nil, internalError(ctx, "failed to resolve sensitive SEV access", err)
 		}
 		for _, id := range ids {
 			accessSet[id] = true
@@ -690,11 +690,11 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 	visible, err := sensitiveSEVVisible(ctx, s.access, record)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+		return nil, internalError(ctx, "failed to check SEV visibility", err)
 	}
 	if !visible {
 		return nil, status.Error(codes.NotFound, "SEV not found")
@@ -734,11 +734,11 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		UserID:         transitionerID,
 		TransitionedAt: now,
 	}); err != nil {
-		return nil, status.Error(codes.Internal, "failed to record status history")
+		return nil, internalError(ctx, "failed to record status history", err)
 	}
 
 	if err := s.sevs.Update(ctx, record); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update SEV")
+		return nil, internalError(ctx, "failed to update SEV", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
