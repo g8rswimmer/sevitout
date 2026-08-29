@@ -47,7 +47,7 @@ func (s *ConfigServer) CreateService(ctx context.Context, req *pb.CreateServiceR
 		if errors.Is(err, store.ErrConflict) {
 			return nil, status.Error(codes.AlreadyExists, "a service with this id or name already exists")
 		}
-		return nil, status.Error(codes.Internal, "failed to create service")
+		return nil, internalError(ctx, "failed to create service", err)
 	}
 	return serviceToProto(svc), nil
 }
@@ -61,7 +61,7 @@ func (s *ConfigServer) GetService(ctx context.Context, req *pb.GetServiceRequest
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "service not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get service")
+		return nil, internalError(ctx, "failed to get service", err)
 	}
 	return serviceToProto(svc), nil
 }
@@ -75,7 +75,7 @@ func (s *ConfigServer) UpdateService(ctx context.Context, req *pb.UpdateServiceR
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "service not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get service")
+		return nil, internalError(ctx, "failed to get service", err)
 	}
 
 	if v := req.GetName(); v != "" {
@@ -102,7 +102,7 @@ func (s *ConfigServer) UpdateService(ctx context.Context, req *pb.UpdateServiceR
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "service not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to update service")
+		return nil, internalError(ctx, "failed to update service", err)
 	}
 	return serviceToProto(svc), nil
 }
@@ -118,7 +118,7 @@ func (s *ConfigServer) DeleteService(ctx context.Context, req *pb.DeleteServiceR
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "service not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to delete service")
+		return nil, internalError(ctx, "failed to delete service", err)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -126,7 +126,7 @@ func (s *ConfigServer) DeleteService(ctx context.Context, req *pb.DeleteServiceR
 func (s *ConfigServer) ListServices(ctx context.Context, req *pb.ListServicesRequest) (*pb.ListServicesResponse, error) {
 	svcs, err := s.services.List(ctx, req.GetActiveOnly())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list services")
+		return nil, internalError(ctx, "failed to list services", err)
 	}
 	resp := &pb.ListServicesResponse{}
 	for _, svc := range svcs {

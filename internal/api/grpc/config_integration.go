@@ -43,7 +43,7 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 	case errors.Is(err, store.ErrNotFound):
 		// no existing row — cfg keeps its zero-value credentials and settings
 	default:
-		return nil, status.Error(codes.Internal, "failed to get integration config")
+		return nil, internalError(ctx, "failed to get integration config", err)
 	}
 
 	if creds := req.GetCredentials(); len(creds) > 0 {
@@ -53,11 +53,11 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 		}
 		raw, err := json.Marshal(creds)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to encode credentials")
+			return nil, internalError(ctx, "failed to encode credentials", err)
 		}
 		sealed, err := s.crypto.Encrypt(raw)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to encrypt credentials")
+			return nil, internalError(ctx, "failed to encrypt credentials", err)
 		}
 		cfg.EncryptedCredentials = sealed
 	}
@@ -74,7 +74,7 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 	}
 
 	if err := s.integrations.Upsert(ctx, cfg); err != nil {
-		return nil, status.Error(codes.Internal, "failed to save integration config")
+		return nil, internalError(ctx, "failed to save integration config", err)
 	}
 
 	slog.InfoContext(ctx, "integration config updated",
@@ -92,7 +92,7 @@ func (s *ConfigServer) GetIntegrationConfig(ctx context.Context, req *pb.GetInte
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "integration config not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get integration config")
+		return nil, internalError(ctx, "failed to get integration config", err)
 	}
 	return integrationConfigToProto(cfg), nil
 }
@@ -100,7 +100,7 @@ func (s *ConfigServer) GetIntegrationConfig(ctx context.Context, req *pb.GetInte
 func (s *ConfigServer) ListIntegrationConfigs(ctx context.Context, _ *pb.ListIntegrationConfigsRequest) (*pb.ListIntegrationConfigsResponse, error) {
 	cfgs, err := s.integrations.List(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list integration configs")
+		return nil, internalError(ctx, "failed to list integration configs", err)
 	}
 	resp := &pb.ListIntegrationConfigsResponse{}
 	for _, cfg := range cfgs {

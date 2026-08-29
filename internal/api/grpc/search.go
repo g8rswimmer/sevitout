@@ -121,7 +121,7 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 		onCall := store.SEVRoleOnCall
 		ids, err := s.roles.ListSEVIDsByUser(ctx, u, &onCall)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to resolve on_call_user")
+			return nil, internalError(ctx, "failed to resolve on_call_user", err)
 		}
 		idSets = append(idSets, ids)
 	}
@@ -129,7 +129,7 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 		detectedBy := store.SEVRoleDetectedBy
 		ids, err := s.roles.ListSEVIDsByUser(ctx, u, &detectedBy)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to resolve detected_by")
+			return nil, internalError(ctx, "failed to resolve detected_by", err)
 		}
 		idSets = append(idSets, ids)
 	}
@@ -140,7 +140,7 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 		}
 		ids, err := s.roles.ListSEVIDsByUser(ctx, uc.UserID, nil)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to resolve my_sevs")
+			return nil, internalError(ctx, "failed to resolve my_sevs", err)
 		}
 		idSets = append(idSets, ids)
 	}
@@ -152,7 +152,7 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 	if filter.Search != "" {
 		ids, err := s.announcements.SearchSEVIDs(ctx, filter.Search)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to search announcements")
+			return nil, internalError(ctx, "failed to search announcements", err)
 		}
 		announcementIDs = ids
 	}
@@ -163,11 +163,11 @@ func (s *SearchServer) SearchSEVs(ctx context.Context, req *pb.SearchSEVsRequest
 		var err error
 		total, err = s.sevs.Count(ctx, filter)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to count SEVs")
+			return nil, internalError(ctx, "failed to count SEVs", err)
 		}
 		records, err = s.sevs.List(ctx, filter)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "failed to search SEVs")
+			return nil, internalError(ctx, "failed to search SEVs", err)
 		}
 	} else {
 		merged, err := s.searchWithAnnouncements(ctx, filter, announcementIDs)
@@ -211,7 +211,7 @@ func (s *SearchServer) searchWithAnnouncements(ctx context.Context, filter store
 	fieldFilter.Limit, fieldFilter.Offset = searchFanoutLimit, 0
 	byField, err := s.sevs.List(ctx, fieldFilter)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to search SEVs")
+		return nil, internalError(ctx, "failed to search SEVs", err)
 	}
 
 	viaAnnouncements := filter
@@ -220,7 +220,7 @@ func (s *SearchServer) searchWithAnnouncements(ctx context.Context, filter store
 	viaAnnouncements.IDs = intersectIDs([][]string{announcementIDs, filter.IDs})
 	byAnnouncement, err := s.sevs.List(ctx, viaAnnouncements)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to search SEVs via announcements")
+		return nil, internalError(ctx, "failed to search SEVs via announcements", err)
 	}
 
 	// Either fetch hitting the cap means the merged set below would be

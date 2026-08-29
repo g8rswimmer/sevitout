@@ -63,7 +63,7 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	callerID := req.GetCreatedBy()
@@ -84,7 +84,7 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 	}
 
 	if err := s.roles.Assign(ctx, role); err != nil {
-		return nil, status.Error(codes.Internal, "failed to assign role")
+		return nil, internalError(ctx, "failed to assign role", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -115,7 +115,7 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	callerID := ""
@@ -127,7 +127,7 @@ func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) 
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "role assignment not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to remove role")
+		return nil, internalError(ctx, "failed to remove role", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -158,7 +158,7 @@ func (s *RoleServer) ListRoles(ctx context.Context, req *pb.ListRolesRequest) (*
 
 	roles, err := s.roles.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list roles")
+		return nil, internalError(ctx, "failed to list roles", err)
 	}
 
 	resp := &pb.ListRolesResponse{}

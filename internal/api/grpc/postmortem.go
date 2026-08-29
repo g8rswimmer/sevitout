@@ -73,7 +73,7 @@ func (s *PostmortemServer) GetPostmortem(ctx context.Context, req *pb.GetPostmor
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "postmortem not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get postmortem")
+		return nil, internalError(ctx, "failed to get postmortem", err)
 	}
 	return postmortemToProto(pm), nil
 }
@@ -88,7 +88,7 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	if sev.Locked {
@@ -102,7 +102,7 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "postmortem not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get postmortem")
+		return nil, internalError(ctx, "failed to get postmortem", err)
 	}
 
 	callerID := req.GetUserId()
@@ -118,7 +118,7 @@ func (s *PostmortemServer) UpdatePostmortem(ctx context.Context, req *pb.UpdateP
 	}
 
 	if err := s.postmortems.Update(ctx, pm); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update postmortem")
+		return nil, internalError(ctx, "failed to update postmortem", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -151,7 +151,7 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "postmortem not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get postmortem")
+		return nil, internalError(ctx, "failed to get postmortem", err)
 	}
 
 	if err := postmortem.ValidateTransition(pm.Status, toStatus); err != nil {
@@ -172,7 +172,7 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 	}
 
 	if err := s.postmortems.Update(ctx, pm); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update postmortem")
+		return nil, internalError(ctx, "failed to update postmortem", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -215,7 +215,7 @@ func (s *PostmortemServer) UnlockSEV(ctx context.Context, req *pb.UnlockSEVReque
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	if !sev.Locked {
@@ -229,7 +229,7 @@ func (s *PostmortemServer) UnlockSEV(ctx context.Context, req *pb.UnlockSEVReque
 
 	token, err := s.unlock.Sign(req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to generate unlock token")
+		return nil, internalError(ctx, "failed to generate unlock token", err)
 	}
 
 	reason := req.GetReason()

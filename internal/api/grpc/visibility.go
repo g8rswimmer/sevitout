@@ -60,11 +60,11 @@ func loadVisibleSEV(ctx context.Context, sevs store.SEVStore, access store.SEVAc
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 	visible, err := sensitiveSEVVisible(ctx, access, record)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to check SEV visibility")
+		return nil, internalError(ctx, "failed to check SEV visibility", err)
 	}
 	if !visible {
 		return nil, status.Error(codes.NotFound, "SEV not found")

@@ -47,7 +47,7 @@ func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryReque
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	addedBy := req.GetAddedBy()
@@ -75,7 +75,7 @@ func (s *ChatServer) AddChatEntry(ctx context.Context, req *pb.AddChatEntryReque
 	}
 
 	if err := s.chat.Create(ctx, entry); err != nil {
-		return nil, status.Error(codes.Internal, "failed to add chat entry")
+		return nil, internalError(ctx, "failed to add chat entry", err)
 	}
 
 	resp := chatEntryToProto(entry)
@@ -97,7 +97,7 @@ func (s *ChatServer) ListChatEntries(ctx context.Context, req *pb.ListChatEntrie
 
 	entries, err := s.chat.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list chat entries")
+		return nil, internalError(ctx, "failed to list chat entries", err)
 	}
 
 	resp := &pb.ListChatEntriesResponse{}

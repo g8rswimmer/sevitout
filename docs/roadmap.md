@@ -173,7 +173,7 @@ deferred per-query histograms noted under Known limitations.
 
 ## Phase 3 — `codes.Internal` root-cause cleanup
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/internal-error-cleanup.md`](../demo/internal-error-cleanup.md)
 
 `internal/api/grpc/*.go` has 119 `status.Error(codes.Internal, "...")` call sites
 that discard the underlying error — e.g. `return nil, status.Error(codes.Internal,

@@ -51,7 +51,7 @@ func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.Cre
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	authorID := req.GetAuthorId()
@@ -72,7 +72,7 @@ func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.Cre
 	}
 
 	if err := s.announcements.Create(ctx, a); err != nil {
-		return nil, status.Error(codes.Internal, "failed to create announcement")
+		return nil, internalError(ctx, "failed to create announcement", err)
 	}
 
 	resp := announcementToProto(a)
@@ -94,7 +94,7 @@ func (s *AnnouncementServer) ListAnnouncements(ctx context.Context, req *pb.List
 
 	all, err := s.announcements.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list announcements")
+		return nil, internalError(ctx, "failed to list announcements", err)
 	}
 
 	audienceFilter := store.AudienceType(req.GetAudience())

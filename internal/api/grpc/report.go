@@ -56,7 +56,7 @@ func (s *ReportServer) GetDashboardMetrics(ctx context.Context, _ *pb.GetDashboa
 
 	counts, err := s.postmortems.CountByStatus(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to count postmortems")
+		return nil, internalError(ctx, "failed to count postmortems", err)
 	}
 	total := 0
 	for _, n := range counts {
@@ -68,7 +68,7 @@ func (s *ReportServer) GetDashboardMetrics(ctx context.Context, _ *pb.GetDashboa
 
 	overdue, err := s.tasks.CountOverdue(ctx, time.Now())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to count overdue tasks")
+		return nil, internalError(ctx, "failed to count overdue tasks", err)
 	}
 	resp.OverdueTaskCount = int32(overdue)
 
@@ -111,7 +111,7 @@ func (s *ReportServer) ExportSEVs(ctx context.Context, req *pb.ExportSEVsRequest
 
 	records, err := s.sevs.List(ctx, filter)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list SEVs")
+		return nil, internalError(ctx, "failed to list SEVs", err)
 	}
 	if len(records) >= reportFanoutLimit {
 		return nil, status.Error(codes.ResourceExhausted, "export matched too many SEVs; narrow the filter")
@@ -119,7 +119,7 @@ func (s *ReportServer) ExportSEVs(ctx context.Context, req *pb.ExportSEVsRequest
 
 	csvBytes, err := sevsToCSV(records)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to encode CSV")
+		return nil, internalError(ctx, "failed to encode CSV", err)
 	}
 
 	return &httpbody.HttpBody{
@@ -134,7 +134,7 @@ func (s *ReportServer) ExportSEVs(ctx context.Context, req *pb.ExportSEVsRequest
 func (s *ReportServer) fetchAllSEVs(ctx context.Context) ([]*store.SEV, error) {
 	records, err := s.sevs.List(ctx, store.SEVFilter{Limit: reportFanoutLimit, ExcludeSensitive: true})
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list SEVs")
+		return nil, internalError(ctx, "failed to list SEVs", err)
 	}
 	if len(records) >= reportFanoutLimit {
 		return nil, status.Error(codes.ResourceExhausted, "too many SEVs to compute an exact report; contact an admin")

@@ -25,7 +25,7 @@ func (s *ConfigServer) GetRetentionConfig(ctx context.Context, req *pb.GetRetent
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "retention config not found for this severity level")
 		}
-		return nil, status.Error(codes.Internal, "failed to get retention config")
+		return nil, internalError(ctx, "failed to get retention config", err)
 	}
 	return retentionConfigToProto(cfg), nil
 }
@@ -49,7 +49,7 @@ func (s *ConfigServer) UpdateRetentionConfig(ctx context.Context, req *pb.Update
 		UpdatedAt: now,
 	}
 	if err := s.retention.Upsert(ctx, cfg); err != nil {
-		return nil, status.Error(codes.Internal, "failed to update retention config")
+		return nil, internalError(ctx, "failed to update retention config", err)
 	}
 
 	slog.InfoContext(ctx, "retention config updated",
@@ -62,7 +62,7 @@ func (s *ConfigServer) UpdateRetentionConfig(ctx context.Context, req *pb.Update
 func (s *ConfigServer) ListRetentionConfig(ctx context.Context, _ *pb.ListRetentionConfigRequest) (*pb.ListRetentionConfigResponse, error) {
 	cfgs, err := s.retention.List(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list retention config")
+		return nil, internalError(ctx, "failed to list retention config", err)
 	}
 	resp := &pb.ListRetentionConfigResponse{}
 	for _, cfg := range cfgs {

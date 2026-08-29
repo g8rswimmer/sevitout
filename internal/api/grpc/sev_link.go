@@ -55,13 +55,13 @@ func (s *SEVLinkServer) LinkSEVs(ctx context.Context, req *pb.LinkSEVsRequest) (
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "source SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get source SEV")
+		return nil, internalError(ctx, "failed to get source SEV", err)
 	}
 	if _, err := s.sevs.Get(ctx, req.GetTargetSevId()); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "target SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get target SEV")
+		return nil, internalError(ctx, "failed to get target SEV", err)
 	}
 
 	callerID := req.GetCreatedBy()
@@ -81,7 +81,7 @@ func (s *SEVLinkServer) LinkSEVs(ctx context.Context, req *pb.LinkSEVsRequest) (
 		if errors.Is(err, store.ErrConflict) {
 			return nil, status.Error(codes.AlreadyExists, "link already exists")
 		}
-		return nil, status.Error(codes.Internal, "failed to create link")
+		return nil, internalError(ctx, "failed to create link", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -130,7 +130,7 @@ func (s *SEVLinkServer) UnlinkSEVs(ctx context.Context, req *pb.UnlinkSEVsReques
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "link not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to delete link")
+		return nil, internalError(ctx, "failed to delete link", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -155,7 +155,7 @@ func (s *SEVLinkServer) ListLinkedSEVs(ctx context.Context, req *pb.ListLinkedSE
 
 	links, err := s.links.ListBySEVID(ctx, req.GetSevId())
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to list links")
+		return nil, internalError(ctx, "failed to list links", err)
 	}
 
 	resp := &pb.ListLinkedSEVsResponse{}

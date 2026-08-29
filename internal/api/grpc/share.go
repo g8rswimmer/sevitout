@@ -60,7 +60,7 @@ func (s *ShareServer) CreateShareLink(ctx context.Context, req *pb.CreateShareLi
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "SEV not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get SEV")
+		return nil, internalError(ctx, "failed to get SEV", err)
 	}
 
 	// §14.1: "Sensitive SEVs cannot have shareable links generated."
@@ -76,7 +76,7 @@ func (s *ShareServer) CreateShareLink(ctx context.Context, req *pb.CreateShareLi
 
 	token, err := s.signer.Sign(req.GetSevId(), expiresAt)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to sign share token")
+		return nil, internalError(ctx, "failed to sign share token", err)
 	}
 
 	callerID := req.GetCreatedBy()
@@ -93,7 +93,7 @@ func (s *ShareServer) CreateShareLink(ctx context.Context, req *pb.CreateShareLi
 		CreatedAt: now,
 	}
 	if err := s.shares.Create(ctx, link); err != nil {
-		return nil, status.Error(codes.Internal, "failed to create share link")
+		return nil, internalError(ctx, "failed to create share link", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
@@ -119,7 +119,7 @@ func (s *ShareServer) RevokeShareLink(ctx context.Context, req *pb.RevokeShareLi
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "share link not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to get share link")
+		return nil, internalError(ctx, "failed to get share link", err)
 	}
 	if link.SEVID != req.GetSevId() {
 		return nil, status.Error(codes.InvalidArgument, "token does not belong to sev_id")
@@ -134,7 +134,7 @@ func (s *ShareServer) RevokeShareLink(ctx context.Context, req *pb.RevokeShareLi
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, "share link not found")
 		}
-		return nil, status.Error(codes.Internal, "failed to revoke share link")
+		return nil, internalError(ctx, "failed to revoke share link", err)
 	}
 
 	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
