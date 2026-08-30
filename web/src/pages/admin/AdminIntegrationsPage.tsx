@@ -55,6 +55,20 @@ function knownLabel(type: string): string {
   return KNOWN_INTEGRATIONS.find((k) => k.value === type)?.label ?? type
 }
 
+/** Builds the settings rows to show for known's type: any already-stored
+ * values first (via existingSettings, preserving whatever isn't in
+ * known.settingsKeys too — e.g. a value set before that key existed), then
+ * an empty row appended for every well-known key (required or optional)
+ * that isn't already present, so every well-known key is always a visible,
+ * editable field — not just mentioned in the hint text below. */
+function settingsRowsFor(known: (typeof KNOWN_INTEGRATIONS)[number] | undefined, existingSettings?: Record<string, string>): TagRow[] {
+  const rows = recordToTagRows(existingSettings)
+  for (const s of known?.settingsKeys ?? []) {
+    if (!rows.some((r) => r.key === s.key)) rows.push({ key: s.key, value: '' })
+  }
+  return rows
+}
+
 export function AdminIntegrationsPage() {
   const queryClient = useQueryClient()
   const configs = useQuery({ queryKey: ['admin', 'integrations'], queryFn: api.config.integrations.list })
@@ -73,11 +87,7 @@ export function AdminIntegrationsPage() {
     setTypeSelect(v)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === v)
     setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
-    // Only pre-seed required settings keys — an optional one (e.g. Jira's
-    // site_url) is left for the admin to add via "Add tag" if they want it,
-    // rather than cluttering the form with an empty row for every config.
-    const requiredSettings = known?.settingsKeys?.filter((s) => s.required) ?? []
-    setSettings(requiredSettings.map((s) => ({ key: s.key, value: '' })))
+    setSettings(settingsRowsFor(known))
   }
 
   const upsertMutation = useMutation({
@@ -99,7 +109,7 @@ export function AdminIntegrationsPage() {
     setCustomType(KNOWN_INTEGRATIONS.some((k) => k.value === type) ? '' : type)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === type)
     setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
-    setSettings(recordToTagRows(existingSettings))
+    setSettings(settingsRowsFor(known, existingSettings))
     setFormError(null)
   }
 

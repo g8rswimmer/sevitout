@@ -89,14 +89,14 @@ describe('AdminIntegrationsPage', () => {
 
     expect(screen.getByDisplayValue('api_token')).toBeInTheDocument()
     expect(screen.getByDisplayValue('cloud_id')).toBeInTheDocument()
-    // site_url is optional (cosmetic browse-link generation only) — it's
-    // mentioned in the hint but not pre-seeded as a row, unlike cloud_id.
+    // site_url is optional (cosmetic browse-link generation only) but still
+    // shown as its own editable row, not just mentioned in the hint text.
     expect(screen.getByText(/"site_url" \(optional\)/)).toBeInTheDocument()
-    expect(screen.queryByDisplayValue('site_url')).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue('site_url')).toBeInTheDocument()
 
-    // Both the credentials and settings sections render a "Tag value" input
-    // once Jira is selected (one row each, pre-filled with its well-known
-    // key) — the first is the credentials row.
+    // The credentials section (1 row: api_token) and the settings section
+    // (2 rows: cloud_id, site_url) each render "Tag value" inputs once Jira
+    // is selected — the first belongs to the credentials row.
     const [credentialValueInput] = screen.getAllByLabelText('Tag value')
     await user.type(credentialValueInput, 'jira-secret-token')
     await user.click(screen.getByRole('button', { name: /save integration/i }))
