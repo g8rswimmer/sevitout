@@ -109,11 +109,10 @@ func TestGitHubIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigure
 }
 
 // TestGitHubIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback
-// covers the failure-signaling this resolver needs, unlike onCallResolver:
-// IssueClient has no "not configured" contract for CreateIssue to return
-// cleanly, so a RefreshIntegrationCredentials call that can't actually
-// enable the datastore path must say so — ConfigServer treats a non-nil
-// return as the write having failed and rolls it back (see
+// covers the failure-signaling every *Resolver type needs: a
+// RefreshIntegrationCredentials call that can't actually enable the
+// datastore path must say so — ConfigServer treats a non-nil return as the
+// write having failed and rolls it back (see
 // IntegrationCredentialsRefresher's doc comment).
 func TestGitHubIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback(t *testing.T) {
 	fallbackIssue := &grpchandler.CreatedIssue{Number: 1}

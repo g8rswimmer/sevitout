@@ -11,7 +11,7 @@ import (
 )
 
 // githubIssueResolver implements both grpchandler.IssueClient and
-// grpchandler.IntegrationCredentialsRefresher — see onCallResolver's doc
+// grpchandler.IntegrationCredentialsRefresher — see pagerdutyResolver's doc
 // comment for the resolve-once-at-startup, refresh-by-direct-handoff
 // rationale this mirrors.
 type githubIssueResolver struct {
@@ -22,7 +22,7 @@ type githubIssueResolver struct {
 }
 
 // newGitHubIssueResolver resolves current from the datastore once,
-// immediately — see newOnCallResolver. A startup fallback (nothing usable
+// immediately — see newPagerdutyResolver. A startup fallback (nothing usable
 // in the datastore yet) is expected, ordinary operation, not reported as an
 // error — there's no request yet whose caller could be told about it the
 // way RefreshIntegrationCredentials's caller can.
@@ -53,13 +53,16 @@ func (r *githubIssueResolver) apply(credentials map[string]string) (usedFallback
 // RefreshIntegrationCredentials applies a new "github" credential the moment
 // ConfigServer.UpsertIntegrationConfig saves one; calls for any other
 // integration_type are ignored, since this resolver owns only GitHub issue
-// creation. Unlike onCallResolver (where "nobody on-call" is a valid,
-// expected steady state), IssueClient has no such contract — every
-// CreateIssue call is expected to either succeed or report a real failure —
-// so falling back here is reported as an error: the credentials/settings
-// ConfigServer just persisted don't actually enable the datastore path,
-// which ConfigServer treats as the write having failed (see
-// IntegrationCredentialsRefresher's doc comment) and rolls back.
+// creation. Falling back here is reported as an error, the same as
+// pagerdutyResolver/jiraIssueResolver: it means the credentials ConfigServer
+// just persisted don't actually enable the datastore path, which
+// ConfigServer treats as the write having failed (see
+// IntegrationCredentialsRefresher's doc comment) and rolls back. IssueClient
+// has no "not configured" contract the way OnCaller.OnCallLookup does —
+// every CreateIssue call is expected to either succeed or report a real
+// failure — but that's a statement about what CreateIssue itself returns at
+// runtime, not about whether this config write took effect, which is what's
+// being reported here.
 func (r *githubIssueResolver) RefreshIntegrationCredentials(_ context.Context, integrationType string, credentials map[string]string, _ map[string]any) error {
 	if integrationType != "github" {
 		return nil

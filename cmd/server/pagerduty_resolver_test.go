@@ -9,7 +9,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
 
-func TestOnCallResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *testing.T) {
+func TestPagerdutyResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore()
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 	putIntegrationConfig(t, integrations, enc, "pagerduty", map[string]string{"api_key": "pd_live_key"}, nil)
@@ -23,7 +23,7 @@ func TestOnCallResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *testing
 	}
 
 	fallback := &fakeOnCaller{name: "static-fallback"}
-	resolver := newOnCallResolver(context.Background(), integrations, enc, fallback)
+	resolver := newPagerdutyResolver(context.Background(), integrations, enc, fallback)
 
 	got, err := resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {
@@ -40,12 +40,12 @@ func TestOnCallResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *testing
 	}
 }
 
-func TestOnCallResolver_NoDatastoreRowAtStartup_FallsBack(t *testing.T) {
+func TestPagerdutyResolver_NoDatastoreRowAtStartup_FallsBack(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore() // no "pagerduty" row upserted
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
 	fallback := &fakeOnCaller{name: "static-fallback"}
-	resolver := newOnCallResolver(context.Background(), integrations, enc, fallback)
+	resolver := newPagerdutyResolver(context.Background(), integrations, enc, fallback)
 
 	got, err := resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {
@@ -56,14 +56,14 @@ func TestOnCallResolver_NoDatastoreRowAtStartup_FallsBack(t *testing.T) {
 	}
 }
 
-func TestOnCallResolver_DatastoreRowMissingCredentialAtStartup_FallsBack(t *testing.T) {
+func TestPagerdutyResolver_DatastoreRowMissingCredentialAtStartup_FallsBack(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore()
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 	// Row exists but has no credentials at all (e.g. a settings-only row).
 	putIntegrationConfig(t, integrations, enc, "pagerduty", nil, map[string]any{"note": "placeholder"})
 
 	fallback := &fakeOnCaller{name: "static-fallback"}
-	resolver := newOnCallResolver(context.Background(), integrations, enc, fallback)
+	resolver := newPagerdutyResolver(context.Background(), integrations, enc, fallback)
 
 	got, err := resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {
@@ -74,14 +74,14 @@ func TestOnCallResolver_DatastoreRowMissingCredentialAtStartup_FallsBack(t *test
 	}
 }
 
-func TestOnCallResolver_DecryptionFailsAtStartup_FallsBackWithoutError(t *testing.T) {
+func TestPagerdutyResolver_DecryptionFailsAtStartup_FallsBackWithoutError(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore()
 	writeKeyEnc := crypto.NewKeyEncryptor(mustKey(t))
 	readKeyEnc := crypto.NewKeyEncryptor(mustKey(t)) // different key: decryption will fail
 	putIntegrationConfig(t, integrations, writeKeyEnc, "pagerduty", map[string]string{"api_key": "pd_live_key"}, nil)
 
 	fallback := &fakeOnCaller{name: "static-fallback"}
-	resolver := newOnCallResolver(context.Background(), integrations, readKeyEnc, fallback)
+	resolver := newPagerdutyResolver(context.Background(), integrations, readKeyEnc, fallback)
 
 	got, err := resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {
@@ -92,11 +92,11 @@ func TestOnCallResolver_DecryptionFailsAtStartup_FallsBackWithoutError(t *testin
 	}
 }
 
-func TestOnCallResolver_NeitherConfigured_ReturnsEmpty(t *testing.T) {
+func TestPagerdutyResolver_NeitherConfigured_ReturnsEmpty(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore()
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
-	resolver := newOnCallResolver(context.Background(), integrations, enc, nil)
+	resolver := newPagerdutyResolver(context.Background(), integrations, enc, nil)
 
 	got, err := resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {
@@ -107,19 +107,56 @@ func TestOnCallResolver_NeitherConfigured_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestOnCallResolver_RefreshAppliesCredentialsDirectlyWithoutRestart is the
-// core behavior this design exists for: a resolver constructed before any
-// datastore config existed (so it started on the static fallback) picks up
-// a credential handed to it via RefreshIntegrationCredentials — the same
-// call ConfigServer.UpsertIntegrationConfig makes, with the plaintext
-// credentials it's about to persist — with no new construction and no
-// datastore read at all on this resolver's part.
-func TestOnCallResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *testing.T) {
+// TestPagerdutyResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback
+// covers the failure-signaling this resolver needs at config-write time —
+// see the equivalent GitHub resolver test for the full rationale. This is
+// distinct from OnCallLookup's own "nobody on-call" contract, which stays
+// nil-error regardless (checked below).
+func TestPagerdutyResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback(t *testing.T) {
+	fallback := &fakeOnCaller{name: "static-fallback"}
+	resolver := newPagerdutyResolver(context.Background(), memory.NewIntegrationConfigStore(), crypto.NewKeyEncryptor(mustKey(t)), fallback)
+
+	err := resolver.RefreshIntegrationCredentials(context.Background(), "pagerduty", map[string]string{"api_key": ""}, nil)
+	if err == nil {
+		t.Fatal("RefreshIntegrationCredentials with no usable api_key should return an error")
+	}
+
+	got, lookupErr := resolver.OnCallLookup(context.Background(), "svc-1")
+	if lookupErr != nil {
+		t.Fatalf("OnCallLookup: %v", lookupErr)
+	}
+	if got != "static-fallback" {
+		t.Errorf("OnCallLookup after a rejected refresh = %q, want the fallback still in use", got)
+	}
+}
+
+// TestPagerdutyResolver_RefreshWithValidCredentials_ReturnsNilError is the
+// success-path counterpart to the test above.
+func TestPagerdutyResolver_RefreshWithValidCredentials_ReturnsNilError(t *testing.T) {
+	origNewPagerdutyOnCaller := newPagerdutyOnCaller
+	t.Cleanup(func() { newPagerdutyOnCaller = origNewPagerdutyOnCaller })
+	newPagerdutyOnCaller = func(string) grpchandler.OnCaller { return &fakeOnCaller{} }
+
+	resolver := newPagerdutyResolver(context.Background(), memory.NewIntegrationConfigStore(), crypto.NewKeyEncryptor(mustKey(t)), nil)
+
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "pagerduty", map[string]string{"api_key": "pd_live_key"}, nil); err != nil {
+		t.Errorf("RefreshIntegrationCredentials with a usable api_key = %v, want nil", err)
+	}
+}
+
+// TestPagerdutyResolver_RefreshAppliesCredentialsDirectlyWithoutRestart is
+// the core behavior this design exists for: a resolver constructed before
+// any datastore config existed (so it started on the static fallback)
+// picks up a credential handed to it via RefreshIntegrationCredentials —
+// the same call ConfigServer.UpsertIntegrationConfig makes, with the
+// plaintext credentials it's about to persist — with no new construction
+// and no datastore read at all on this resolver's part.
+func TestPagerdutyResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore() // never written to in this test
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
 	fallback := &fakeOnCaller{name: "static-fallback"}
-	resolver := newOnCallResolver(context.Background(), integrations, enc, fallback)
+	resolver := newPagerdutyResolver(context.Background(), integrations, enc, fallback)
 
 	got, err := resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {

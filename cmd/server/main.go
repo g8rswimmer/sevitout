@@ -156,7 +156,7 @@ func main() {
 	// below is given the same three resolvers as Refreshers so it can tell
 	// them to re-resolve immediately after an admin edits that integration's
 	// config via the Config API, rather than only on the next restart. ---
-	pagerdutyResolver := newOnCallResolver(ctx, stores.IntegrationConfig, encryptor, onCaller)
+	pagerdutyResolver := newPagerdutyResolver(ctx, stores.IntegrationConfig, encryptor, onCaller)
 	githubResolver := newGitHubIssueResolver(ctx, stores.IntegrationConfig, encryptor, issueClient)
 	jiraResolver := newJiraIssueResolver(ctx, stores.IntegrationConfig, encryptor, jiraClient)
 	onCaller = pagerdutyResolver
