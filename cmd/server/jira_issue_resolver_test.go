@@ -114,6 +114,57 @@ func TestJiraIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigured(
 	}
 }
 
+// TestJiraIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback
+// covers the failure-signaling this resolver needs — see the equivalent
+// GitHub resolver test for the full rationale. Jira needs two values
+// (api_token, cloud_id), so both "only one present" cases are covered.
+func TestJiraIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback(t *testing.T) {
+	tests := []struct {
+		name        string
+		credentials map[string]string
+		settings    map[string]any
+	}{
+		{"missing api_token", map[string]string{}, map[string]any{"cloud_id": "cloud-123"}},
+		{"missing cloud_id", map[string]string{"api_token": "jira_live_token"}, map[string]any{}},
+		{"neither", map[string]string{}, map[string]any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fallbackIssue := &grpchandler.CreatedIssue{Key: "FALLBACK-1"}
+			fallback := &fakeJiraIssueClient{issue: fallbackIssue}
+			resolver := newJiraIssueResolver(context.Background(), memory.NewIntegrationConfigStore(), crypto.NewKeyEncryptor(mustKey(t)), fallback)
+
+			if err := resolver.RefreshIntegrationCredentials(context.Background(), "jira", tt.credentials, tt.settings); err == nil {
+				t.Fatal("RefreshIntegrationCredentials with incomplete credentials/settings should return an error")
+			}
+
+			got, createErr := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+			if createErr != nil {
+				t.Fatalf("CreateIssue: %v", createErr)
+			}
+			if got != fallbackIssue {
+				t.Errorf("CreateIssue after a rejected refresh = %+v, want the fallback still in use", got)
+			}
+		})
+	}
+}
+
+// TestJiraIssueResolver_RefreshWithValidCredentials_ReturnsNilError is the
+// success-path counterpart to the test above.
+func TestJiraIssueResolver_RefreshWithValidCredentials_ReturnsNilError(t *testing.T) {
+	origNewJiraIssueClientFn := newJiraIssueClientFn
+	t.Cleanup(func() { newJiraIssueClientFn = origNewJiraIssueClientFn })
+	newJiraIssueClientFn = func(string, string) grpchandler.JiraIssueClient { return &fakeJiraIssueClient{} }
+
+	resolver := newJiraIssueResolver(context.Background(), memory.NewIntegrationConfigStore(), crypto.NewKeyEncryptor(mustKey(t)), nil)
+
+	err := resolver.RefreshIntegrationCredentials(context.Background(), "jira",
+		map[string]string{"api_token": "jira_live_token"}, map[string]any{"cloud_id": "cloud-123"})
+	if err != nil {
+		t.Errorf("RefreshIntegrationCredentials with complete credentials/settings = %v, want nil", err)
+	}
+}
+
 // TestJiraIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart is
 // the core behavior this design exists for — see the OnCaller resolver's
 // equivalent test for the full rationale.

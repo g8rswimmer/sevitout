@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
@@ -21,7 +22,10 @@ type jiraIssueResolver struct {
 }
 
 // newJiraIssueResolver resolves current from the datastore once,
-// immediately — see newOnCallResolver.
+// immediately — see newOnCallResolver. A startup fallback (nothing usable
+// in the datastore yet) is expected, ordinary operation, not reported as an
+// error — there's no request yet whose caller could be told about it the
+// way RefreshIntegrationCredentials's caller can.
 func newJiraIssueResolver(ctx context.Context, integrations store.IntegrationConfigStore, crypto grpchandler.Encryptor, fallback grpchandler.JiraIssueClient) *jiraIssueResolver {
 	r := &jiraIssueResolver{fallback: fallback}
 	creds, settings, _ := resolveIntegrationCredentials(ctx, integrations, crypto, "jira")
@@ -30,29 +34,42 @@ func newJiraIssueResolver(ctx context.Context, integrations store.IntegrationCon
 }
 
 // apply picks what current should point to given credentials/settings
-// already known to be plaintext and current, and swaps it in under mu.
-func (r *jiraIssueResolver) apply(credentials map[string]string, settings map[string]any) {
+// already known to be plaintext and current, swaps it in under mu, and
+// reports whether it had to fall back to the static client
+// (usedFallback=true, including when fallback is itself nil) rather than a
+// datastore-configured one.
+func (r *jiraIssueResolver) apply(credentials map[string]string, settings map[string]any) (usedFallback bool) {
 	next := r.fallback
+	usedFallback = true
 	apiToken := credentials["api_token"]
 	cloudID, _ := settings["cloud_id"].(string)
 	if apiToken != "" && cloudID != "" {
 		next = newJiraIssueClientFn(cloudID, apiToken)
+		usedFallback = false
 	}
 	r.mu.Lock()
 	r.current = next
 	r.mu.Unlock()
+	return usedFallback
 }
 
 // RefreshIntegrationCredentials applies a new "jira" credential/setting pair
 // the moment ConfigServer.UpsertIntegrationConfig saves one; calls for any
 // other integration_type are ignored, since this resolver owns only Jira
-// issue creation — see onCallResolver.RefreshIntegrationCredentials's doc
-// comment for the error-return rationale.
+// issue creation. Unlike onCallResolver (where "nobody on-call" is a valid,
+// expected steady state), JiraIssueClient has no such contract — every
+// CreateIssue call is expected to either succeed or report a real failure —
+// so falling back here is reported as an error: the credentials/settings
+// ConfigServer just persisted don't actually enable the datastore path,
+// which ConfigServer treats as the write having failed (see
+// IntegrationCredentialsRefresher's doc comment) and rolls back.
 func (r *jiraIssueResolver) RefreshIntegrationCredentials(_ context.Context, integrationType string, credentials map[string]string, settings map[string]any) error {
 	if integrationType != "jira" {
 		return nil
 	}
-	r.apply(credentials, settings)
+	if usedFallback := r.apply(credentials, settings); usedFallback {
+		return fmt.Errorf("jira: need both \"api_token\" (credentials) and \"cloud_id\" (settings); falling back to the static configuration")
+	}
 	return nil
 }
 

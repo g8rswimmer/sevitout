@@ -108,6 +108,46 @@ func TestGitHubIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigure
 	}
 }
 
+// TestGitHubIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback
+// covers the failure-signaling this resolver needs, unlike onCallResolver:
+// IssueClient has no "not configured" contract for CreateIssue to return
+// cleanly, so a RefreshIntegrationCredentials call that can't actually
+// enable the datastore path must say so — ConfigServer treats a non-nil
+// return as the write having failed and rolls it back (see
+// IntegrationCredentialsRefresher's doc comment).
+func TestGitHubIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesFallback(t *testing.T) {
+	fallbackIssue := &grpchandler.CreatedIssue{Number: 1}
+	fallback := &fakeIssueClient{issue: fallbackIssue}
+	resolver := newGitHubIssueResolver(context.Background(), memory.NewIntegrationConfigStore(), crypto.NewKeyEncryptor(mustKey(t)), fallback)
+
+	err := resolver.RefreshIntegrationCredentials(context.Background(), "github", map[string]string{"token": ""}, nil)
+	if err == nil {
+		t.Fatal("RefreshIntegrationCredentials with no usable token should return an error")
+	}
+
+	got, createErr := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	if createErr != nil {
+		t.Fatalf("CreateIssue: %v", createErr)
+	}
+	if got != fallbackIssue {
+		t.Errorf("CreateIssue after a rejected refresh = %+v, want the fallback still in use", got)
+	}
+}
+
+// TestGitHubIssueResolver_RefreshWithValidCredentials_ReturnsNilError is the
+// success-path counterpart to the test above.
+func TestGitHubIssueResolver_RefreshWithValidCredentials_ReturnsNilError(t *testing.T) {
+	origNewGitHubIssueClient := newGitHubIssueClient
+	t.Cleanup(func() { newGitHubIssueClient = origNewGitHubIssueClient })
+	newGitHubIssueClient = func(string) grpchandler.IssueClient { return &fakeIssueClient{} }
+
+	resolver := newGitHubIssueResolver(context.Background(), memory.NewIntegrationConfigStore(), crypto.NewKeyEncryptor(mustKey(t)), nil)
+
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "github", map[string]string{"token": "ghp_live_token"}, nil); err != nil {
+		t.Errorf("RefreshIntegrationCredentials with a usable token = %v, want nil", err)
+	}
+}
+
 // TestGitHubIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart is
 // the core behavior this design exists for — see the OnCaller resolver's
 // equivalent test for the full rationale.
