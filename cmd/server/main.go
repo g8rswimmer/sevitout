@@ -76,36 +76,36 @@ func main() {
 		os.Exit(1)
 	}
 
-	// --- PagerDuty client (optional) ---
+	// --- PagerDuty client (optional, static fallback) ---
 	var onCaller grpchandler.OnCaller
 	if cfg.PagerDutyAPIKey != "" {
 		onCaller = pagerduty.NewClient(cfg.PagerDutyAPIKey)
-		log.Info("PagerDuty on-call integration enabled")
+		log.Info("PagerDuty on-call integration enabled (static)")
 	}
 
-	// --- GitHub client (optional) ---
+	// --- GitHub client (optional, static fallback) ---
 	var issueClient grpchandler.IssueClient
 	if cfg.GitHubToken != "" {
 		issueClient = &githubIssueClient{c: github.NewClient(cfg.GitHubToken)}
-		log.Info("GitHub Issues integration enabled")
+		log.Info("GitHub Issues integration enabled (static)")
 	} else {
-		log.Info("GitHub Issues integration DISABLED")
+		log.Info("GitHub Issues integration DISABLED (static)")
 	}
 
-	// --- Jira client (optional) --- both JIRA_CLOUD_ID and JIRA_API_TOKEN
-	// are required together (unlike GitHub's single GITHUB_TOKEN — see
-	// config.Config.JiraCloudID's doc comment for why); partial
-	// configuration is treated the same as none rather than starting with a
-	// client that would fail every call. JIRA_SITE_URL is independently
-	// optional (see config.Config.JiraSiteURL's doc comment) — passed
-	// through either way, since jira.NewClient treats "" as "no browse
-	// links" rather than an error.
+	// --- Jira client (optional, static fallback) --- both JIRA_CLOUD_ID and
+	// JIRA_API_TOKEN are required together (unlike GitHub's single
+	// GITHUB_TOKEN — see config.Config.JiraCloudID's doc comment for why);
+	// partial configuration is treated the same as none rather than starting
+	// with a client that would fail every call. JIRA_SITE_URL is
+	// independently optional (see config.Config.JiraSiteURL's doc comment) —
+	// passed through either way, since jira.NewClient treats "" as "no
+	// browse links" rather than an error.
 	var jiraClient grpchandler.JiraIssueClient
 	if cfg.JiraCloudID != "" && cfg.JiraAPIToken != "" {
 		jiraClient = &jiraIssueClient{c: jira.NewClient(cfg.JiraCloudID, cfg.JiraAPIToken, cfg.JiraSiteURL)}
-		log.Info("Jira integration enabled")
+		log.Info("Jira integration enabled (static)")
 	} else {
-		log.Info("Jira integration DISABLED")
+		log.Info("Jira integration DISABLED (static)")
 	}
 
 	// --- JWT signer ---
@@ -147,6 +147,16 @@ func main() {
 	} else {
 		log.Warn("ENCRYPTION_KEY not set — integration credentials cannot be stored")
 	}
+
+	// --- Prefer datastore-configured credentials over the static clients
+	// built above, per integration, falling back to the static client (which
+	// may itself be nil) whenever the Config API has no usable credentials
+	// for that integration type. Each resolver hits stores.IntegrationConfig
+	// fresh on every call (no caching), so a credential added or changed via
+	// the Config API takes effect on the next request with no restart. ---
+	onCaller = newOnCallResolver(stores.IntegrationConfig, encryptor, onCaller)
+	issueClient = newGitHubIssueResolver(stores.IntegrationConfig, encryptor, issueClient)
+	jiraClient = newJiraIssueResolver(stores.IntegrationConfig, encryptor, jiraClient)
 
 	// --- WebSocket hub: room-per-SEV pub/sub fed by the mutation handlers below ---
 	wsHub := ws.NewHub()

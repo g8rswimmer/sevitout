@@ -782,6 +782,31 @@ func TestCreateGitHubIssue_GitHubError(t *testing.T) {
 	}
 }
 
+// TestCreateGitHubIssue_NotConfiguredMapsToUnavailable covers an IssueClient
+// (e.g. one of cmd/server's *Resolver types) reporting that neither a
+// datastore-configured nor a static env-var-configured credential is
+// available: this must map to Unavailable, not be run through
+// githubIssueError's HTTP-status mapping (which assumes a real HTTP response
+// was involved).
+func TestCreateGitHubIssue_NotConfiguredMapsToUnavailable(t *testing.T) {
+	gh := &fakeIssueClient{err: grpchandler.ErrIntegrationNotConfigured}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	_, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId:            sevID,
+		Owner:            "acme",
+		Repo:             "api",
+		Title:            "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if grpcCode(err) != codes.Unavailable {
+		t.Errorf("want Unavailable when the IssueClient reports ErrIntegrationNotConfigured, got %v (%v)", grpcCode(err), err)
+	}
+}
+
 func TestCreateGitHubIssue_DuplicateLinkReturnsAlreadyExists(t *testing.T) {
 	gh := &fakeIssueClient{issue: &grpchandler.CreatedIssue{Number: 1, Title: "t", URL: "https://github.com/acme/api/issues/1"}}
 	ts := newTestTaskServer(gh)
@@ -955,6 +980,27 @@ func TestCreateJiraIssue_JiraError(t *testing.T) {
 	})
 	if grpcCode(err) != codes.Internal {
 		t.Errorf("want Internal on unmapped Jira error, got %v", grpcCode(err))
+	}
+}
+
+// TestCreateJiraIssue_NotConfiguredMapsToUnavailable is CreateJiraIssue's
+// counterpart to TestCreateGitHubIssue_NotConfiguredMapsToUnavailable above.
+func TestCreateJiraIssue_NotConfiguredMapsToUnavailable(t *testing.T) {
+	jira := &fakeJiraIssueClient{err: grpchandler.ErrIntegrationNotConfigured}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	_, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId:            sevID,
+		ProjectKey:       "OPS",
+		IssueType:        "Task",
+		Summary:          "issue",
+		RelationshipType: "action-item",
+		Priority:         "critical",
+	})
+	if grpcCode(err) != codes.Unavailable {
+		t.Errorf("want Unavailable when the JiraIssueClient reports ErrIntegrationNotConfigured, got %v (%v)", grpcCode(err), err)
 	}
 }
 

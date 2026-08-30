@@ -61,6 +61,15 @@ type httpStatusError interface {
 	HTTPStatus() int
 }
 
+// ErrIntegrationNotConfigured is returned by an IssueClient/JiraIssueClient
+// implementation (see the *Resolver types in cmd/server) when neither a
+// datastore-configured nor a static env-var-configured credential is
+// currently available for that tracker. CreateGitHubIssue/CreateJiraIssue
+// check for it explicitly and map it to codes.Unavailable, rather than
+// running it through githubIssueError/jiraIssueError below, which assume a
+// real HTTP response from the tracker was involved.
+var ErrIntegrationNotConfigured = errors.New("integration not configured")
+
 // TaskServer implements pb.TaskServiceServer.
 type TaskServer struct {
 	pb.UnimplementedTaskServiceServer
@@ -340,7 +349,7 @@ func (s *TaskServer) UpdateTaskDueDate(ctx context.Context, req *pb.UpdateTaskDu
 
 func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHubIssueRequest) (*pb.TaskResponse, error) {
 	if s.github == nil {
-		return nil, status.Error(codes.Unavailable, "GitHub integration is not configured (GITHUB_TOKEN not set)")
+		return nil, status.Error(codes.Unavailable, "GitHub integration is not configured (set GITHUB_TOKEN, or add credentials via the Integration Config API)")
 	}
 	if req.GetSevId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
@@ -378,6 +387,9 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		// exist and the org restricting who can create new labels. Don't
 		// let a cosmetic labeling failure block issue creation.
 		issue, err = s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), nil)
+	}
+	if errors.Is(err, ErrIntegrationNotConfigured) {
+		return nil, status.Error(codes.Unavailable, "GitHub integration is not configured (set GITHUB_TOKEN, or add credentials via the Integration Config API)")
 	}
 	if err != nil {
 		return nil, githubIssueError(err)
@@ -437,7 +449,7 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssueRequest) (*pb.TaskResponse, error) {
 	if s.jira == nil {
 		return nil, status.Error(codes.Unavailable,
-			"Jira integration is not configured (JIRA_CLOUD_ID/JIRA_API_TOKEN not set)")
+			"Jira integration is not configured (set JIRA_CLOUD_ID/JIRA_API_TOKEN, or add credentials via the Integration Config API)")
 	}
 	if req.GetSevId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
@@ -476,6 +488,9 @@ func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssu
 	// issue instead of rejecting the request, so that failure mode doesn't
 	// apply here.
 	issue, err := s.jira.CreateIssue(ctx, req.GetProjectKey(), req.GetIssueType(), req.GetSummary(), req.GetDescription(), labels)
+	if errors.Is(err, ErrIntegrationNotConfigured) {
+		return nil, status.Error(codes.Unavailable, "Jira integration is not configured (set JIRA_CLOUD_ID/JIRA_API_TOKEN, or add credentials via the Integration Config API)")
+	}
 	if err != nil {
 		return nil, jiraIssueError(err)
 	}
