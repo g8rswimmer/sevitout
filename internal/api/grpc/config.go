@@ -26,7 +26,7 @@ type RateLimitEvictor interface {
 }
 
 // IntegrationCredentialsRefresher is handed the plaintext credentials and
-// settings UpsertIntegrationConfig is about to persist for one
+// settings UpsertIntegrationConfig has just durably persisted for one
 // integrationType, so an in-process client cached from that integration's
 // credentials (see cmd/server's OnCaller/IssueClient/JiraIssueClient
 // *Resolver types) can apply them immediately — without waiting for a
@@ -38,9 +38,12 @@ type RateLimitEvictor interface {
 //
 // A non-nil error means credentials/settings could not be turned into a
 // usable client. UpsertIntegrationConfig calls every registered refresher
-// before persisting anything, so an error here means the write is rejected
-// outright — nothing is saved — rather than a config being confirmed as
-// saved when it silently isn't usable.
+// right after persisting — not before — because the credentials must
+// already be durable for a resolver to safely apply them; on error, it
+// rolls the just-written config back to what it held before the call (a
+// best-effort compensating write, not a real cross-system transaction) and
+// reports the failure, rather than confirming a save that silently isn't
+// usable.
 type IntegrationCredentialsRefresher interface {
 	RefreshIntegrationCredentials(ctx context.Context, integrationType string, credentials map[string]string, settings map[string]any) error
 }

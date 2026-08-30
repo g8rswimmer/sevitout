@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -509,7 +510,7 @@ func TestUpsertIntegrationConfig_NotifiesRefreshersWithPlaintextCredentials(t *t
 	}
 }
 
-func TestUpsertIntegrationConfig_RefreshRejects_NewIntegrationType_NothingIsSaved(t *testing.T) {
+func TestUpsertIntegrationConfig_RefreshRejects_NewIntegrationType_RollsBackToNoCredentials(t *testing.T) {
 	enc := testEncryptor(t)
 	integrations := memory.NewIntegrationConfigStore()
 	refresher := &fakeCredentialsRefresher{err: errors.New("missing required field")}
@@ -527,10 +528,16 @@ func TestUpsertIntegrationConfig_RefreshRejects_NewIntegrationType_NothingIsSave
 		t.Fatalf("UpsertIntegrationConfig err = %v, want InvalidArgument when a refresher rejects the config", err)
 	}
 
-	// Refreshers are consulted before anything is persisted, so a rejection
-	// must leave no trace at all — not even an empty row.
-	if _, getErr := integrations.Get(context.Background(), "pagerduty"); !errors.Is(getErr, store.ErrNotFound) {
-		t.Errorf("Get after a rejected write = %v, want store.ErrNotFound (nothing should have been saved)", getErr)
+	// Refreshers only run after the write is durable (so a resolver never
+	// applies credentials that could still fail to persist) — a rejection
+	// therefore rolls the row back to "no credentials" rather than leaving
+	// no trace at all, since there was no previous row to restore.
+	stored, getErr := integrations.Get(context.Background(), "pagerduty")
+	if getErr != nil {
+		t.Fatalf("Get after a rejected write: %v", getErr)
+	}
+	if len(stored.EncryptedCredentials) != 0 {
+		t.Error("a rejected write for a brand-new integration_type must roll back to no credentials, not retain the rejected ones")
 	}
 }
 
@@ -557,8 +564,8 @@ func TestUpsertIntegrationConfig_RefreshRejects_ExistingIntegrationType_Previous
 		t.Fatalf("Get original: %v", err)
 	}
 
-	// A second write with a credential the refresher rejects must never
-	// reach the store at all — the original row stays exactly as it was.
+	// A second write with a credential the refresher rejects must be rolled
+	// back after the fact — the original row ends up exactly as it was.
 	refresher.err = errors.New("missing required field")
 	_, err = server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
 		IntegrationType: "github",
@@ -619,6 +626,52 @@ func TestUpsertIntegrationConfig_SettingsOnlyUpdate_RefresherSeesExistingCredent
 	}
 	if call.settings["cloud_id"] != "cloud-456" {
 		t.Errorf("settings-only update passed settings = %v, want the new cloud_id", call.settings)
+	}
+}
+
+// TestUpsertIntegrationConfig_SettingsOnlyUpdate_ExistingCredentialsUndecryptable_Rejected
+// covers the "encrypt/decrypt fails in any way" requirement for the one
+// decrypt UpsertIntegrationConfig still performs after startup: existing
+// credentials that can no longer be decrypted (e.g. ENCRYPTION_KEY rotated
+// since they were written) must fail the request outright — before
+// anything is written or any refresher is consulted — rather than silently
+// treating the integration as unconfigured.
+func TestUpsertIntegrationConfig_SettingsOnlyUpdate_ExistingCredentialsUndecryptable_Rejected(t *testing.T) {
+	writeKeyEnc := testEncryptor(t)
+	readKeyEnc := testEncryptor(t) // different key: decryption will fail
+	integrations := memory.NewIntegrationConfigStore()
+
+	raw, err := json.Marshal(map[string]string{"api_key": "pd_live_key"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	sealed, err := writeKeyEnc.Encrypt(raw)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if err := integrations.Upsert(context.Background(), &store.IntegrationConfig{
+		IntegrationType:      "pagerduty",
+		EncryptedCredentials: sealed,
+	}); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+
+	refresher := &fakeCredentialsRefresher{}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       readKeyEnc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresher},
+	})
+
+	_, err = server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Settings:        map[string]string{"default_escalation_policy": "P999"},
+	})
+	if grpcCode(err) != codes.FailedPrecondition {
+		t.Fatalf("UpsertIntegrationConfig err = %v, want FailedPrecondition when existing credentials can't be decrypted", err)
+	}
+	if len(refresher.calls) != 0 {
+		t.Error("a refresher must not be consulted when existing credentials can't be decrypted")
 	}
 }
 
