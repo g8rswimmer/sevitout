@@ -15,13 +15,16 @@ import type { IntegrationHealthStatus } from '@/types/api'
 
 /** The integration types with a live connectivity check registered
  * server-side (cmd/server/main.go's healthCheckers map) — each also has one
- * well-known credential key its HealthChecker reads. "Other" covers any
- * integration_type not in this fixed list (e.g. a future Datadog/Prometheus
- * integration), stored and displayed exactly as typed. */
-const KNOWN_INTEGRATIONS: { value: string; label: string; credentialKey: string }[] = [
+ * well-known credential key its HealthChecker reads, and (Jira only) one
+ * well-known non-secret settings key its HealthChecker also needs alongside
+ * the credential. "Other" covers any integration_type not in this fixed
+ * list (e.g. a future Datadog/Prometheus integration), stored and displayed
+ * exactly as typed. */
+const KNOWN_INTEGRATIONS: { value: string; label: string; credentialKey: string; settingsKey?: string }[] = [
   { value: 'pagerduty', label: 'PagerDuty', credentialKey: 'api_key' },
   { value: 'github', label: 'GitHub', credentialKey: 'token' },
   { value: 'slack', label: 'Slack', credentialKey: 'bot_token' },
+  { value: 'jira', label: 'Jira', credentialKey: 'api_token', settingsKey: 'cloud_id' },
 ]
 const OTHER = '__other__'
 
@@ -53,6 +56,7 @@ export function AdminIntegrationsPage() {
     setTypeSelect(v)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === v)
     setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
+    setSettings(known?.settingsKey ? [{ key: known.settingsKey, value: '' }] : [])
   }
 
   const upsertMutation = useMutation({
@@ -186,6 +190,11 @@ export function AdminIntegrationsPage() {
 
           <div>
             <Label>Settings (non-secret)</Label>
+            {KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)?.settingsKey && (
+              <p className="mb-1.5 text-xs text-muted-foreground">
+                {`Well-known key for this type: "${KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)!.settingsKey}"`}
+              </p>
+            )}
             <TagRowsEditor rows={settings} onChange={setSettings} />
           </div>
 
