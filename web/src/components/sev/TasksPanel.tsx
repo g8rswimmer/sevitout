@@ -9,12 +9,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Section } from '@/components/sev/Section'
+import { ExternalSystemBadge } from '@/components/sev/badges'
 import { formatDateTime } from '@/lib/format'
 import { TASK_RELATIONSHIP_LABELS, type TaskPriority, type TaskRelationshipType } from '@/types/api'
 
 const RELATIONSHIP_TYPES = Object.keys(TASK_RELATIONSHIP_LABELS) as TaskRelationshipType[]
 
-type Mode = 'link' | 'github'
+type Mode = 'link' | 'github' | 'jira'
 
 /** "owner/repo" → its parts, or null if it isn't shaped that way. */
 function parseRepo(value?: string): { owner: string; repo: string } | null {
@@ -46,6 +47,8 @@ export function TasksPanel({
   const [priority, setPriority] = useState<TaskPriority>('non-critical')
   const [owner, setOwner] = useState('')
   const [repo, setRepo] = useState('')
+  const [projectKey, setProjectKey] = useState('')
+  const [issueType, setIssueType] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sevs', sevId, 'tasks'] })
@@ -92,6 +95,27 @@ export function TasksPanel({
     onError: (err) => setError(err instanceof ApiError ? err.message : 'Failed to create GitHub issue'),
   })
 
+  const createJiraIssue = useMutation({
+    mutationFn: () =>
+      api.tasks.createJiraIssue(sevId, {
+        project_key: projectKey,
+        issue_type: issueType,
+        summary: title,
+        description: description || undefined,
+        relationship_type: relationshipType,
+        priority,
+      }),
+    onSuccess: () => {
+      setProjectKey('')
+      setIssueType('')
+      setTitle('')
+      setDescription('')
+      setError(null)
+      void invalidate()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'Failed to create Jira issue'),
+  })
+
   const unlink = useMutation({
     mutationFn: (id: string) => api.tasks.unlink(sevId, id),
     onSuccess: () => void invalidate(),
@@ -123,6 +147,7 @@ export function TasksPanel({
                   <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
                 </a>
                 <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <ExternalSystemBadge system={t.external_system} />
                   <Badge variant="outline">{TASK_RELATIONSHIP_LABELS[t.relationship_type]}</Badge>
                   <Badge variant={t.priority === 'critical' ? 'destructive' : 'secondary'}>{t.priority}</Badge>
                   {t.overdue && (
@@ -172,6 +197,9 @@ export function TasksPanel({
             >
               Create GitHub issue
             </Button>
+            <Button type="button" size="sm" variant={mode === 'jira' ? 'default' : 'outline'} onClick={() => setMode('jira')}>
+              Create Jira issue
+            </Button>
           </div>
 
           <form
@@ -180,20 +208,45 @@ export function TasksPanel({
               e.preventDefault()
               if (mode === 'link' && url.trim() && title.trim()) link.mutate()
               if (mode === 'github' && owner.trim() && repo.trim() && title.trim()) createIssue.mutate()
+              if (mode === 'jira' && projectKey.trim() && issueType.trim() && title.trim()) createJiraIssue.mutate()
             }}
           >
-            {mode === 'link' ? (
+            {mode === 'link' && (
               <Input aria-label="Task URL" placeholder="https://github.com/org/repo/issues/42" value={url} onChange={(e) => setUrl(e.target.value)} />
-            ) : (
+            )}
+            {mode === 'github' && (
               <div className="flex gap-2">
                 <Input aria-label="Owner" placeholder="owner" value={owner} onChange={(e) => setOwner(e.target.value)} className="w-1/2" />
                 <Input aria-label="Repo" placeholder="repo" value={repo} onChange={(e) => setRepo(e.target.value)} className="w-1/2" />
               </div>
             )}
-            <Input aria-label="Title" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            {mode === 'jira' && (
+              <div className="flex gap-2">
+                <Input
+                  aria-label="Project key"
+                  placeholder="e.g. OPS"
+                  value={projectKey}
+                  onChange={(e) => setProjectKey(e.target.value)}
+                  className="w-1/2"
+                />
+                <Input
+                  aria-label="Issue type"
+                  placeholder="e.g. Task, Bug"
+                  value={issueType}
+                  onChange={(e) => setIssueType(e.target.value)}
+                  className="w-1/2"
+                />
+              </div>
+            )}
+            <Input
+              aria-label={mode === 'jira' ? 'Summary' : 'Title'}
+              placeholder={mode === 'jira' ? 'Summary' : 'Title'}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
             <Textarea
               aria-label="Description"
-              placeholder="Description (pre-filled with SEV context for a new GitHub issue)"
+              placeholder="Description (pre-filled with SEV context for a new issue)"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -214,14 +267,13 @@ export function TasksPanel({
                 <option value="critical">Critical</option>
                 <option value="non-critical">Non-critical</option>
               </Select>
-              <Button type="submit" size="sm" disabled={link.isPending || createIssue.isPending}>
-                {mode === 'link'
-                  ? link.isPending
-                    ? 'Linking…'
-                    : 'Link task'
-                  : createIssue.isPending
-                    ? 'Creating…'
-                    : 'Create issue'}
+              <Button type="submit" size="sm" disabled={link.isPending || createIssue.isPending || createJiraIssue.isPending}>
+                {mode === 'link' &&
+                  (link.isPending ? 'Linking…' : 'Link task')}
+                {mode === 'github' &&
+                  (createIssue.isPending ? 'Creating…' : 'Create issue')}
+                {mode === 'jira' &&
+                  (createJiraIssue.isPending ? 'Creating…' : 'Create issue')}
               </Button>
             </div>
           </form>

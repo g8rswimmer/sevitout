@@ -7,6 +7,7 @@ import type {
   CreateAnnouncementRequest,
   CreateAIPluginRequest,
   CreateGitHubIssueRequest,
+  CreateJiraIssueRequest,
   CreateOnCallRotationRequest,
   CreateSEVRequest,
   CreateServiceRequest,
@@ -321,6 +322,8 @@ export const api = {
       }),
     createGitHubIssue: (sevId: string, req: CreateGitHubIssueRequest) =>
       request<TaskResponse>(`/v1/sevs/${sevId}/github-issues`, { method: 'POST', body: JSON.stringify(req) }),
+    createJiraIssue: (sevId: string, req: CreateJiraIssueRequest) =>
+      request<TaskResponse>(`/v1/sevs/${sevId}/jira-issues`, { method: 'POST', body: JSON.stringify(req) }),
   },
   sevLinks: {
     list: (sevId: string) => request<ListLinkedSEVsResponse>(`/v1/sevs/${sevId}/links`),
