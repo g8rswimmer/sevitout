@@ -151,12 +151,17 @@ func main() {
 	// --- Prefer datastore-configured credentials over the static clients
 	// built above, per integration, falling back to the static client (which
 	// may itself be nil) whenever the Config API has no usable credentials
-	// for that integration type. Each resolver hits stores.IntegrationConfig
-	// fresh on every call (no caching), so a credential added or changed via
-	// the Config API takes effect on the next request with no restart. ---
-	onCaller = newOnCallResolver(stores.IntegrationConfig, encryptor, onCaller)
-	issueClient = newGitHubIssueResolver(stores.IntegrationConfig, encryptor, issueClient)
-	jiraClient = newJiraIssueResolver(stores.IntegrationConfig, encryptor, jiraClient)
+	// for that integration type. Each resolver resolves once here (checking
+	// stores.IntegrationConfig first) and caches the result; ConfigServer
+	// below is given the same three resolvers as Refreshers so it can tell
+	// them to re-resolve immediately after an admin edits that integration's
+	// config via the Config API, rather than only on the next restart. ---
+	pagerdutyResolver := newOnCallResolver(ctx, stores.IntegrationConfig, encryptor, onCaller)
+	githubResolver := newGitHubIssueResolver(ctx, stores.IntegrationConfig, encryptor, issueClient)
+	jiraResolver := newJiraIssueResolver(ctx, stores.IntegrationConfig, encryptor, jiraClient)
+	onCaller = pagerdutyResolver
+	issueClient = githubResolver
+	jiraClient = jiraResolver
 
 	// --- WebSocket hub: room-per-SEV pub/sub fed by the mutation handlers below ---
 	wsHub := ws.NewHub()
@@ -225,6 +230,9 @@ func main() {
 		AIPlugins:    stores.AIPlugin,
 		Crypto:       encryptor,
 		RateLimits:   aiDispatcher,
+		Refreshers: []grpchandler.IntegrationCredentialsRefresher{
+			pagerdutyResolver, githubResolver, jiraResolver,
+		},
 	})
 	aiServer := grpchandler.NewAIServer(aiDispatcher, stores.AIOutput, stores.AIPlugin)
 

@@ -25,6 +25,17 @@ type RateLimitEvictor interface {
 	EvictRateLimit(pluginID int64)
 }
 
+// IntegrationCredentialsRefresher is notified after UpsertIntegrationConfig
+// successfully writes a config row, so an in-process client cached from
+// that integration's credentials (see cmd/server's OnCaller/IssueClient/
+// JiraIssueClient *Resolver types) can be re-resolved without waiting for a
+// server restart. Declared here (the consumer) per this repo's
+// interface-ownership convention. Implementations must ignore calls for an
+// integrationType they don't own and must be safe for concurrent use.
+type IntegrationCredentialsRefresher interface {
+	RefreshIntegrationCredentials(ctx context.Context, integrationType string)
+}
+
 // ConfigServer implements pb.ConfigServiceServer: the admin configuration API
 // (service registry, user management, on-call rotations, integration
 // credentials, AI plugin registration, and data retention policy). Its
@@ -39,14 +50,15 @@ type ConfigServer struct {
 	integrations store.IntegrationConfigStore
 	retention    store.RetentionConfigStore
 	aiPlugins    store.AIPluginStore
-	crypto       Encryptor        // nil when ENCRYPTION_KEY is not set
-	rateLimits   RateLimitEvictor // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
+	crypto       Encryptor                         // nil when ENCRYPTION_KEY is not set
+	rateLimits   RateLimitEvictor                  // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
+	refreshers   []IntegrationCredentialsRefresher // notified after every successful UpsertIntegrationConfig
 }
 
 // ConfigServerParams groups NewConfigServer's dependencies. Crypto may be
 // nil, in which case UpsertIntegrationConfig and CreateAIPlugin/
 // UpdateAIPlugin reject any request that supplies credentials/an API key.
-// RateLimits may also be nil.
+// RateLimits and Refreshers may also be nil/empty.
 type ConfigServerParams struct {
 	Services     store.ServiceStore
 	Users        store.UserStore
@@ -56,6 +68,7 @@ type ConfigServerParams struct {
 	AIPlugins    store.AIPluginStore
 	Crypto       Encryptor
 	RateLimits   RateLimitEvictor
+	Refreshers   []IntegrationCredentialsRefresher
 }
 
 func NewConfigServer(p ConfigServerParams) *ConfigServer {
@@ -68,6 +81,7 @@ func NewConfigServer(p ConfigServerParams) *ConfigServer {
 		aiPlugins:    p.AIPlugins,
 		crypto:       p.Crypto,
 		rateLimits:   p.RateLimits,
+		refreshers:   p.Refreshers,
 	}
 }
 

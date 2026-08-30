@@ -10,7 +10,7 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
 
-func TestJiraIssueResolver_DatastoreConfigured_PrefersDatastore(t *testing.T) {
+func TestJiraIssueResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore()
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 	putIntegrationConfig(t, integrations, enc, "jira",
@@ -27,7 +27,7 @@ func TestJiraIssueResolver_DatastoreConfigured_PrefersDatastore(t *testing.T) {
 	}
 
 	fallback := &fakeJiraIssueClient{issue: &grpchandler.CreatedIssue{Key: "OTHER-1"}}
-	resolver := newJiraIssueResolver(integrations, enc, fallback)
+	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
 
 	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
 	if err != nil {
@@ -45,13 +45,13 @@ func TestJiraIssueResolver_DatastoreConfigured_PrefersDatastore(t *testing.T) {
 	}
 }
 
-func TestJiraIssueResolver_NoDatastoreRow_FallsBack(t *testing.T) {
+func TestJiraIssueResolver_NoDatastoreRowAtStartup_FallsBack(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore() // no "jira" row upserted
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
 	wantIssue := &grpchandler.CreatedIssue{Key: "PROJ-1"}
 	fallback := &fakeJiraIssueClient{issue: wantIssue}
-	resolver := newJiraIssueResolver(integrations, enc, fallback)
+	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
 
 	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
 	if err != nil {
@@ -62,7 +62,7 @@ func TestJiraIssueResolver_NoDatastoreRow_FallsBack(t *testing.T) {
 	}
 }
 
-func TestJiraIssueResolver_DatastoreRowMissingCloudID_FallsBack(t *testing.T) {
+func TestJiraIssueResolver_DatastoreRowMissingCloudIDAtStartup_FallsBack(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore()
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 	// api_token present but cloud_id missing from settings — Jira needs both.
@@ -70,7 +70,7 @@ func TestJiraIssueResolver_DatastoreRowMissingCloudID_FallsBack(t *testing.T) {
 
 	wantIssue := &grpchandler.CreatedIssue{Key: "PROJ-1"}
 	fallback := &fakeJiraIssueClient{issue: wantIssue}
-	resolver := newJiraIssueResolver(integrations, enc, fallback)
+	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
 
 	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestJiraIssueResolver_DatastoreRowMissingCloudID_FallsBack(t *testing.T) {
 	}
 }
 
-func TestJiraIssueResolver_DecryptionFails_FallsBackWithoutError(t *testing.T) {
+func TestJiraIssueResolver_DecryptionFailsAtStartup_FallsBackWithoutError(t *testing.T) {
 	integrations := memory.NewIntegrationConfigStore()
 	writeKeyEnc := crypto.NewKeyEncryptor(mustKey(t))
 	readKeyEnc := crypto.NewKeyEncryptor(mustKey(t)) // different key: decryption will fail
@@ -91,7 +91,7 @@ func TestJiraIssueResolver_DecryptionFails_FallsBackWithoutError(t *testing.T) {
 
 	wantIssue := &grpchandler.CreatedIssue{Key: "PROJ-1"}
 	fallback := &fakeJiraIssueClient{issue: wantIssue}
-	resolver := newJiraIssueResolver(integrations, readKeyEnc, fallback)
+	resolver := newJiraIssueResolver(context.Background(), integrations, readKeyEnc, fallback)
 
 	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
 	if err != nil {
@@ -106,10 +106,59 @@ func TestJiraIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigured(
 	integrations := memory.NewIntegrationConfigStore()
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
-	resolver := newJiraIssueResolver(integrations, enc, nil)
+	resolver := newJiraIssueResolver(context.Background(), integrations, enc, nil)
 
 	_, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
 	if !errors.Is(err, grpchandler.ErrIntegrationNotConfigured) {
 		t.Errorf("CreateIssue err = %v, want ErrIntegrationNotConfigured", err)
+	}
+}
+
+// TestJiraIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart is the
+// core behavior this caching design exists for — see the OnCaller resolver's
+// equivalent test for the full rationale.
+func TestJiraIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testing.T) {
+	integrations := memory.NewIntegrationConfigStore()
+	enc := crypto.NewKeyEncryptor(mustKey(t))
+
+	fallbackIssue := &grpchandler.CreatedIssue{Key: "FALLBACK-1"}
+	fallback := &fakeJiraIssueClient{issue: fallbackIssue}
+	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
+
+	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if got != fallbackIssue {
+		t.Fatalf("CreateIssue before config exists = %+v, want fallback", got)
+	}
+
+	origNewJiraIssueClientFn := newJiraIssueClientFn
+	t.Cleanup(func() { newJiraIssueClientFn = origNewJiraIssueClientFn })
+	datastoreIssue := &grpchandler.CreatedIssue{Key: "PROJ-1"}
+	newJiraIssueClientFn = func(cloudID, apiToken string) grpchandler.JiraIssueClient {
+		return &fakeJiraIssueClient{issue: datastoreIssue}
+	}
+	putIntegrationConfig(t, integrations, enc, "jira",
+		map[string]string{"api_token": "jira_live_token"},
+		map[string]any{"cloud_id": "cloud-123"})
+
+	// Refreshing for an unrelated integration type must be a no-op.
+	resolver.RefreshIntegrationCredentials(context.Background(), "github")
+	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if got != fallbackIssue {
+		t.Errorf("CreateIssue after an unrelated refresh = %+v, want still fallback", got)
+	}
+
+	resolver.RefreshIntegrationCredentials(context.Background(), "jira")
+	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if got != datastoreIssue {
+		t.Errorf("CreateIssue after RefreshIntegrationCredentials(\"jira\") = %+v, want %+v", got, datastoreIssue)
 	}
 }

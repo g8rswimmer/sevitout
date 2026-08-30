@@ -77,6 +77,13 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 		return nil, internalError(ctx, "failed to save integration config", err)
 	}
 
+	// Let any in-process client cached from this integration's credentials
+	// (see cmd/server's *Resolver types) pick up the change immediately,
+	// rather than only on the next server restart.
+	for _, r := range s.refreshers {
+		r.RefreshIntegrationCredentials(ctx, cfg.IntegrationType)
+	}
+
 	slog.InfoContext(ctx, "integration config updated",
 		"actor", callerID(ctx), "integration_type", cfg.IntegrationType)
 

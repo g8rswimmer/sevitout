@@ -456,6 +456,57 @@ func TestUpsertIntegrationConfig_EncryptsCredentials(t *testing.T) {
 	}
 }
 
+// fakeCredentialsRefresher records every RefreshIntegrationCredentials call
+// it receives, letting tests assert ConfigServer notifies its configured
+// Refreshers (see cmd/server's OnCaller/IssueClient/JiraIssueClient
+// *Resolver types, the real implementations) after a successful
+// UpsertIntegrationConfig.
+type fakeCredentialsRefresher struct {
+	calls []string // integrationType per call, in order
+}
+
+func (f *fakeCredentialsRefresher) RefreshIntegrationCredentials(_ context.Context, integrationType string) {
+	f.calls = append(f.calls, integrationType)
+}
+
+func TestUpsertIntegrationConfig_NotifiesRefreshers(t *testing.T) {
+	enc := testEncryptor(t)
+	integrations := memory.NewIntegrationConfigStore()
+	refresherA := &fakeCredentialsRefresher{}
+	refresherB := &fakeCredentialsRefresher{}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       enc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresherA, refresherB},
+	})
+
+	if _, err := server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"api_key": "pd_super_secret"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig: %v", err)
+	}
+
+	for name, r := range map[string]*fakeCredentialsRefresher{"A": refresherA, "B": refresherB} {
+		if len(r.calls) != 1 || r.calls[0] != "pagerduty" {
+			t.Errorf("refresher %s calls = %v, want exactly one call for \"pagerduty\"", name, r.calls)
+		}
+	}
+}
+
+func TestUpsertIntegrationConfig_NoRefreshersConfigured_DoesNotPanic(t *testing.T) {
+	// ConfigServerParams.Refreshers is nil here, matching every other
+	// newTestConfigServer-based test in this file — Upsert must tolerate
+	// that rather than nil-panicking when it ranges over the list.
+	ts := newTestConfigServer(testEncryptor(t))
+	if _, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"api_key": "secret"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig: %v", err)
+	}
+}
+
 func TestUpsertIntegrationConfig_NoEncryptorConfigured(t *testing.T) {
 	ts := newTestConfigServer(nil) // no ENCRYPTION_KEY
 	_, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{

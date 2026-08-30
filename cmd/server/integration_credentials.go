@@ -21,11 +21,13 @@ import (
 // failure — mirroring the best-effort, non-blocking treatment of on-call
 // lookup failures in grpchandler.SEVServer.
 //
-// This hits integrations fresh on every call, with no in-process caching —
-// the same "live from the store, decrypt per call" shape as
-// internal/ai/dispatcher.go's resolvePlugin/buildProvider — so a credential
-// added or changed via the Config API takes effect on the very next request,
-// with no server restart required.
+// Callers are the *Resolver types' refresh methods, not any per-request
+// code path: each resolver calls this once at construction (server
+// startup) and again only when notified, via RefreshIntegrationCredentials,
+// that its integration's config changed through the Config API — then
+// caches the result, so a credential added or changed via the Config API
+// takes effect immediately, with no server restart required, but without
+// a datastore round trip on every OnCallLookup/CreateIssue call.
 func resolveIntegrationCredentials(
 	ctx context.Context,
 	integrations store.IntegrationConfigStore,
