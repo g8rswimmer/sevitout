@@ -108,11 +108,11 @@ func TestGitHubIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigure
 	}
 }
 
-// TestGitHubIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart is the
-// core behavior this caching design exists for — see the OnCaller resolver's
+// TestGitHubIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart is
+// the core behavior this design exists for — see the OnCaller resolver's
 // equivalent test for the full rationale.
-func TestGitHubIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testing.T) {
-	integrations := memory.NewIntegrationConfigStore()
+func TestGitHubIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *testing.T) {
+	integrations := memory.NewIntegrationConfigStore() // never written to in this test
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
 	fallbackIssue := &grpchandler.CreatedIssue{Number: 1}
@@ -124,19 +124,22 @@ func TestGitHubIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *test
 		t.Fatalf("CreateIssue: %v", err)
 	}
 	if got != fallbackIssue {
-		t.Fatalf("CreateIssue before config exists = %+v, want fallback", got)
+		t.Fatalf("CreateIssue before any refresh = %+v, want fallback", got)
 	}
 
 	origNewGitHubIssueClient := newGitHubIssueClient
 	t.Cleanup(func() { newGitHubIssueClient = origNewGitHubIssueClient })
 	datastoreIssue := &grpchandler.CreatedIssue{Number: 42}
+	var gotToken string
 	newGitHubIssueClient = func(token string) grpchandler.IssueClient {
+		gotToken = token
 		return &fakeIssueClient{issue: datastoreIssue}
 	}
-	putIntegrationConfig(t, integrations, enc, "github", map[string]string{"token": "ghp_live_token"}, nil)
 
 	// Refreshing for an unrelated integration type must be a no-op.
-	resolver.RefreshIntegrationCredentials(context.Background(), "jira")
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "jira", map[string]string{"token": "ghp_live_token"}, nil); err != nil {
+		t.Fatalf("RefreshIntegrationCredentials: %v", err)
+	}
 	got, err = resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -145,12 +148,17 @@ func TestGitHubIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *test
 		t.Errorf("CreateIssue after an unrelated refresh = %+v, want still fallback", got)
 	}
 
-	resolver.RefreshIntegrationCredentials(context.Background(), "github")
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "github", map[string]string{"token": "ghp_live_token"}, nil); err != nil {
+		t.Fatalf("RefreshIntegrationCredentials: %v", err)
+	}
 	got, err = resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 	if got != datastoreIssue {
 		t.Errorf("CreateIssue after RefreshIntegrationCredentials(\"github\") = %+v, want %+v", got, datastoreIssue)
+	}
+	if gotToken != "ghp_live_token" {
+		t.Errorf("datastore client built with token = %q, want %q", gotToken, "ghp_live_token")
 	}
 }

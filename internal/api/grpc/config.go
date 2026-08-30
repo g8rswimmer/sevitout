@@ -25,23 +25,24 @@ type RateLimitEvictor interface {
 	EvictRateLimit(pluginID int64)
 }
 
-// IntegrationCredentialsRefresher is notified after UpsertIntegrationConfig
-// successfully writes a config row, so an in-process client cached from
-// that integration's credentials (see cmd/server's OnCaller/IssueClient/
-// JiraIssueClient *Resolver types) can be re-resolved without waiting for a
-// server restart. Declared here (the consumer) per this repo's
-// interface-ownership convention. Implementations must ignore calls for an
-// integrationType they don't own (returning nil) and must be safe for
-// concurrent use.
+// IntegrationCredentialsRefresher is handed the plaintext credentials and
+// settings UpsertIntegrationConfig is about to persist for one
+// integrationType, so an in-process client cached from that integration's
+// credentials (see cmd/server's OnCaller/IssueClient/JiraIssueClient
+// *Resolver types) can apply them immediately — without waiting for a
+// server restart, and without ever needing to read or decrypt anything
+// from the datastore itself; that only happens once, at that resolver's own
+// startup. Declared here (the consumer) per this repo's interface-ownership
+// convention. Implementations must ignore calls for an integrationType they
+// don't own (returning nil) and must be safe for concurrent use.
 //
-// A non-nil error means the config that was just written could not
-// actually be resolved into a usable client (e.g. the stored credentials
-// failed to decrypt) — UpsertIntegrationConfig treats this as the write
-// having failed: it rolls the config back to what it was before the call
-// and reports the error to the caller, rather than confirming a save that
-// silently isn't in effect.
+// A non-nil error means credentials/settings could not be turned into a
+// usable client. UpsertIntegrationConfig calls every registered refresher
+// before persisting anything, so an error here means the write is rejected
+// outright — nothing is saved — rather than a config being confirmed as
+// saved when it silently isn't usable.
 type IntegrationCredentialsRefresher interface {
-	RefreshIntegrationCredentials(ctx context.Context, integrationType string) error
+	RefreshIntegrationCredentials(ctx context.Context, integrationType string, credentials map[string]string, settings map[string]any) error
 }
 
 // ConfigServer implements pb.ConfigServiceServer: the admin configuration API

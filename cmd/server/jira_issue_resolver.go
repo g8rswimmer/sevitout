@@ -11,57 +11,49 @@ import (
 
 // jiraIssueResolver implements both grpchandler.JiraIssueClient and
 // grpchandler.IntegrationCredentialsRefresher — see onCallResolver's doc
-// comment for the resolve-once-and-cache rationale this mirrors.
+// comment for the resolve-once-at-startup, refresh-by-direct-handoff
+// rationale this mirrors.
 type jiraIssueResolver struct {
-	integrations store.IntegrationConfigStore
-	crypto       grpchandler.Encryptor
-	fallback     grpchandler.JiraIssueClient // the static JIRA_CLOUD_ID/JIRA_API_TOKEN client, or nil
+	fallback grpchandler.JiraIssueClient // the static JIRA_CLOUD_ID/JIRA_API_TOKEN client, or nil
 
 	mu      sync.RWMutex
-	current grpchandler.JiraIssueClient // resolved datastore client, or fallback; nil if neither is configured
+	current grpchandler.JiraIssueClient // datastore-configured client, or fallback; nil if neither is configured
 }
 
-// newJiraIssueResolver resolves current immediately (datastore config
-// first, fallback second) before returning — see newOnCallResolver.
+// newJiraIssueResolver resolves current from the datastore once,
+// immediately — see newOnCallResolver.
 func newJiraIssueResolver(ctx context.Context, integrations store.IntegrationConfigStore, crypto grpchandler.Encryptor, fallback grpchandler.JiraIssueClient) *jiraIssueResolver {
-	r := &jiraIssueResolver{integrations: integrations, crypto: crypto, fallback: fallback}
-	_ = r.refresh(ctx)
+	r := &jiraIssueResolver{fallback: fallback}
+	creds, settings, _ := resolveIntegrationCredentials(ctx, integrations, crypto, "jira")
+	r.apply(creds, settings)
 	return r
 }
 
-// refresh re-resolves current from the datastore (falling back to the
-// static client whenever the datastore has nothing usable, whether that's
-// because it's genuinely unconfigured or because resolution failed) and
-// swaps it in under mu. It returns the resolution error, if any — see
-// onCallResolver.refresh's doc comment for why current is always left
-// usable regardless.
-func (r *jiraIssueResolver) refresh(ctx context.Context) error {
-	creds, settings, ok, err := resolveIntegrationCredentials(ctx, r.integrations, r.crypto, "jira")
+// apply picks what current should point to given credentials/settings
+// already known to be plaintext and current, and swaps it in under mu.
+func (r *jiraIssueResolver) apply(credentials map[string]string, settings map[string]any) {
 	next := r.fallback
-	if ok {
-		apiToken := creds["api_token"]
-		cloudID, _ := settings["cloud_id"].(string)
-		if apiToken != "" && cloudID != "" {
-			next = newJiraIssueClientFn(cloudID, apiToken)
-		}
+	apiToken := credentials["api_token"]
+	cloudID, _ := settings["cloud_id"].(string)
+	if apiToken != "" && cloudID != "" {
+		next = newJiraIssueClientFn(cloudID, apiToken)
 	}
 	r.mu.Lock()
 	r.current = next
 	r.mu.Unlock()
-	return err
 }
 
-// RefreshIntegrationCredentials re-resolves current when the "jira"
-// integration's config changes via the Config API; calls for any other
-// integration_type are ignored (returning nil), since this resolver owns
-// only Jira issue creation. A non-nil return means the datastore config
-// that was just written could not actually be resolved into a usable
-// client — see onCallResolver.RefreshIntegrationCredentials's doc comment.
-func (r *jiraIssueResolver) RefreshIntegrationCredentials(ctx context.Context, integrationType string) error {
+// RefreshIntegrationCredentials applies a new "jira" credential/setting pair
+// the moment ConfigServer.UpsertIntegrationConfig saves one; calls for any
+// other integration_type are ignored, since this resolver owns only Jira
+// issue creation — see onCallResolver.RefreshIntegrationCredentials's doc
+// comment for the error-return rationale.
+func (r *jiraIssueResolver) RefreshIntegrationCredentials(_ context.Context, integrationType string, credentials map[string]string, settings map[string]any) error {
 	if integrationType != "jira" {
 		return nil
 	}
-	return r.refresh(ctx)
+	r.apply(credentials, settings)
+	return nil
 }
 
 // newJiraIssueClientFn builds the live client used for a datastore-configured

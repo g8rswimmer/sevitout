@@ -107,14 +107,15 @@ func TestOnCallResolver_NeitherConfigured_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestOnCallResolver_RefreshPicksUpDatastoreChangeWithoutRestart is the core
-// behavior this caching design exists for: a resolver constructed before any
+// TestOnCallResolver_RefreshAppliesCredentialsDirectlyWithoutRestart is the
+// core behavior this design exists for: a resolver constructed before any
 // datastore config existed (so it started on the static fallback) picks up
-// a credential added later purely because RefreshIntegrationCredentials is
-// called — the same notification ConfigServer.UpsertIntegrationConfig sends
-// in production — with no new construction and no per-call datastore read.
-func TestOnCallResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testing.T) {
-	integrations := memory.NewIntegrationConfigStore()
+// a credential handed to it via RefreshIntegrationCredentials — the same
+// call ConfigServer.UpsertIntegrationConfig makes, with the plaintext
+// credentials it's about to persist — with no new construction and no
+// datastore read at all on this resolver's part.
+func TestOnCallResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *testing.T) {
+	integrations := memory.NewIntegrationConfigStore() // never written to in this test
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
 	fallback := &fakeOnCaller{name: "static-fallback"}
@@ -125,18 +126,21 @@ func TestOnCallResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testing.T
 		t.Fatalf("OnCallLookup: %v", err)
 	}
 	if got != "static-fallback" {
-		t.Fatalf("OnCallLookup before config exists = %q, want fallback", got)
+		t.Fatalf("OnCallLookup before any refresh = %q, want fallback", got)
 	}
 
 	origNewPagerdutyOnCaller := newPagerdutyOnCaller
 	t.Cleanup(func() { newPagerdutyOnCaller = origNewPagerdutyOnCaller })
+	var gotAPIKey string
 	newPagerdutyOnCaller = func(apiKey string) grpchandler.OnCaller {
+		gotAPIKey = apiKey
 		return &fakeOnCaller{name: "alice"}
 	}
-	putIntegrationConfig(t, integrations, enc, "pagerduty", map[string]string{"api_key": "pd_live_key"}, nil)
 
 	// Refreshing for an unrelated integration type must be a no-op.
-	resolver.RefreshIntegrationCredentials(context.Background(), "github")
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "github", map[string]string{"api_key": "pd_live_key"}, nil); err != nil {
+		t.Fatalf("RefreshIntegrationCredentials: %v", err)
+	}
 	got, err = resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {
 		t.Fatalf("OnCallLookup: %v", err)
@@ -145,12 +149,17 @@ func TestOnCallResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testing.T
 		t.Errorf("OnCallLookup after an unrelated refresh = %q, want still fallback", got)
 	}
 
-	resolver.RefreshIntegrationCredentials(context.Background(), "pagerduty")
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "pagerduty", map[string]string{"api_key": "pd_live_key"}, nil); err != nil {
+		t.Fatalf("RefreshIntegrationCredentials: %v", err)
+	}
 	got, err = resolver.OnCallLookup(context.Background(), "svc-1")
 	if err != nil {
 		t.Fatalf("OnCallLookup: %v", err)
 	}
 	if got != "alice" {
 		t.Errorf("OnCallLookup after RefreshIntegrationCredentials(\"pagerduty\") = %q, want %q", got, "alice")
+	}
+	if gotAPIKey != "pd_live_key" {
+		t.Errorf("datastore client built with api_key = %q, want %q", gotAPIKey, "pd_live_key")
 	}
 }

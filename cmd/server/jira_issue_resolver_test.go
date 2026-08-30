@@ -114,11 +114,11 @@ func TestJiraIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigured(
 	}
 }
 
-// TestJiraIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart is the
-// core behavior this caching design exists for — see the OnCaller resolver's
+// TestJiraIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart is
+// the core behavior this design exists for — see the OnCaller resolver's
 // equivalent test for the full rationale.
-func TestJiraIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testing.T) {
-	integrations := memory.NewIntegrationConfigStore()
+func TestJiraIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *testing.T) {
+	integrations := memory.NewIntegrationConfigStore() // never written to in this test
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 
 	fallbackIssue := &grpchandler.CreatedIssue{Key: "FALLBACK-1"}
@@ -130,21 +130,24 @@ func TestJiraIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testin
 		t.Fatalf("CreateIssue: %v", err)
 	}
 	if got != fallbackIssue {
-		t.Fatalf("CreateIssue before config exists = %+v, want fallback", got)
+		t.Fatalf("CreateIssue before any refresh = %+v, want fallback", got)
 	}
 
 	origNewJiraIssueClientFn := newJiraIssueClientFn
 	t.Cleanup(func() { newJiraIssueClientFn = origNewJiraIssueClientFn })
 	datastoreIssue := &grpchandler.CreatedIssue{Key: "PROJ-1"}
+	var gotCloudID, gotAPIToken string
 	newJiraIssueClientFn = func(cloudID, apiToken string) grpchandler.JiraIssueClient {
+		gotCloudID, gotAPIToken = cloudID, apiToken
 		return &fakeJiraIssueClient{issue: datastoreIssue}
 	}
-	putIntegrationConfig(t, integrations, enc, "jira",
-		map[string]string{"api_token": "jira_live_token"},
-		map[string]any{"cloud_id": "cloud-123"})
+	creds := map[string]string{"api_token": "jira_live_token"}
+	settings := map[string]any{"cloud_id": "cloud-123"}
 
 	// Refreshing for an unrelated integration type must be a no-op.
-	resolver.RefreshIntegrationCredentials(context.Background(), "github")
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "github", creds, settings); err != nil {
+		t.Fatalf("RefreshIntegrationCredentials: %v", err)
+	}
 	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -153,12 +156,18 @@ func TestJiraIssueResolver_RefreshPicksUpDatastoreChangeWithoutRestart(t *testin
 		t.Errorf("CreateIssue after an unrelated refresh = %+v, want still fallback", got)
 	}
 
-	resolver.RefreshIntegrationCredentials(context.Background(), "jira")
+	if err := resolver.RefreshIntegrationCredentials(context.Background(), "jira", creds, settings); err != nil {
+		t.Fatalf("RefreshIntegrationCredentials: %v", err)
+	}
 	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 	if got != datastoreIssue {
 		t.Errorf("CreateIssue after RefreshIntegrationCredentials(\"jira\") = %+v, want %+v", got, datastoreIssue)
+	}
+	if gotCloudID != "cloud-123" || gotAPIToken != "jira_live_token" {
+		t.Errorf("datastore client built with (cloudID=%q, apiToken=%q), want (%q, %q)",
+			gotCloudID, gotAPIToken, "cloud-123", "jira_live_token")
 	}
 }

@@ -10,72 +10,60 @@ import (
 )
 
 // onCallResolver implements both grpchandler.OnCaller and
-// grpchandler.IntegrationCredentialsRefresher. Rather than hitting the
-// datastore on every OnCallLookup call, it resolves once — at construction
-// (server startup) and again only when notified that the "pagerduty"
-// integration's config changed via the Config API — and caches the result,
-// so the hot path (OnCallLookup) never touches the datastore. This trades
-// "always current, one DB read per request" for "current as of the last
-// startup or config write, zero DB reads per request," which is the right
-// trade for a value that only ever changes through an explicit admin
-// action, not on some other schedule OnCallLookup would need to notice on
-// its own.
+// grpchandler.IntegrationCredentialsRefresher. It resolves the datastore
+// path exactly once, at construction (server startup); after that,
+// RefreshIntegrationCredentials is handed the current plaintext credentials
+// directly by grpchandler.ConfigServer.UpsertIntegrationConfig whenever the
+// "pagerduty" config changes, so this resolver never touches the datastore
+// or a decryptor again after startup. The hot path (OnCallLookup) just
+// reads whatever was last resolved or handed to it.
 type onCallResolver struct {
-	integrations store.IntegrationConfigStore
-	crypto       grpchandler.Encryptor
-	fallback     grpchandler.OnCaller // the static PAGERDUTY_API_KEY client, or nil
+	fallback grpchandler.OnCaller // the static PAGERDUTY_API_KEY client, or nil
 
 	mu      sync.RWMutex
-	current grpchandler.OnCaller // resolved datastore client, or fallback; nil if neither is configured
+	current grpchandler.OnCaller // datastore-configured client, or fallback; nil if neither is configured
 }
 
-// newOnCallResolver resolves current immediately (datastore config first,
-// fallback second) before returning, so the very first request after
-// startup already sees whatever was configured at that point. A startup
-// resolution failure (e.g. a bad ENCRYPTION_KEY) is already logged by
-// resolveIntegrationCredentials and degrades to the static fallback here —
-// there is no request yet whose caller could be told about it the way
-// RefreshIntegrationCredentials's caller can.
+// newOnCallResolver resolves current from the datastore once, immediately
+// (falling back to fallback when nothing usable is stored), so the very
+// first request after startup already reflects whatever was configured at
+// that point.
 func newOnCallResolver(ctx context.Context, integrations store.IntegrationConfigStore, crypto grpchandler.Encryptor, fallback grpchandler.OnCaller) *onCallResolver {
-	r := &onCallResolver{integrations: integrations, crypto: crypto, fallback: fallback}
-	_ = r.refresh(ctx)
+	r := &onCallResolver{fallback: fallback}
+	creds, _, _ := resolveIntegrationCredentials(ctx, integrations, crypto, "pagerduty")
+	r.apply(creds)
 	return r
 }
 
-// refresh re-resolves current from the datastore (falling back to the
-// static client whenever the datastore has nothing usable, whether that's
-// because it's genuinely unconfigured or because resolution failed) and
-// swaps it in under mu. It returns the resolution error, if any, so
-// RefreshIntegrationCredentials can report it — current is always left in a
-// usable state either way; the error is purely informational for the
-// caller that triggered this refresh.
-func (r *onCallResolver) refresh(ctx context.Context) error {
-	creds, _, ok, err := resolveIntegrationCredentials(ctx, r.integrations, r.crypto, "pagerduty")
+// apply picks what current should point to given credentials already known
+// to be plaintext and current — either freshly decrypted at startup, or
+// handed directly by RefreshIntegrationCredentials — and swaps it in under
+// mu.
+func (r *onCallResolver) apply(credentials map[string]string) {
 	next := r.fallback
-	if ok {
-		if apiKey := creds["api_key"]; apiKey != "" {
-			next = newPagerdutyOnCaller(apiKey)
-		}
+	if apiKey := credentials["api_key"]; apiKey != "" {
+		next = newPagerdutyOnCaller(apiKey)
 	}
 	r.mu.Lock()
 	r.current = next
 	r.mu.Unlock()
-	return err
 }
 
-// RefreshIntegrationCredentials re-resolves current when the "pagerduty"
-// integration's config changes via the Config API; calls for any other
-// integration_type are ignored (returning nil), since this resolver owns
-// only PagerDuty on-call lookups. A non-nil return means the datastore
-// config that was just written could not actually be resolved into a
-// usable client (e.g. it failed to decrypt) — ConfigServer uses this to
-// reject the write and roll the config back, rather than reporting success
-// for a credential that silently isn't usable.
-func (r *onCallResolver) RefreshIntegrationCredentials(ctx context.Context, integrationType string) error {
+// RefreshIntegrationCredentials applies a new "pagerduty" credential the
+// moment ConfigServer.UpsertIntegrationConfig saves one — calls for any
+// other integration_type are ignored, since this resolver owns only
+// PagerDuty on-call lookups. Building an OnCaller from credentials never
+// fails for PagerDuty (pagerduty.NewClient does no I/O), so this always
+// returns nil; the error return exists purely so ConfigServer can reject a
+// write outright — before persisting anything — if some future
+// integration's construction can fail (e.g. one that validates against a
+// live API).
+func (r *onCallResolver) RefreshIntegrationCredentials(_ context.Context, integrationType string, credentials map[string]string, _ map[string]any) error {
 	if integrationType != "pagerduty" {
 		return nil
 	}
-	return r.refresh(ctx)
+	r.apply(credentials)
+	return nil
 }
 
 // newPagerdutyOnCaller builds the live client used for a datastore-configured
