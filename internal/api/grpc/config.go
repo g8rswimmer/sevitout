@@ -31,9 +31,17 @@ type RateLimitEvictor interface {
 // JiraIssueClient *Resolver types) can be re-resolved without waiting for a
 // server restart. Declared here (the consumer) per this repo's
 // interface-ownership convention. Implementations must ignore calls for an
-// integrationType they don't own and must be safe for concurrent use.
+// integrationType they don't own (returning nil) and must be safe for
+// concurrent use.
+//
+// A non-nil error means the config that was just written could not
+// actually be resolved into a usable client (e.g. the stored credentials
+// failed to decrypt) — UpsertIntegrationConfig treats this as the write
+// having failed: it rolls the config back to what it was before the call
+// and reports the error to the caller, rather than confirming a save that
+// silently isn't in effect.
 type IntegrationCredentialsRefresher interface {
-	RefreshIntegrationCredentials(ctx context.Context, integrationType string)
+	RefreshIntegrationCredentials(ctx context.Context, integrationType string) error
 }
 
 // ConfigServer implements pb.ConfigServiceServer: the admin configuration API

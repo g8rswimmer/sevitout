@@ -34,9 +34,14 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 		UpdatedAt:       now,
 	}
 
+	// existing and hadExisting are kept around past this switch so a
+	// refresh failure below can roll the write back to exactly what was
+	// there before this call.
 	existing, err := s.integrations.Get(ctx, req.GetIntegrationType())
+	hadExisting := false
 	switch {
 	case err == nil:
+		hadExisting = true
 		cfg.EncryptedCredentials = existing.EncryptedCredentials
 		cfg.Settings = existing.Settings
 		cfg.CreatedAt = existing.CreatedAt
@@ -79,9 +84,37 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 
 	// Let any in-process client cached from this integration's credentials
 	// (see cmd/server's *Resolver types) pick up the change immediately,
-	// rather than only on the next server restart.
+	// rather than only on the next server restart. A refresher only acts on
+	// notifications for the integration_type it owns (see
+	// IntegrationCredentialsRefresher's doc comment), so at most one of
+	// these is expected to actually do anything for a given call —
+	// errors.Join is used only defensively, in case more than one somehow
+	// reports a problem.
+	var refreshErrs []error
 	for _, r := range s.refreshers {
-		r.RefreshIntegrationCredentials(ctx, cfg.IntegrationType)
+		if err := r.RefreshIntegrationCredentials(ctx, cfg.IntegrationType); err != nil {
+			refreshErrs = append(refreshErrs, err)
+		}
+	}
+	if refreshErr := errors.Join(refreshErrs...); refreshErr != nil {
+		// The write above left credentials in the datastore that can't
+		// actually be used (e.g. they fail to decrypt) — restore whatever
+		// was there before this call, rather than confirming a save that
+		// silently isn't in effect. There's no delete for a row that didn't
+		// exist before this call; a rollback in that case clears it back to
+		// an empty (no credentials, no settings) row for integrationType,
+		// which every refresher already treats identically to "no row at
+		// all" (see resolveIntegrationCredentials).
+		rollback := &store.IntegrationConfig{IntegrationType: cfg.IntegrationType, CreatedAt: cfg.CreatedAt, UpdatedAt: cfg.CreatedAt}
+		if hadExisting {
+			rollback = existing
+		}
+		if err := s.integrations.Upsert(ctx, rollback); err != nil {
+			slog.ErrorContext(ctx, "integration config rollback after refresh failure also failed",
+				"integration_type", cfg.IntegrationType, "refresh_err", refreshErr, "rollback_err", err)
+		}
+		return nil, internalError(ctx,
+			"integration config could not be applied; the previous configuration has been restored", refreshErr)
 	}
 
 	slog.InfoContext(ctx, "integration config updated",

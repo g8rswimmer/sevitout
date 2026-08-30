@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"testing"
 	"time"
 
@@ -460,13 +461,16 @@ func TestUpsertIntegrationConfig_EncryptsCredentials(t *testing.T) {
 // it receives, letting tests assert ConfigServer notifies its configured
 // Refreshers (see cmd/server's OnCaller/IssueClient/JiraIssueClient
 // *Resolver types, the real implementations) after a successful
-// UpsertIntegrationConfig.
+// UpsertIntegrationConfig, and optionally returns a canned error to
+// exercise UpsertIntegrationConfig's rollback-on-refresh-failure path.
 type fakeCredentialsRefresher struct {
+	err   error
 	calls []string // integrationType per call, in order
 }
 
-func (f *fakeCredentialsRefresher) RefreshIntegrationCredentials(_ context.Context, integrationType string) {
+func (f *fakeCredentialsRefresher) RefreshIntegrationCredentials(_ context.Context, integrationType string) error {
 	f.calls = append(f.calls, integrationType)
+	return f.err
 }
 
 func TestUpsertIntegrationConfig_NotifiesRefreshers(t *testing.T) {
@@ -491,6 +495,79 @@ func TestUpsertIntegrationConfig_NotifiesRefreshers(t *testing.T) {
 		if len(r.calls) != 1 || r.calls[0] != "pagerduty" {
 			t.Errorf("refresher %s calls = %v, want exactly one call for \"pagerduty\"", name, r.calls)
 		}
+	}
+}
+
+func TestUpsertIntegrationConfig_RefreshFailure_NewIntegrationType_RollsBackToUnconfigured(t *testing.T) {
+	enc := testEncryptor(t)
+	integrations := memory.NewIntegrationConfigStore()
+	refresher := &fakeCredentialsRefresher{err: errors.New("decrypt failed")}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       enc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresher},
+	})
+
+	_, err := server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"api_key": "pd_super_secret"},
+	})
+	if grpcCode(err) != codes.Internal {
+		t.Fatalf("UpsertIntegrationConfig err = %v, want Internal when a refresher rejects the config", err)
+	}
+
+	// There was no "pagerduty" row before this call, so the rollback must
+	// leave the datastore equivalent to "still unconfigured" — a row with
+	// no credentials, not the ones that were just rejected.
+	stored, getErr := integrations.Get(context.Background(), "pagerduty")
+	if getErr != nil {
+		t.Fatalf("Get after rollback: %v", getErr)
+	}
+	if len(stored.EncryptedCredentials) != 0 {
+		t.Error("rolled-back config must not retain the rejected credentials")
+	}
+}
+
+func TestUpsertIntegrationConfig_RefreshFailure_ExistingIntegrationType_RestoresPreviousConfig(t *testing.T) {
+	enc := testEncryptor(t)
+	integrations := memory.NewIntegrationConfigStore()
+	refresher := &fakeCredentialsRefresher{}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       enc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresher},
+	})
+	ctx := context.Background()
+
+	// A valid config is saved first (refresher succeeds).
+	if _, err := server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "github",
+		Credentials:     map[string]string{"token": "ghp_original"},
+	}); err != nil {
+		t.Fatalf("initial UpsertIntegrationConfig: %v", err)
+	}
+	original, err := integrations.Get(ctx, "github")
+	if err != nil {
+		t.Fatalf("Get original: %v", err)
+	}
+
+	// A second write with a credential the refresher rejects must restore
+	// exactly the previous (working) config, not just clear it.
+	refresher.err = errors.New("decrypt failed")
+	_, err = server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "github",
+		Credentials:     map[string]string{"token": "ghp_bad"},
+	})
+	if grpcCode(err) != codes.Internal {
+		t.Fatalf("UpsertIntegrationConfig err = %v, want Internal when a refresher rejects the config", err)
+	}
+
+	stored, err := integrations.Get(ctx, "github")
+	if err != nil {
+		t.Fatalf("Get after rollback: %v", err)
+	}
+	if !bytes.Equal(stored.EncryptedCredentials, original.EncryptedCredentials) {
+		t.Error("rolled-back config must restore the previous credentials, not the rejected ones")
 	}
 }
 

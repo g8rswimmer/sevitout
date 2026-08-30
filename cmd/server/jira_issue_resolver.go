@@ -25,16 +25,20 @@ type jiraIssueResolver struct {
 // first, fallback second) before returning — see newOnCallResolver.
 func newJiraIssueResolver(ctx context.Context, integrations store.IntegrationConfigStore, crypto grpchandler.Encryptor, fallback grpchandler.JiraIssueClient) *jiraIssueResolver {
 	r := &jiraIssueResolver{integrations: integrations, crypto: crypto, fallback: fallback}
-	r.refresh(ctx)
+	_ = r.refresh(ctx)
 	return r
 }
 
 // refresh re-resolves current from the datastore (falling back to the
-// static client when the datastore has nothing usable) and swaps it in
-// under mu.
-func (r *jiraIssueResolver) refresh(ctx context.Context) {
+// static client whenever the datastore has nothing usable, whether that's
+// because it's genuinely unconfigured or because resolution failed) and
+// swaps it in under mu. It returns the resolution error, if any — see
+// onCallResolver.refresh's doc comment for why current is always left
+// usable regardless.
+func (r *jiraIssueResolver) refresh(ctx context.Context) error {
+	creds, settings, ok, err := resolveIntegrationCredentials(ctx, r.integrations, r.crypto, "jira")
 	next := r.fallback
-	if creds, settings, ok := resolveIntegrationCredentials(ctx, r.integrations, r.crypto, "jira"); ok {
+	if ok {
 		apiToken := creds["api_token"]
 		cloudID, _ := settings["cloud_id"].(string)
 		if apiToken != "" && cloudID != "" {
@@ -44,17 +48,20 @@ func (r *jiraIssueResolver) refresh(ctx context.Context) {
 	r.mu.Lock()
 	r.current = next
 	r.mu.Unlock()
+	return err
 }
 
 // RefreshIntegrationCredentials re-resolves current when the "jira"
 // integration's config changes via the Config API; calls for any other
-// integration_type are ignored, since this resolver owns only Jira issue
-// creation.
-func (r *jiraIssueResolver) RefreshIntegrationCredentials(ctx context.Context, integrationType string) {
+// integration_type are ignored (returning nil), since this resolver owns
+// only Jira issue creation. A non-nil return means the datastore config
+// that was just written could not actually be resolved into a usable
+// client — see onCallResolver.RefreshIntegrationCredentials's doc comment.
+func (r *jiraIssueResolver) RefreshIntegrationCredentials(ctx context.Context, integrationType string) error {
 	if integrationType != "jira" {
-		return
+		return nil
 	}
-	r.refresh(ctx)
+	return r.refresh(ctx)
 }
 
 // newJiraIssueClientFn builds the live client used for a datastore-configured
