@@ -15,14 +15,14 @@ func TestJiraIssueResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *test
 	enc := crypto.NewKeyEncryptor(mustKey(t))
 	putIntegrationConfig(t, integrations, enc, "jira",
 		map[string]string{"api_token": "jira_live_token"},
-		map[string]any{"cloud_id": "cloud-123"})
+		map[string]any{"cloud_id": "cloud-123", "site_url": "https://example.atlassian.net"})
 
 	origNewJiraIssueClientFn := newJiraIssueClientFn
 	t.Cleanup(func() { newJiraIssueClientFn = origNewJiraIssueClientFn })
-	var gotCloudID, gotAPIToken string
+	var gotCloudID, gotAPIToken, gotSiteURL string
 	wantIssue := &grpchandler.CreatedIssue{Key: "PROJ-1", URL: "https://example.atlassian.net/browse/PROJ-1"}
-	newJiraIssueClientFn = func(cloudID, apiToken string) grpchandler.JiraIssueClient {
-		gotCloudID, gotAPIToken = cloudID, apiToken
+	newJiraIssueClientFn = func(cloudID, apiToken, siteURL string) grpchandler.JiraIssueClient {
+		gotCloudID, gotAPIToken, gotSiteURL = cloudID, apiToken, siteURL
 		return &fakeJiraIssueClient{issue: wantIssue}
 	}
 
@@ -36,9 +36,9 @@ func TestJiraIssueResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *test
 	if got != wantIssue {
 		t.Errorf("CreateIssue returned %+v, want the datastore-configured client's issue", got)
 	}
-	if gotCloudID != "cloud-123" || gotAPIToken != "jira_live_token" {
-		t.Errorf("datastore client built with (cloudID=%q, apiToken=%q), want (%q, %q)",
-			gotCloudID, gotAPIToken, "cloud-123", "jira_live_token")
+	if gotCloudID != "cloud-123" || gotAPIToken != "jira_live_token" || gotSiteURL != "https://example.atlassian.net" {
+		t.Errorf("datastore client built with (cloudID=%q, apiToken=%q, siteURL=%q), want (%q, %q, %q)",
+			gotCloudID, gotAPIToken, gotSiteURL, "cloud-123", "jira_live_token", "https://example.atlassian.net")
 	}
 	if fallback.called {
 		t.Error("fallback should not be called when datastore config is usable")
@@ -154,7 +154,7 @@ func TestJiraIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesF
 func TestJiraIssueResolver_RefreshWithValidCredentials_ReturnsNilError(t *testing.T) {
 	origNewJiraIssueClientFn := newJiraIssueClientFn
 	t.Cleanup(func() { newJiraIssueClientFn = origNewJiraIssueClientFn })
-	newJiraIssueClientFn = func(string, string) grpchandler.JiraIssueClient { return &fakeJiraIssueClient{} }
+	newJiraIssueClientFn = func(string, string, string) grpchandler.JiraIssueClient { return &fakeJiraIssueClient{} }
 
 	resolver := newJiraIssueResolver(context.Background(), memory.NewIntegrationConfigStore(), crypto.NewKeyEncryptor(mustKey(t)), nil)
 
@@ -188,7 +188,7 @@ func TestJiraIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *te
 	t.Cleanup(func() { newJiraIssueClientFn = origNewJiraIssueClientFn })
 	datastoreIssue := &grpchandler.CreatedIssue{Key: "PROJ-1"}
 	var gotCloudID, gotAPIToken string
-	newJiraIssueClientFn = func(cloudID, apiToken string) grpchandler.JiraIssueClient {
+	newJiraIssueClientFn = func(cloudID, apiToken, _ string) grpchandler.JiraIssueClient {
 		gotCloudID, gotAPIToken = cloudID, apiToken
 		return &fakeJiraIssueClient{issue: datastoreIssue}
 	}

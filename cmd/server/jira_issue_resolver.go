@@ -37,14 +37,16 @@ func newJiraIssueResolver(ctx context.Context, integrations store.IntegrationCon
 // already known to be plaintext and current, swaps it in under mu, and
 // reports whether it had to fall back to the static client
 // (usedFallback=true, including when fallback is itself nil) rather than a
-// datastore-configured one.
+// datastore-configured one. site_url is optional — an empty value is
+// treated the same as it not being set at all (see newJiraIssueClientFn).
 func (r *jiraIssueResolver) apply(credentials map[string]string, settings map[string]any) (usedFallback bool) {
 	next := r.fallback
 	usedFallback = true
 	apiToken := credentials["api_token"]
 	cloudID, _ := settings["cloud_id"].(string)
+	siteURL, _ := settings["site_url"].(string)
 	if apiToken != "" && cloudID != "" {
-		next = newJiraIssueClientFn(cloudID, apiToken)
+		next = newJiraIssueClientFn(cloudID, apiToken, siteURL)
 		usedFallback = false
 	}
 	r.mu.Lock()
@@ -73,11 +75,12 @@ func (r *jiraIssueResolver) RefreshIntegrationCredentials(_ context.Context, int
 // Jira credential. A package-level var (rather than constructing
 // jiraIssueClient directly) so resolver tests can substitute a fake and
 // assert the datastore path was taken without making a real Jira API call.
-// Site URL is cosmetic only (browse-link generation, see
-// jiraIssueClient.CreateIssue) and has no settings-key convention yet — ""
-// is safe, jira.NewClient treats it as "no browse links".
-var newJiraIssueClientFn = func(cloudID, apiToken string) grpchandler.JiraIssueClient {
-	return &jiraIssueClient{c: jira.NewClient(cloudID, apiToken, "")}
+// siteURL is cosmetic only (browse-link generation, see
+// jiraIssueClient.CreateIssue) — mirroring config.Config.JiraSiteURL's
+// independently-optional treatment of JIRA_SITE_URL, an empty siteURL is
+// safe here too, since jira.NewClient treats "" as "no browse links".
+var newJiraIssueClientFn = func(cloudID, apiToken, siteURL string) grpchandler.JiraIssueClient {
+	return &jiraIssueClient{c: jira.NewClient(cloudID, apiToken, siteURL)}
 }
 
 func (r *jiraIssueResolver) CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string) (*grpchandler.CreatedIssue, error) {

@@ -89,6 +89,10 @@ describe('AdminIntegrationsPage', () => {
 
     expect(screen.getByDisplayValue('api_token')).toBeInTheDocument()
     expect(screen.getByDisplayValue('cloud_id')).toBeInTheDocument()
+    // site_url is optional (cosmetic browse-link generation only) — it's
+    // mentioned in the hint but not pre-seeded as a row, unlike cloud_id.
+    expect(screen.getByText(/"site_url" \(optional\)/)).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('site_url')).not.toBeInTheDocument()
 
     // Both the credentials and settings sections render a "Tag value" input
     // once Jira is selected (one row each, pre-filled with its well-known

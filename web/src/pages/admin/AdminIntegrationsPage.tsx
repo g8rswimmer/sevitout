@@ -15,16 +15,32 @@ import type { IntegrationHealthStatus } from '@/types/api'
 
 /** The integration types with a live connectivity check registered
  * server-side (cmd/server/main.go's healthCheckers map) — each also has one
- * well-known credential key its HealthChecker reads, and (Jira only) one
- * well-known non-secret settings key its HealthChecker also needs alongside
- * the credential. "Other" covers any integration_type not in this fixed
- * list (e.g. a future Datadog/Prometheus integration), stored and displayed
- * exactly as typed. */
-const KNOWN_INTEGRATIONS: { value: string; label: string; credentialKey: string; settingsKey?: string }[] = [
+ * well-known credential key its HealthChecker reads, and (Jira only) one or
+ * more well-known non-secret settings keys used alongside the credential:
+ * cloud_id (required — the datastore path won't activate without it, see
+ * jiraIssueResolver.apply) and site_url (optional — cosmetic browse-link
+ * generation only, mirroring JIRA_SITE_URL's independently-optional
+ * treatment in internal/config.Config). "Other" covers any integration_type
+ * not in this fixed list (e.g. a future Datadog/Prometheus integration),
+ * stored and displayed exactly as typed. */
+const KNOWN_INTEGRATIONS: {
+  value: string
+  label: string
+  credentialKey: string
+  settingsKeys?: { key: string; required: boolean }[]
+}[] = [
   { value: 'pagerduty', label: 'PagerDuty', credentialKey: 'api_key' },
   { value: 'github', label: 'GitHub', credentialKey: 'token' },
   { value: 'slack', label: 'Slack', credentialKey: 'bot_token' },
-  { value: 'jira', label: 'Jira', credentialKey: 'api_token', settingsKey: 'cloud_id' },
+  {
+    value: 'jira',
+    label: 'Jira',
+    credentialKey: 'api_token',
+    settingsKeys: [
+      { key: 'cloud_id', required: true },
+      { key: 'site_url', required: false },
+    ],
+  },
 ]
 const OTHER = '__other__'
 
@@ -51,12 +67,17 @@ export function AdminIntegrationsPage() {
   const [formError, setFormError] = useState<string | null>(null)
 
   const integrationType = typeSelect === OTHER ? customType.trim() : typeSelect
+  const knownType = KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)
 
   function selectType(v: string) {
     setTypeSelect(v)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === v)
     setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
-    setSettings(known?.settingsKey ? [{ key: known.settingsKey, value: '' }] : [])
+    // Only pre-seed required settings keys — an optional one (e.g. Jira's
+    // site_url) is left for the admin to add via "Add tag" if they want it,
+    // rather than cluttering the form with an empty row for every config.
+    const requiredSettings = known?.settingsKeys?.filter((s) => s.required) ?? []
+    setSettings(requiredSettings.map((s) => ({ key: s.key, value: '' })))
   }
 
   const upsertMutation = useMutation({
@@ -181,8 +202,8 @@ export function AdminIntegrationsPage() {
           <div>
             <Label>Credentials (write-only — leave a value blank to keep it unchanged)</Label>
             <p className="mb-1.5 text-xs text-muted-foreground">
-              {KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)
-                ? `Well-known key for this type: "${KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)!.credentialKey}"`
+              {knownType
+                ? `Well-known key for this type: "${knownType.credentialKey}"`
                 : 'Enter whatever key(s) this integration expects.'}
             </p>
             <TagRowsEditor rows={credentials} onChange={setCredentials} />
@@ -190,9 +211,11 @@ export function AdminIntegrationsPage() {
 
           <div>
             <Label>Settings (non-secret)</Label>
-            {KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)?.settingsKey && (
+            {knownType?.settingsKeys && (
               <p className="mb-1.5 text-xs text-muted-foreground">
-                {`Well-known key for this type: "${KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)!.settingsKey}"`}
+                {`Well-known key${knownType.settingsKeys.length > 1 ? 's' : ''} for this type: ${knownType.settingsKeys
+                  .map((s) => `"${s.key}"${s.required ? '' : ' (optional)'}`)
+                  .join(', ')}`}
               </p>
             )}
             <TagRowsEditor rows={settings} onChange={setSettings} />
