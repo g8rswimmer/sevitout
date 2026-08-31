@@ -69,6 +69,17 @@ type Config struct {
 	JiraCloudID  string
 	JiraAPIToken string
 
+	// SlackbotServiceEmail is SLACKBOT_SERVICE_EMAIL — the same login email
+	// cmd/slackbot uses to authenticate itself to this API server (see
+	// README.md's environment-variable table). The API server needs its own
+	// copy of this value (not just cmd/slackbot) purely to gate
+	// ConfigService.GetSlackBotCredential to that one account server-side;
+	// see docs/roadmap.md Phase 8 and that RPC's doc comment. Empty means
+	// GetSlackBotCredential rejects every caller, not "any Admin may call
+	// it" — a deliberate fail-closed default for a self-hosted deployment
+	// that hasn't set up the Slack bot at all.
+	SlackbotServiceEmail string
+
 	// JiraSiteURL is JIRA_SITE_URL (e.g. "https://acme.atlassian.net") —
 	// optional, and independent of whether the Jira integration itself is
 	// enabled (that's governed by JiraCloudID/JiraAPIToken alone). It's
@@ -101,6 +112,7 @@ func Load() (*Config, error) {
 		JiraCloudID:            os.Getenv("JIRA_CLOUD_ID"),
 		JiraAPIToken:           os.Getenv("JIRA_API_TOKEN"),
 		JiraSiteURL:            os.Getenv("JIRA_SITE_URL"),
+		SlackbotServiceEmail:   os.Getenv("SLACKBOT_SERVICE_EMAIL"),
 	}
 
 	if v := os.Getenv("JWT_TTL_HOURS"); v != "" {

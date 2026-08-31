@@ -234,6 +234,7 @@ func main() {
 		Refreshers: []grpchandler.IntegrationCredentialsRefresher{
 			pagerdutyResolver, githubResolver, jiraResolver,
 		},
+		SlackbotServiceEmail: cfg.SlackbotServiceEmail,
 	})
 	aiServer := grpchandler.NewAIServer(aiDispatcher, stores.AIOutput, stores.AIPlugin)
 

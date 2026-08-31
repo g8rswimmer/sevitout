@@ -20,17 +20,33 @@ func withFastRetries(t *testing.T) {
 }
 
 func TestLoadSlackSettings_Success(t *testing.T) {
-	cfg := &fakeConfigAPI{resp: &pb.IntegrationConfigResponse{
-		Settings: map[string]string{
-			"default_channel":           "general",
-			"channel_naming_convention": "inc-{level}-{id}",
+	cfg := &fakeConfigAPI{
+		resp: &pb.IntegrationConfigResponse{
+			Settings: map[string]string{
+				"default_channel":           "general",
+				"channel_naming_convention": "inc-{level}-{id}",
+			},
 		},
-	}}
+		credentialResp: &pb.GetSlackBotCredentialResponse{BotToken: "xoxb-store", AppToken: "xapp-store"},
+	}
 
-	ch, conv := loadSlackSettings(context.Background(), slog.Default(), cfg)
+	ch, conv, bot, app := loadSlackSettings(context.Background(), slog.Default(), cfg, "xoxb-static", "xapp-static")
 
 	if ch != "general" || conv != "inc-{level}-{id}" {
 		t.Errorf("got (%q, %q)", ch, conv)
+	}
+	if bot != "xoxb-store" || app != "xapp-store" {
+		t.Errorf("bot/app token = (%q, %q), want the datastore-configured pair preferred over static tokens", bot, app)
+	}
+}
+
+func TestLoadSlackSettings_NoDatastoreCredential_FallsBackToStaticTokens(t *testing.T) {
+	cfg := &fakeConfigAPI{resp: &pb.IntegrationConfigResponse{}}
+
+	_, _, bot, app := loadSlackSettings(context.Background(), slog.Default(), cfg, "xoxb-static", "xapp-static")
+
+	if bot != "xoxb-static" || app != "xapp-static" {
+		t.Errorf("bot/app token = (%q, %q), want static fallback when nothing is datastore-configured", bot, app)
 	}
 }
 
@@ -38,10 +54,13 @@ func TestLoadSlackSettings_GivesUpAfterRetriesExhausted(t *testing.T) {
 	withFastRetries(t)
 	cfg := &fakeConfigAPI{err: errAlways}
 
-	ch, conv := loadSlackSettings(context.Background(), slog.Default(), cfg)
+	ch, conv, bot, app := loadSlackSettings(context.Background(), slog.Default(), cfg, "xoxb-static", "xapp-static")
 
 	if ch != "" || conv != "" {
 		t.Errorf("got (%q, %q), want empty defaults after every attempt fails", ch, conv)
+	}
+	if bot != "xoxb-static" || app != "xapp-static" {
+		t.Errorf("bot/app token = (%q, %q), want static fallback after every attempt fails", bot, app)
 	}
 }
 
@@ -55,7 +74,7 @@ func TestLoadSlackSettings_ContextCanceledStopsRetrying(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		loadSlackSettings(ctx, slog.Default(), cfg)
+		loadSlackSettings(ctx, slog.Default(), cfg, "xoxb-static", "xapp-static")
 		close(done)
 	}()
 

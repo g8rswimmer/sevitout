@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestRunSettingsRefresher_AppliesUpdatedSettings(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go b.runSettingsRefresher(ctx, cfg)
+	go b.runSettingsRefresher(ctx, cfg, nil)
 
 	deadline := time.After(time.Second)
 	for {
@@ -47,7 +48,7 @@ func TestRunSettingsRefresher_FailedRefreshKeepsPreviousSettings(t *testing.T) {
 	cfg := &fakeConfigAPI{err: errAlways}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go b.runSettingsRefresher(ctx, cfg)
+	go b.runSettingsRefresher(ctx, cfg, nil)
 
 	// Give it a few ticks to (fail to) refresh, then confirm nothing changed.
 	time.Sleep(50 * time.Millisecond)
@@ -66,7 +67,7 @@ func TestRunSettingsRefresher_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		b.runSettingsRefresher(ctx, cfg)
+		b.runSettingsRefresher(ctx, cfg, nil)
 		close(done)
 	}()
 
@@ -75,6 +76,75 @@ func TestRunSettingsRefresher_StopsOnContextCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("runSettingsRefresher did not return promptly after ctx was canceled")
+	}
+}
+
+func TestRunSettingsRefresher_AppliesDatastoreConfiguredSlackCredential(t *testing.T) {
+	withFastRefresh(t, 10*time.Millisecond)
+	built := withFakeSlackAPIClient(t)
+	b := newTestBot(nil, nil, nil, nil, nil, "", "")
+	resolver := newSlackClientResolver(&fakeSlack{}, "")
+	cfg := &fakeConfigAPI{
+		resp:           &pb.IntegrationConfigResponse{},
+		credentialResp: &pb.GetSlackBotCredentialResponse{BotToken: "xoxb-rotated"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.runSettingsRefresher(ctx, cfg, resolver)
+
+	deadline := time.After(time.Second)
+	for {
+		if _, ok := built.get("xoxb-rotated"); ok {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("REST client was never rebuilt with the rotated token")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func TestRunSettingsRefresher_NilRESTClient_DoesNotPanic(t *testing.T) {
+	withFastRefresh(t, 10*time.Millisecond)
+	b := newTestBot(nil, nil, nil, nil, nil, "", "")
+	cfg := &fakeConfigAPI{
+		resp:           &pb.IntegrationConfigResponse{},
+		credentialResp: &pb.GetSlackBotCredentialResponse{BotToken: "xoxb-rotated"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go b.runSettingsRefresher(ctx, cfg, nil)
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+}
+
+func TestRefreshSlackRESTClient_EmptyBotToken_LeavesCurrentClientInPlace(t *testing.T) {
+	built := withFakeSlackAPIClient(t)
+	resolver := newSlackClientResolver(&fakeSlack{createChannelID: "C-ORIGINAL"}, "")
+	cfg := &fakeConfigAPI{credentialResp: &pb.GetSlackBotCredentialResponse{}}
+
+	refreshSlackRESTClient(context.Background(), slog.Default(), cfg, resolver)
+
+	if built.len() != 0 {
+		t.Error("an empty bot_token should not rebuild the client")
+	}
+	id, err := resolver.CreateChannel(context.Background(), "inc-1")
+	if err != nil || id != "C-ORIGINAL" {
+		t.Errorf("CreateChannel = (%q, %v), want the original client left untouched", id, err)
+	}
+}
+
+func TestRefreshSlackRESTClient_FetchError_LeavesCurrentClientInPlace(t *testing.T) {
+	built := withFakeSlackAPIClient(t)
+	resolver := newSlackClientResolver(&fakeSlack{createChannelID: "C-ORIGINAL"}, "")
+	cfg := &fakeConfigAPI{credentialErr: errAlways}
+
+	refreshSlackRESTClient(context.Background(), slog.Default(), cfg, resolver)
+
+	if built.len() != 0 {
+		t.Error("a fetch error should not rebuild the client")
 	}
 }
 

@@ -43,12 +43,18 @@ type chatAPI interface {
 
 // configAPI is the subset of pb.ConfigServiceClient the bot uses to load its
 // non-secret Slack settings (default notification channel, incident channel
-// naming convention) — see docs/requirements.md §18.4. The bot's own
-// credentials (SLACK_APP_TOKEN, SLACK_BOT_TOKEN) come directly from its
-// process environment, matching docs/architecture.md §10's docker-compose
-// layout; ConfigService never returns decrypted credentials anyway.
+// naming convention) — see docs/requirements.md §18.4 — and, per
+// docs/roadmap.md Phase 8, to poll for a datastore-configured Slack bot
+// credential pair that should take precedence over the static
+// SLACK_APP_TOKEN/SLACK_BOT_TOKEN env vars it otherwise falls back to. Both
+// the Socket Mode connection (smClient in main.go) and the REST client (see
+// slackClientResolver) are built from this preferred pair at startup; only
+// *live* reconnection when the datastore credential changes later is
+// REST-client-only (Socket Mode's own live reconnection is a deferred
+// follow-up — see slackClientResolver's doc comment).
 type configAPI interface {
 	GetIntegrationConfig(ctx context.Context, in *pb.GetIntegrationConfigRequest, opts ...grpc.CallOption) (*pb.IntegrationConfigResponse, error)
+	GetSlackBotCredential(ctx context.Context, in *pb.GetSlackBotCredentialRequest, opts ...grpc.CallOption) (*pb.GetSlackBotCredentialResponse, error)
 }
 
 // apiClients groups every backend dependency the bot calls, so bot

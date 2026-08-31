@@ -15,6 +15,7 @@ import (
 
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/crypto"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
@@ -774,6 +775,91 @@ func TestGetIntegrationConfig_NotFound(t *testing.T) {
 	_, err := ts.server.GetIntegrationConfig(context.Background(), &pb.GetIntegrationConfigRequest{IntegrationType: "slack"})
 	if grpcCode(err) != codes.NotFound {
 		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+// newTestConfigServerWithSlackbotEmail is like newTestConfigServer but also
+// sets SlackbotServiceEmail, for GetSlackBotCredential's caller-identity gate.
+func newTestConfigServerWithSlackbotEmail(enc grpchandler.Encryptor, slackbotEmail string) *testConfigServer {
+	services := memory.NewServiceStore()
+	users := memory.NewUserStore()
+	oncall := memory.NewOnCallStore()
+	integrations := memory.NewIntegrationConfigStore()
+	retention := memory.NewRetentionConfigStore()
+	aiPlugins := memory.NewAIPluginStore()
+	return &testConfigServer{
+		server: grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+			Services: services, Users: users, OnCall: oncall, Integrations: integrations,
+			Retention: retention, AIPlugins: aiPlugins, Crypto: enc,
+			SlackbotServiceEmail: slackbotEmail,
+		}),
+		services:     services,
+		users:        users,
+		oncall:       oncall,
+		integrations: integrations,
+		retention:    retention,
+		aiPlugins:    aiPlugins,
+	}
+}
+
+func TestGetSlackBotCredential_ReturnsDecryptedPairForServiceAccount(t *testing.T) {
+	enc := testEncryptor(t)
+	ts := newTestConfigServerWithSlackbotEmail(enc, "slackbot@example.com")
+	ctx := context.Background()
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "slack",
+		Credentials:     map[string]string{"bot_token": "xoxb-1", "app_token": "xapp-1"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig: %v", err)
+	}
+
+	callerCtx := auth.WithUser(ctx, &auth.UserContext{UserID: "slackbot-user", Email: "slackbot@example.com", OrgRole: store.OrgRoleAdmin})
+	resp, err := ts.server.GetSlackBotCredential(callerCtx, &pb.GetSlackBotCredentialRequest{})
+	if err != nil {
+		t.Fatalf("GetSlackBotCredential: %v", err)
+	}
+	if resp.GetBotToken() != "xoxb-1" || resp.GetAppToken() != "xapp-1" {
+		t.Errorf("got (%q, %q), want (xoxb-1, xapp-1)", resp.GetBotToken(), resp.GetAppToken())
+	}
+}
+
+func TestGetSlackBotCredential_NotConfigured_ReturnsEmptyNotError(t *testing.T) {
+	ts := newTestConfigServerWithSlackbotEmail(nil, "slackbot@example.com")
+	callerCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "slackbot-user", Email: "slackbot@example.com", OrgRole: store.OrgRoleAdmin})
+	resp, err := ts.server.GetSlackBotCredential(callerCtx, &pb.GetSlackBotCredentialRequest{})
+	if err != nil {
+		t.Fatalf("GetSlackBotCredential: %v", err)
+	}
+	if resp.GetBotToken() != "" || resp.GetAppToken() != "" {
+		t.Errorf("got (%q, %q), want empty strings when slack isn't configured", resp.GetBotToken(), resp.GetAppToken())
+	}
+}
+
+func TestGetSlackBotCredential_WrongCallerEmail_PermissionDenied(t *testing.T) {
+	enc := testEncryptor(t)
+	ts := newTestConfigServerWithSlackbotEmail(enc, "slackbot@example.com")
+	ctx := context.Background()
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "slack",
+		Credentials:     map[string]string{"bot_token": "xoxb-1"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig: %v", err)
+	}
+
+	adminCtx := auth.WithUser(ctx, &auth.UserContext{UserID: "user-admin", Email: "admin@example.com", OrgRole: store.OrgRoleAdmin})
+	_, err := ts.server.GetSlackBotCredential(adminCtx, &pb.GetSlackBotCredentialRequest{})
+	if grpcCode(err) != codes.PermissionDenied {
+		t.Errorf("an unrelated Admin caller: want PermissionDenied, got %v", grpcCode(err))
+	}
+}
+
+func TestGetSlackBotCredential_NoServiceEmailConfigured_RejectsEveryCaller(t *testing.T) {
+	enc := testEncryptor(t)
+	ts := newTestConfigServerWithSlackbotEmail(enc, "")
+	adminCtx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-admin", Email: "admin@example.com", OrgRole: store.OrgRoleAdmin})
+	_, err := ts.server.GetSlackBotCredential(adminCtx, &pb.GetSlackBotCredentialRequest{})
+	if grpcCode(err) != codes.PermissionDenied {
+		t.Errorf("no SlackbotServiceEmail configured: want PermissionDenied, got %v", grpcCode(err))
 	}
 }
 

@@ -125,6 +125,23 @@ service ConfigService {
       get: "/v1/config/integrations/{integration_type}"
     };
   }
+  // GetSlackBotCredential returns the decrypted "slack" integration
+  // credential pair (bot_token/app_token) — the one deliberate exception to
+  // "credentials are never returned by any RPC in this service" above. It
+  // exists solely so cmd/slackbot (a separate process that only talks to
+  // this API over gRPC, with no direct datastore/encryption-key access) can
+  // pick up a datastore-configured Slack token without a restart; see
+  // docs/roadmap.md Phase 8. Gated server-side to the specific slackbot
+  // service account (SLACKBOT_SERVICE_EMAIL), not merely Admin+ — an
+  // unrelated admin session must not be able to pull plaintext Slack tokens
+  // through this call. Returns empty fields (not an error) when the "slack"
+  // integration has no credentials configured, so callers can fall back to
+  // their own static tokens.
+  rpc GetSlackBotCredential(GetSlackBotCredentialRequest) returns (GetSlackBotCredentialResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/integrations/slack/bot-credential"
+    };
+  }
   rpc ListIntegrationConfigs(ListIntegrationConfigsRequest) returns (ListIntegrationConfigsResponse) {
     option (google.api.http) = {
       get: "/v1/config/integrations"
@@ -352,6 +369,16 @@ message UpsertIntegrationConfigRequest {
 
 message GetIntegrationConfigRequest {
   string integration_type = 1;
+}
+
+message GetSlackBotCredentialRequest {}
+
+message GetSlackBotCredentialResponse {
+  // bot_token / app_token are empty when the "slack" integration has no
+  // datastore-configured credentials — not an error, since the caller has a
+  // static-env-var fallback of its own.
+  string bot_token = 1;
+  string app_token = 2;
 }
 
 message ListIntegrationConfigsRequest {}

@@ -793,6 +793,24 @@ func local_request_ConfigService_GetIntegrationConfig_0(ctx context.Context, mar
 
 }
 
+func request_ConfigService_GetSlackBotCredential_0(ctx context.Context, marshaler runtime.Marshaler, client ConfigServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq GetSlackBotCredentialRequest
+	var metadata runtime.ServerMetadata
+
+	msg, err := client.GetSlackBotCredential(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+
+}
+
+func local_request_ConfigService_GetSlackBotCredential_0(ctx context.Context, marshaler runtime.Marshaler, server ConfigServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq GetSlackBotCredentialRequest
+	var metadata runtime.ServerMetadata
+
+	msg, err := server.GetSlackBotCredential(ctx, &protoReq)
+	return msg, metadata, err
+
+}
+
 func request_ConfigService_ListIntegrationConfigs_0(ctx context.Context, marshaler runtime.Marshaler, client ConfigServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var protoReq ListIntegrationConfigsRequest
 	var metadata runtime.ServerMetadata
@@ -1555,6 +1573,31 @@ func RegisterConfigServiceHandlerServer(ctx context.Context, mux *runtime.ServeM
 
 	})
 
+	mux.Handle("GET", pattern_ConfigService_GetSlackBotCredential_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		var annotatedContext context.Context
+		annotatedContext, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/sevitout.v1.ConfigService/GetSlackBotCredential", runtime.WithHTTPPathPattern("/v1/config/integrations/slack/bot-credential"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_ConfigService_GetSlackBotCredential_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_ConfigService_GetSlackBotCredential_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
 	mux.Handle("GET", pattern_ConfigService_ListIntegrationConfigs_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -2173,6 +2216,28 @@ func RegisterConfigServiceHandlerClient(ctx context.Context, mux *runtime.ServeM
 
 	})
 
+	mux.Handle("GET", pattern_ConfigService_GetSlackBotCredential_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		var annotatedContext context.Context
+		annotatedContext, err = runtime.AnnotateContext(ctx, mux, req, "/sevitout.v1.ConfigService/GetSlackBotCredential", runtime.WithHTTPPathPattern("/v1/config/integrations/slack/bot-credential"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_ConfigService_GetSlackBotCredential_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_ConfigService_GetSlackBotCredential_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
 	mux.Handle("GET", pattern_ConfigService_ListIntegrationConfigs_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -2407,6 +2472,8 @@ var (
 
 	pattern_ConfigService_GetIntegrationConfig_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"v1", "config", "integrations", "integration_type"}, ""))
 
+	pattern_ConfigService_GetSlackBotCredential_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"v1", "config", "integrations", "slack", "bot-credential"}, ""))
+
 	pattern_ConfigService_ListIntegrationConfigs_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "config", "integrations"}, ""))
 
 	pattern_ConfigService_GetRetentionConfig_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"v1", "config", "retention", "severity_level"}, ""))
@@ -2458,6 +2525,8 @@ var (
 	forward_ConfigService_UpsertIntegrationConfig_0 = runtime.ForwardResponseMessage
 
 	forward_ConfigService_GetIntegrationConfig_0 = runtime.ForwardResponseMessage
+
+	forward_ConfigService_GetSlackBotCredential_0 = runtime.ForwardResponseMessage
 
 	forward_ConfigService_ListIntegrationConfigs_0 = runtime.ForwardResponseMessage
 

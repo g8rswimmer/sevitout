@@ -91,15 +91,20 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.ConfigService/ListOnCallRotations":     store.OrgRoleViewer,
 	"/sevitout.v1.ConfigService/UpsertIntegrationConfig": store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/GetIntegrationConfig":    store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListIntegrationConfigs":  store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetRetentionConfig":      store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/UpdateRetentionConfig":   store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListRetentionConfig":     store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/CreateAIPlugin":          store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetAIPlugin":             store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/UpdateAIPlugin":          store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteAIPlugin":          store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListAIPlugins":           store.OrgRoleAdmin,
+	// GetSlackBotCredential sits at the same Admin floor as every other
+	// integration-config RPC, but ConfigServer.GetSlackBotCredential narrows
+	// it further, server-side, to one specific Admin account (the slackbot
+	// service user) — see that method's doc comment.
+	"/sevitout.v1.ConfigService/GetSlackBotCredential":  store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListIntegrationConfigs": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetRetentionConfig":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateRetentionConfig":  store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListRetentionConfig":    store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateAIPlugin":         store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetAIPlugin":            store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateAIPlugin":         store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteAIPlugin":         store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListAIPlugins":          store.OrgRoleAdmin,
 	// AI service — running/streaming an action needs at least Responder
 	// (same floor as most SEV-mutating actions); listing outputs and
 	// available plugins is read-only and open to any authenticated user.

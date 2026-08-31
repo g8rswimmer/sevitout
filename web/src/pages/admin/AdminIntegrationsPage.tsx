@@ -15,9 +15,10 @@ import type { IntegrationHealthStatus } from '@/types/api'
 
 /** The integration types with a live connectivity check registered
  * server-side (cmd/server/main.go's healthCheckers map) — each also has one
- * well-known credential key its HealthChecker reads, and (Jira and Slack)
- * one or more well-known non-secret settings keys used alongside the
- * credential:
+ * well-known credential key its HealthChecker reads (plus, for Slack, a
+ * second well-known credential key — see extraCredentialKeys below), and
+ * (Jira and Slack) one or more well-known non-secret settings keys used
+ * alongside the credential:
  *  - Jira: cloud_id (required — the datastore path won't activate without
  *    it, see jiraIssueResolver.apply) and site_url (optional — cosmetic
  *    browse-link generation only, mirroring JIRA_SITE_URL's independently-
@@ -31,20 +32,24 @@ import type { IntegrationHealthStatus } from '@/types/api'
  *
  * `note`, where present, calls out a real behavioral gap worth surfacing in
  * the form itself rather than leaving an admin to discover it by testing —
- * currently only Slack has one, because it's the only integration whose
- * *live* credential is unreachable from here at all (see the credential
- * field below and cmd/slackbot/main.go — the running bot process is a
- * separate binary that reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN from its own
- * environment at startup; unlike PagerDuty/GitHub/Jira, whose resolvers run
- * in-process inside cmd/server with direct access to decrypt this same
- * datastore config, the bot only ever talks to the API over gRPC, and
- * IntegrationConfigResponse deliberately never returns decrypted
- * credentials over that wire — by design, plaintext secrets never leave the
- * process that decrypts them). */
+ * currently only Slack has one. Per docs/roadmap.md Phase 8, this
+ * bot_token/app_token pair is preferred over SLACK_BOT_TOKEN/SLACK_APP_TOKEN
+ * (which remain a fallback) for *both* halves of the running bot at
+ * startup: Socket Mode (slash commands, @mentions) and the REST client
+ * (channel creation, messages, invites, history, user lookup). Only the
+ * REST client picks up a change made here *without* a restart — it
+ * periodically re-pulls this pair via ConfigService.GetSlackBotCredential.
+ * Socket Mode's connection is still established once at startup; live-
+ * reconnecting it on a credential change is an explicit, not-yet-built
+ * follow-up (see the roadmap phase's "genuinely hard part"), so a rotated
+ * credential still needs a restart to reach slash commands/@mentions. */
 const KNOWN_INTEGRATIONS: {
   value: string
   label: string
   credentialKey: string
+  /** Additional well-known credential keys beyond credentialKey, pre-filled
+   * as their own rows the same way — currently only Slack's app_token. */
+  extraCredentialKeys?: string[]
   settingsKeys?: { key: string; required: boolean }[]
   note?: string
 }[] = [
@@ -54,11 +59,12 @@ const KNOWN_INTEGRATIONS: {
     value: 'slack',
     label: 'Slack',
     credentialKey: 'bot_token',
+    extraCredentialKeys: ['app_token'],
     settingsKeys: [
       { key: 'default_channel', required: false },
       { key: 'channel_naming_convention', required: false },
     ],
-    note: 'This credential only powers the connectivity check above — the running Slack bot reads SLACK_BOT_TOKEN from its own environment at startup and won’t pick up a value saved here without restarting the slackbot process. default_channel and channel_naming_convention below do reach the running bot (it polls them periodically).',
+    note: 'The Slack bot prefers this bot_token/app_token pair over SLACK_BOT_TOKEN/SLACK_APP_TOKEN — set both here and no env vars are needed. Changes reach message/channel actions live; Socket Mode still needs a restart to pick up a rotated credential. Settings below update live too.',
   },
   {
     value: 'jira',
@@ -70,6 +76,15 @@ const KNOWN_INTEGRATIONS: {
     ],
   },
 ]
+
+/** Builds the credential rows to show for known's type: the well-known
+ * credentialKey plus any extraCredentialKeys, each as its own empty,
+ * editable row — mirrors settingsRowsFor's "every well-known key is always
+ * visible" treatment below, just for credentials instead of settings. */
+function credentialRowsFor(known: (typeof KNOWN_INTEGRATIONS)[number] | undefined): TagRow[] {
+  if (!known) return [{ key: '', value: '' }]
+  return [known.credentialKey, ...(known.extraCredentialKeys ?? [])].map((key) => ({ key, value: '' }))
+}
 const OTHER = '__other__'
 
 const HEALTH_BADGE: Record<IntegrationHealthStatus, { label: string; variant: BadgeProps['variant'] }> = {
@@ -104,7 +119,7 @@ export function AdminIntegrationsPage() {
 
   const [typeSelect, setTypeSelect] = useState<string>(KNOWN_INTEGRATIONS[0].value)
   const [customType, setCustomType] = useState('')
-  const [credentials, setCredentials] = useState<TagRow[]>([{ key: KNOWN_INTEGRATIONS[0].credentialKey, value: '' }])
+  const [credentials, setCredentials] = useState<TagRow[]>(credentialRowsFor(KNOWN_INTEGRATIONS[0]))
   const [settings, setSettings] = useState<TagRow[]>([])
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -114,7 +129,7 @@ export function AdminIntegrationsPage() {
   function selectType(v: string) {
     setTypeSelect(v)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === v)
-    setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
+    setCredentials(credentialRowsFor(known))
     setSettings(settingsRowsFor(known))
   }
 
@@ -136,7 +151,7 @@ export function AdminIntegrationsPage() {
     setTypeSelect(KNOWN_INTEGRATIONS.some((k) => k.value === type) ? type : OTHER)
     setCustomType(KNOWN_INTEGRATIONS.some((k) => k.value === type) ? '' : type)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === type)
-    setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
+    setCredentials(credentialRowsFor(known))
     setSettings(settingsRowsFor(known, existingSettings))
     setFormError(null)
   }
@@ -248,7 +263,9 @@ export function AdminIntegrationsPage() {
             <Label>Credentials (write-only — leave a value blank to keep it unchanged)</Label>
             <p className="mb-1.5 text-xs text-muted-foreground">
               {knownType
-                ? `Well-known key for this type: "${knownType.credentialKey}"`
+                ? `Well-known key${knownType.extraCredentialKeys?.length ? 's' : ''} for this type: ${[knownType.credentialKey, ...(knownType.extraCredentialKeys ?? [])]
+                    .map((k) => `"${k}"`)
+                    .join(', ')}`
                 : 'Enter whatever key(s) this integration expects.'}
             </p>
             <TagRowsEditor rows={credentials} onChange={setCredentials} />
