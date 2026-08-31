@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
+import { Info, RefreshCw } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,13 +15,60 @@ import type { IntegrationHealthStatus } from '@/types/api'
 
 /** The integration types with a live connectivity check registered
  * server-side (cmd/server/main.go's healthCheckers map) — each also has one
- * well-known credential key its HealthChecker reads. "Other" covers any
- * integration_type not in this fixed list (e.g. a future Datadog/Prometheus
- * integration), stored and displayed exactly as typed. */
-const KNOWN_INTEGRATIONS: { value: string; label: string; credentialKey: string }[] = [
+ * well-known credential key its HealthChecker reads, and (Jira and Slack)
+ * one or more well-known non-secret settings keys used alongside the
+ * credential:
+ *  - Jira: cloud_id (required — the datastore path won't activate without
+ *    it, see jiraIssueResolver.apply) and site_url (optional — cosmetic
+ *    browse-link generation only, mirroring JIRA_SITE_URL's independently-
+ *    optional treatment in internal/config.Config).
+ *  - Slack: default_channel and channel_naming_convention (both optional —
+ *    read by cmd/slackbot's loadSlackSettings/runSettingsRefresher, each
+ *    with a safe built-in fallback when unset; not read by
+ *    slackHealthChecker, which only needs the bot_token credential).
+ * "Other" covers any integration_type not in this fixed list (e.g. a future
+ * Datadog/Prometheus integration), stored and displayed exactly as typed.
+ *
+ * `note`, where present, calls out a real behavioral gap worth surfacing in
+ * the form itself rather than leaving an admin to discover it by testing —
+ * currently only Slack has one, because it's the only integration whose
+ * *live* credential is unreachable from here at all (see the credential
+ * field below and cmd/slackbot/main.go — the running bot process is a
+ * separate binary that reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN from its own
+ * environment at startup; unlike PagerDuty/GitHub/Jira, whose resolvers run
+ * in-process inside cmd/server with direct access to decrypt this same
+ * datastore config, the bot only ever talks to the API over gRPC, and
+ * IntegrationConfigResponse deliberately never returns decrypted
+ * credentials over that wire — by design, plaintext secrets never leave the
+ * process that decrypts them). */
+const KNOWN_INTEGRATIONS: {
+  value: string
+  label: string
+  credentialKey: string
+  settingsKeys?: { key: string; required: boolean }[]
+  note?: string
+}[] = [
   { value: 'pagerduty', label: 'PagerDuty', credentialKey: 'api_key' },
   { value: 'github', label: 'GitHub', credentialKey: 'token' },
-  { value: 'slack', label: 'Slack', credentialKey: 'bot_token' },
+  {
+    value: 'slack',
+    label: 'Slack',
+    credentialKey: 'bot_token',
+    settingsKeys: [
+      { key: 'default_channel', required: false },
+      { key: 'channel_naming_convention', required: false },
+    ],
+    note: 'This credential only powers the connectivity check above — the running Slack bot reads SLACK_BOT_TOKEN from its own environment at startup and won’t pick up a value saved here without restarting the slackbot process. default_channel and channel_naming_convention below do reach the running bot (it polls them periodically).',
+  },
+  {
+    value: 'jira',
+    label: 'Jira',
+    credentialKey: 'api_token',
+    settingsKeys: [
+      { key: 'cloud_id', required: true },
+      { key: 'site_url', required: false },
+    ],
+  },
 ]
 const OTHER = '__other__'
 
@@ -36,6 +83,20 @@ function knownLabel(type: string): string {
   return KNOWN_INTEGRATIONS.find((k) => k.value === type)?.label ?? type
 }
 
+/** Builds the settings rows to show for known's type: any already-stored
+ * values first (via existingSettings, preserving whatever isn't in
+ * known.settingsKeys too — e.g. a value set before that key existed), then
+ * an empty row appended for every well-known key (required or optional)
+ * that isn't already present, so every well-known key is always a visible,
+ * editable field — not just mentioned in the hint text below. */
+function settingsRowsFor(known: (typeof KNOWN_INTEGRATIONS)[number] | undefined, existingSettings?: Record<string, string>): TagRow[] {
+  const rows = recordToTagRows(existingSettings)
+  for (const s of known?.settingsKeys ?? []) {
+    if (!rows.some((r) => r.key === s.key)) rows.push({ key: s.key, value: '' })
+  }
+  return rows
+}
+
 export function AdminIntegrationsPage() {
   const queryClient = useQueryClient()
   const configs = useQuery({ queryKey: ['admin', 'integrations'], queryFn: api.config.integrations.list })
@@ -48,11 +109,13 @@ export function AdminIntegrationsPage() {
   const [formError, setFormError] = useState<string | null>(null)
 
   const integrationType = typeSelect === OTHER ? customType.trim() : typeSelect
+  const knownType = KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)
 
   function selectType(v: string) {
     setTypeSelect(v)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === v)
     setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
+    setSettings(settingsRowsFor(known))
   }
 
   const upsertMutation = useMutation({
@@ -74,7 +137,7 @@ export function AdminIntegrationsPage() {
     setCustomType(KNOWN_INTEGRATIONS.some((k) => k.value === type) ? '' : type)
     const known = KNOWN_INTEGRATIONS.find((k) => k.value === type)
     setCredentials(known ? [{ key: known.credentialKey, value: '' }] : [{ key: '', value: '' }])
-    setSettings(recordToTagRows(existingSettings))
+    setSettings(settingsRowsFor(known, existingSettings))
     setFormError(null)
   }
 
@@ -174,11 +237,18 @@ export function AdminIntegrationsPage() {
             )}
           </div>
 
+          {knownType?.note && (
+            <div className="flex items-start gap-2 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{knownType.note}</p>
+            </div>
+          )}
+
           <div>
             <Label>Credentials (write-only — leave a value blank to keep it unchanged)</Label>
             <p className="mb-1.5 text-xs text-muted-foreground">
-              {KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)
-                ? `Well-known key for this type: "${KNOWN_INTEGRATIONS.find((k) => k.value === typeSelect)!.credentialKey}"`
+              {knownType
+                ? `Well-known key for this type: "${knownType.credentialKey}"`
                 : 'Enter whatever key(s) this integration expects.'}
             </p>
             <TagRowsEditor rows={credentials} onChange={setCredentials} />
@@ -186,6 +256,13 @@ export function AdminIntegrationsPage() {
 
           <div>
             <Label>Settings (non-secret)</Label>
+            {knownType?.settingsKeys && (
+              <p className="mb-1.5 text-xs text-muted-foreground">
+                {`Well-known key${knownType.settingsKeys.length > 1 ? 's' : ''} for this type: ${knownType.settingsKeys
+                  .map((s) => `"${s.key}"${s.required ? '' : ' (optional)'}`)
+                  .join(', ')}`}
+              </p>
+            )}
             <TagRowsEditor rows={settings} onChange={setSettings} />
           </div>
 

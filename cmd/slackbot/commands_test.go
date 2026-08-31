@@ -11,6 +11,7 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	sevitoutslack "github.com/g8rswimmer/sevitout/internal/integrations/slack"
+	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
 func TestParseAction_Empty(t *testing.T) {
@@ -162,6 +163,14 @@ func TestHandleOpen_CreatesSEVAndReportsID(t *testing.T) {
 
 	if sevs.lastCreateReq.GetSeverityLevel() != 1 || sevs.lastCreateReq.GetTitle() != "checkout down" {
 		t.Errorf("CreateSEV request = %+v", sevs.lastCreateReq)
+	}
+	// Must be one of store.DetectionMethod's known values — fakeSevAPI, unlike
+	// the real server's validateDetectionMethod, doesn't reject an unknown
+	// one, so this needs its own assertion to catch a value drifting out of
+	// sync with the enum (see the "unknown detection_method" InvalidArgument
+	// this previously caused with a stray "slack" literal).
+	if got, want := sevs.lastCreateReq.GetDetectionMethod(), string(store.DetectionMethodSlackEscalation); got != want {
+		t.Errorf("CreateSEV request DetectionMethod = %q, want %q", got, want)
 	}
 	if !strings.Contains(reply, "SEV-2026-0001") {
 		t.Errorf("reply = %q, want it to mention the new SEV ID", reply)

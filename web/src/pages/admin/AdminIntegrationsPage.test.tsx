@@ -26,6 +26,18 @@ function mockFetch(configs: IntegrationConfigResponse[] = [PAGERDUTY]) {
     if (url === '/v1/config/integrations/pagerduty' && method === 'PUT') {
       return Promise.resolve(jsonResponse({ ...PAGERDUTY }))
     }
+    if (url === '/v1/config/integrations/jira' && method === 'PUT') {
+      const body = JSON.parse(String(init?.body))
+      return Promise.resolve(
+        jsonResponse({ integration_type: 'jira', credentials_configured: true, settings: body.settings }),
+      )
+    }
+    if (url === '/v1/config/integrations/slack' && method === 'PUT') {
+      const body = JSON.parse(String(init?.body))
+      return Promise.resolve(
+        jsonResponse({ integration_type: 'slack', credentials_configured: true, settings: body.settings }),
+      )
+    }
     if (url === '/v1/config/integrations/datadog' && method === 'PUT') {
       const body = JSON.parse(String(init?.body))
       return Promise.resolve(jsonResponse({ integration_type: 'datadog', credentials_configured: true, settings: body.settings }))
@@ -53,6 +65,9 @@ describe('AdminIntegrationsPage', () => {
     await screen.findByText('PagerDuty')
 
     expect(screen.getByDisplayValue('api_key')).toBeInTheDocument()
+    // PagerDuty has no gap between "credential saved here" and "credential
+    // actually used" the way Slack does, so it must not show Slack's note.
+    expect(screen.queryByText(/won.t pick up a value saved here/)).not.toBeInTheDocument()
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('Tag value'), 'secret-key')
@@ -70,6 +85,83 @@ describe('AdminIntegrationsPage', () => {
     expect(JSON.parse(String(call[1]!.body))).toMatchObject({
       integration_type: 'pagerduty',
       credentials: { api_key: 'secret-key' },
+    })
+  })
+
+  it('includes Jira in the type dropdown with its well-known credential and settings keys pre-filled', async () => {
+    mockFetch()
+    renderWithProviders(<AdminIntegrationsPage />)
+    await screen.findByText('PagerDuty')
+
+    const user = userEvent.setup()
+    await user.selectOptions(screen.getByLabelText('Type'), 'Jira')
+
+    expect(screen.getByDisplayValue('api_token')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('cloud_id')).toBeInTheDocument()
+    // site_url is optional (cosmetic browse-link generation only) but still
+    // shown as its own editable row, not just mentioned in the hint text.
+    expect(screen.getByText(/"site_url" \(optional\)/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue('site_url')).toBeInTheDocument()
+
+    // The credentials section (1 row: api_token) and the settings section
+    // (2 rows: cloud_id, site_url) each render "Tag value" inputs once Jira
+    // is selected — the first belongs to the credentials row.
+    const [credentialValueInput] = screen.getAllByLabelText('Tag value')
+    await user.type(credentialValueInput, 'jira-secret-token')
+    await user.click(screen.getByRole('button', { name: /save integration/i }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/jira' && init?.method === 'PUT')
+      expect(call).toBeDefined()
+    })
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/jira' && init?.method === 'PUT')!
+    expect(JSON.parse(String(call[1]!.body))).toMatchObject({
+      integration_type: 'jira',
+      credentials: { api_token: 'jira-secret-token' },
+    })
+  })
+
+  it('includes Slack\'s optional settings keys as editable rows, not just credentials', async () => {
+    mockFetch()
+    renderWithProviders(<AdminIntegrationsPage />)
+    await screen.findByText('PagerDuty')
+
+    const user = userEvent.setup()
+    await user.selectOptions(screen.getByLabelText('Type'), 'Slack')
+
+    expect(screen.getByDisplayValue('bot_token')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('default_channel')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('channel_naming_convention')).toBeInTheDocument()
+    expect(screen.getByText(/"default_channel" \(optional\)/)).toBeInTheDocument()
+    expect(screen.getByText(/"channel_naming_convention" \(optional\)/)).toBeInTheDocument()
+    // Slack's credential here doesn't reach the running bot process (a
+    // separate binary reading SLACK_BOT_TOKEN from its own environment) —
+    // the form must say so rather than implying it does.
+    expect(screen.getByText(/won.t pick up a value saved here/)).toBeInTheDocument()
+
+    // Credentials section (1 row: bot_token) + settings section (2 rows:
+    // default_channel, channel_naming_convention) — the first "Tag value"
+    // belongs to the credentials row.
+    const [credentialValueInput] = screen.getAllByLabelText('Tag value')
+    await user.type(credentialValueInput, 'xoxb-slack-secret')
+    await user.click(screen.getByRole('button', { name: /save integration/i }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/slack' && init?.method === 'PUT')
+      expect(call).toBeDefined()
+    })
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/slack' && init?.method === 'PUT')!
+    expect(JSON.parse(String(call[1]!.body))).toMatchObject({
+      integration_type: 'slack',
+      credentials: { bot_token: 'xoxb-slack-secret' },
     })
   })
 

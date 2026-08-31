@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"fmt"
@@ -76,36 +77,36 @@ func main() {
 		os.Exit(1)
 	}
 
-	// --- PagerDuty client (optional) ---
+	// --- PagerDuty client (optional, static fallback) ---
 	var onCaller grpchandler.OnCaller
 	if cfg.PagerDutyAPIKey != "" {
 		onCaller = pagerduty.NewClient(cfg.PagerDutyAPIKey)
-		log.Info("PagerDuty on-call integration enabled")
+		log.Info("PagerDuty on-call integration enabled (static)")
 	}
 
-	// --- GitHub client (optional) ---
+	// --- GitHub client (optional, static fallback) ---
 	var issueClient grpchandler.IssueClient
 	if cfg.GitHubToken != "" {
 		issueClient = &githubIssueClient{c: github.NewClient(cfg.GitHubToken)}
-		log.Info("GitHub Issues integration enabled")
+		log.Info("GitHub Issues integration enabled (static)")
 	} else {
-		log.Info("GitHub Issues integration DISABLED")
+		log.Info("GitHub Issues integration DISABLED (static)")
 	}
 
-	// --- Jira client (optional) --- both JIRA_CLOUD_ID and JIRA_API_TOKEN
-	// are required together (unlike GitHub's single GITHUB_TOKEN — see
-	// config.Config.JiraCloudID's doc comment for why); partial
-	// configuration is treated the same as none rather than starting with a
-	// client that would fail every call. JIRA_SITE_URL is independently
-	// optional (see config.Config.JiraSiteURL's doc comment) — passed
-	// through either way, since jira.NewClient treats "" as "no browse
-	// links" rather than an error.
+	// --- Jira client (optional, static fallback) --- both JIRA_CLOUD_ID and
+	// JIRA_API_TOKEN are required together (unlike GitHub's single
+	// GITHUB_TOKEN — see config.Config.JiraCloudID's doc comment for why);
+	// partial configuration is treated the same as none rather than starting
+	// with a client that would fail every call. JIRA_SITE_URL is
+	// independently optional (see config.Config.JiraSiteURL's doc comment) —
+	// passed through either way, since jira.NewClient treats "" as "no
+	// browse links" rather than an error.
 	var jiraClient grpchandler.JiraIssueClient
 	if cfg.JiraCloudID != "" && cfg.JiraAPIToken != "" {
 		jiraClient = &jiraIssueClient{c: jira.NewClient(cfg.JiraCloudID, cfg.JiraAPIToken, cfg.JiraSiteURL)}
-		log.Info("Jira integration enabled")
+		log.Info("Jira integration enabled (static)")
 	} else {
-		log.Info("Jira integration DISABLED")
+		log.Info("Jira integration DISABLED (static)")
 	}
 
 	// --- JWT signer ---
@@ -147,6 +148,21 @@ func main() {
 	} else {
 		log.Warn("ENCRYPTION_KEY not set — integration credentials cannot be stored")
 	}
+
+	// --- Prefer datastore-configured credentials over the static clients
+	// built above, per integration, falling back to the static client (which
+	// may itself be nil) whenever the Config API has no usable credentials
+	// for that integration type. Each resolver resolves once here (checking
+	// stores.IntegrationConfig first) and caches the result; ConfigServer
+	// below is given the same three resolvers as Refreshers so it can tell
+	// them to re-resolve immediately after an admin edits that integration's
+	// config via the Config API, rather than only on the next restart. ---
+	pagerdutyResolver := newPagerdutyResolver(ctx, stores.IntegrationConfig, encryptor, onCaller)
+	githubResolver := newGitHubIssueResolver(ctx, stores.IntegrationConfig, encryptor, issueClient)
+	jiraResolver := newJiraIssueResolver(ctx, stores.IntegrationConfig, encryptor, jiraClient)
+	onCaller = pagerdutyResolver
+	issueClient = githubResolver
+	jiraClient = jiraResolver
 
 	// --- WebSocket hub: room-per-SEV pub/sub fed by the mutation handlers below ---
 	wsHub := ws.NewHub()
@@ -215,6 +231,9 @@ func main() {
 		AIPlugins:    stores.AIPlugin,
 		Crypto:       encryptor,
 		RateLimits:   aiDispatcher,
+		Refreshers: []grpchandler.IntegrationCredentialsRefresher{
+			pagerdutyResolver, githubResolver, jiraResolver,
+		},
 	})
 	aiServer := grpchandler.NewAIServer(aiDispatcher, stores.AIOutput, stores.AIPlugin)
 
@@ -778,4 +797,23 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
+}
+
+// Hijack forwards to the underlying ResponseWriter's http.Hijacker, which
+// embedding the http.ResponseWriter *interface* above does not do on its
+// own — Hijack isn't part of that interface, so without this override
+// statusWriter would silently fail the type assertion gorilla/websocket's
+// Upgrade makes to take over the raw connection, breaking every WebSocket
+// upgrade that passes through loggingMiddleware (i.e. /ws) with a 500
+// ("response does not implement http.Hijacker") no matter how well-formed
+// the request otherwise is. httpL (cmux's HTTP/1.1 listener,
+// cmux.Any() below) always hands loggingMiddleware a connection whose real
+// ResponseWriter does support hijacking, so the type assertion here only
+// fails if something changes that.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("statusWriter: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }

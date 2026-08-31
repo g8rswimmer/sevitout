@@ -25,6 +25,29 @@ type RateLimitEvictor interface {
 	EvictRateLimit(pluginID int64)
 }
 
+// IntegrationCredentialsRefresher is handed the plaintext credentials and
+// settings UpsertIntegrationConfig has just durably persisted for one
+// integrationType, so an in-process client cached from that integration's
+// credentials (see cmd/server's OnCaller/IssueClient/JiraIssueClient
+// *Resolver types) can apply them immediately — without waiting for a
+// server restart, and without ever needing to read or decrypt anything
+// from the datastore itself; that only happens once, at that resolver's own
+// startup. Declared here (the consumer) per this repo's interface-ownership
+// convention. Implementations must ignore calls for an integrationType they
+// don't own (returning nil) and must be safe for concurrent use.
+//
+// A non-nil error means credentials/settings could not be turned into a
+// usable client. UpsertIntegrationConfig calls every registered refresher
+// right after persisting — not before — because the credentials must
+// already be durable for a resolver to safely apply them; on error, it
+// rolls the just-written config back to what it held before the call (a
+// best-effort compensating write, not a real cross-system transaction) and
+// reports the failure, rather than confirming a save that silently isn't
+// usable.
+type IntegrationCredentialsRefresher interface {
+	RefreshIntegrationCredentials(ctx context.Context, integrationType string, credentials map[string]string, settings map[string]any) error
+}
+
 // ConfigServer implements pb.ConfigServiceServer: the admin configuration API
 // (service registry, user management, on-call rotations, integration
 // credentials, AI plugin registration, and data retention policy). Its
@@ -39,14 +62,15 @@ type ConfigServer struct {
 	integrations store.IntegrationConfigStore
 	retention    store.RetentionConfigStore
 	aiPlugins    store.AIPluginStore
-	crypto       Encryptor        // nil when ENCRYPTION_KEY is not set
-	rateLimits   RateLimitEvictor // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
+	crypto       Encryptor                         // nil when ENCRYPTION_KEY is not set
+	rateLimits   RateLimitEvictor                  // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
+	refreshers   []IntegrationCredentialsRefresher // notified after every successful UpsertIntegrationConfig
 }
 
 // ConfigServerParams groups NewConfigServer's dependencies. Crypto may be
 // nil, in which case UpsertIntegrationConfig and CreateAIPlugin/
 // UpdateAIPlugin reject any request that supplies credentials/an API key.
-// RateLimits may also be nil.
+// RateLimits and Refreshers may also be nil/empty.
 type ConfigServerParams struct {
 	Services     store.ServiceStore
 	Users        store.UserStore
@@ -56,6 +80,7 @@ type ConfigServerParams struct {
 	AIPlugins    store.AIPluginStore
 	Crypto       Encryptor
 	RateLimits   RateLimitEvictor
+	Refreshers   []IntegrationCredentialsRefresher
 }
 
 func NewConfigServer(p ConfigServerParams) *ConfigServer {
@@ -68,6 +93,7 @@ func NewConfigServer(p ConfigServerParams) *ConfigServer {
 		aiPlugins:    p.AIPlugins,
 		crypto:       p.Crypto,
 		rateLimits:   p.RateLimits,
+		refreshers:   p.Refreshers,
 	}
 }
 

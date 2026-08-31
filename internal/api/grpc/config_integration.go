@@ -34,9 +34,14 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 		UpdatedAt:       now,
 	}
 
+	// existing (and whether it was found) is kept around past this switch
+	// for one reason: if the write below succeeds but the refresh step
+	// afterward fails, this is exactly what gets restored.
 	existing, err := s.integrations.Get(ctx, req.GetIntegrationType())
+	hadExisting := false
 	switch {
 	case err == nil:
+		hadExisting = true
 		cfg.EncryptedCredentials = existing.EncryptedCredentials
 		cfg.Settings = existing.Settings
 		cfg.CreatedAt = existing.CreatedAt
@@ -46,6 +51,11 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 		return nil, internalError(ctx, "failed to get integration config", err)
 	}
 
+	// plaintextCreds tracks whatever credentials will actually be in effect
+	// for this integration_type once this write completes, so refreshers
+	// below can be handed them directly instead of re-reading and
+	// re-decrypting the row this call just wrote.
+	var plaintextCreds map[string]string
 	if creds := req.GetCredentials(); len(creds) > 0 {
 		if s.crypto == nil {
 			return nil, status.Error(codes.FailedPrecondition,
@@ -60,6 +70,21 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 			return nil, internalError(ctx, "failed to encrypt credentials", err)
 		}
 		cfg.EncryptedCredentials = sealed
+		plaintextCreds = creds // already plaintext — no need to decrypt what we just encrypted
+	} else if len(cfg.EncryptedCredentials) > 0 {
+		// This request doesn't touch credentials, but a previous one left
+		// some stored — decrypt them once here so refreshers see the
+		// credentials that will actually remain in effect. Any decrypt
+		// failure here (e.g. ENCRYPTION_KEY rotated since it was written)
+		// aborts the whole request before anything is written — nothing to
+		// roll back yet, so this is a plain early return.
+		decrypted, decErr := DecryptIntegrationCredentials(s.crypto, cfg)
+		if decErr != nil {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"existing credentials for %q could not be decrypted, refusing to update settings until this is resolved: %v",
+				cfg.IntegrationType, decErr)
+		}
+		plaintextCreds = decrypted
 	}
 
 	// Settings, like credentials, are only replaced when the request actually
@@ -75,6 +100,45 @@ func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.Upse
 
 	if err := s.integrations.Upsert(ctx, cfg); err != nil {
 		return nil, internalError(ctx, "failed to save integration config", err)
+	}
+
+	// The write above is now durable; let every registered refresher (see
+	// cmd/server's *Resolver types) apply it in-process. A refresher only
+	// acts on the integration_type it owns, so at most one is expected to
+	// actually validate anything for a given call; errors.Join is used only
+	// defensively, in case more than one somehow reports a problem.
+	//
+	// If a refresher rejects it, the whole operation must be treated as
+	// failed: roll the datastore back to exactly what it held before this
+	// call (or clear it, for a brand-new integration_type — there is no
+	// store.Delete) so the datastore and the in-process state it drives
+	// never end up disagreeing, and report the failure instead of
+	// confirming a save that isn't actually in effect. This is a
+	// best-effort compensating write, not a real cross-system transaction —
+	// there is a narrow window between the two Upsert calls where a
+	// concurrent reader could observe the not-yet-rolled-back config — but
+	// it's the closest approximation available when the second step
+	// (refresh) is in-process Go, not something a database transaction can
+	// span into.
+	var refreshErrs []error
+	for _, r := range s.refreshers {
+		if err := r.RefreshIntegrationCredentials(ctx, cfg.IntegrationType, plaintextCreds, cfg.Settings); err != nil {
+			refreshErrs = append(refreshErrs, err)
+		}
+	}
+	if refreshErr := errors.Join(refreshErrs...); refreshErr != nil {
+		rollback := &store.IntegrationConfig{IntegrationType: cfg.IntegrationType, CreatedAt: now, UpdatedAt: now}
+		if hadExisting {
+			rollback = existing
+		}
+		if rbErr := s.integrations.Upsert(ctx, rollback); rbErr != nil {
+			slog.ErrorContext(ctx, "integration config rollback after refresh failure also failed",
+				"integration_type", cfg.IntegrationType, "refresh_err", refreshErr, "rollback_err", rbErr)
+		}
+		slog.WarnContext(ctx, "integration config rejected by refresher, rolled back",
+			"actor", callerID(ctx), "integration_type", cfg.IntegrationType, "err", refreshErr)
+		return nil, status.Errorf(codes.InvalidArgument,
+			"integration config rejected: %v; the previous configuration has been restored", refreshErr)
 	}
 
 	slog.InfoContext(ctx, "integration config updated",

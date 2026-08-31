@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -453,6 +455,236 @@ func TestUpsertIntegrationConfig_EncryptsCredentials(t *testing.T) {
 	}
 	if creds["api_key"] != "pd_super_secret" {
 		t.Errorf("decrypted api_key = %q, want pd_super_secret", creds["api_key"])
+	}
+}
+
+// fakeCredentialsRefresher records every RefreshIntegrationCredentials call
+// it receives — including the plaintext credentials/settings handed to it —
+// letting tests assert ConfigServer notifies its configured Refreshers (see
+// cmd/server's OnCaller/IssueClient/JiraIssueClient *Resolver types, the
+// real implementations) with the correct data, and optionally returns a
+// canned error to exercise UpsertIntegrationConfig's
+// reject-before-persisting path.
+type fakeCredentialsRefresher struct {
+	err   error
+	calls []refresherCall
+}
+
+type refresherCall struct {
+	integrationType string
+	credentials     map[string]string
+	settings        map[string]any
+}
+
+func (f *fakeCredentialsRefresher) RefreshIntegrationCredentials(_ context.Context, integrationType string, credentials map[string]string, settings map[string]any) error {
+	f.calls = append(f.calls, refresherCall{integrationType, credentials, settings})
+	return f.err
+}
+
+func TestUpsertIntegrationConfig_NotifiesRefreshersWithPlaintextCredentials(t *testing.T) {
+	enc := testEncryptor(t)
+	integrations := memory.NewIntegrationConfigStore()
+	refresherA := &fakeCredentialsRefresher{}
+	refresherB := &fakeCredentialsRefresher{}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       enc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresherA, refresherB},
+	})
+
+	if _, err := server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"api_key": "pd_super_secret"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig: %v", err)
+	}
+
+	for name, r := range map[string]*fakeCredentialsRefresher{"A": refresherA, "B": refresherB} {
+		if len(r.calls) != 1 {
+			t.Fatalf("refresher %s calls = %v, want exactly one call", name, r.calls)
+		}
+		call := r.calls[0]
+		if call.integrationType != "pagerduty" || call.credentials["api_key"] != "pd_super_secret" {
+			t.Errorf("refresher %s received %+v, want integration_type=pagerduty, api_key=pd_super_secret", name, call)
+		}
+	}
+}
+
+func TestUpsertIntegrationConfig_RefreshRejects_NewIntegrationType_RollsBackToNoCredentials(t *testing.T) {
+	enc := testEncryptor(t)
+	integrations := memory.NewIntegrationConfigStore()
+	refresher := &fakeCredentialsRefresher{err: errors.New("missing required field")}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       enc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresher},
+	})
+
+	_, err := server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"api_key": "pd_super_secret"},
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Fatalf("UpsertIntegrationConfig err = %v, want InvalidArgument when a refresher rejects the config", err)
+	}
+
+	// Refreshers only run after the write is durable (so a resolver never
+	// applies credentials that could still fail to persist) — a rejection
+	// therefore rolls the row back to "no credentials" rather than leaving
+	// no trace at all, since there was no previous row to restore.
+	stored, getErr := integrations.Get(context.Background(), "pagerduty")
+	if getErr != nil {
+		t.Fatalf("Get after a rejected write: %v", getErr)
+	}
+	if len(stored.EncryptedCredentials) != 0 {
+		t.Error("a rejected write for a brand-new integration_type must roll back to no credentials, not retain the rejected ones")
+	}
+}
+
+func TestUpsertIntegrationConfig_RefreshRejects_ExistingIntegrationType_PreviousConfigUnchanged(t *testing.T) {
+	enc := testEncryptor(t)
+	integrations := memory.NewIntegrationConfigStore()
+	refresher := &fakeCredentialsRefresher{}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       enc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresher},
+	})
+	ctx := context.Background()
+
+	// A valid config is saved first (refresher accepts it).
+	if _, err := server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "github",
+		Credentials:     map[string]string{"token": "ghp_original"},
+	}); err != nil {
+		t.Fatalf("initial UpsertIntegrationConfig: %v", err)
+	}
+	original, err := integrations.Get(ctx, "github")
+	if err != nil {
+		t.Fatalf("Get original: %v", err)
+	}
+
+	// A second write with a credential the refresher rejects must be rolled
+	// back after the fact — the original row ends up exactly as it was.
+	refresher.err = errors.New("missing required field")
+	_, err = server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "github",
+		Credentials:     map[string]string{"token": "ghp_bad"},
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Fatalf("UpsertIntegrationConfig err = %v, want InvalidArgument when a refresher rejects the config", err)
+	}
+
+	stored, err := integrations.Get(ctx, "github")
+	if err != nil {
+		t.Fatalf("Get after rejected write: %v", err)
+	}
+	if !bytes.Equal(stored.EncryptedCredentials, original.EncryptedCredentials) {
+		t.Error("a rejected write must leave the previously stored credentials untouched")
+	}
+}
+
+// TestUpsertIntegrationConfig_SettingsOnlyUpdate_RefresherSeesExistingCredentials
+// covers the one place UpsertIntegrationConfig still decrypts anything after
+// startup: a request that only changes settings (no credentials.
+// submitted) must still hand refreshers the previously stored credentials,
+// decrypted once, rather than an empty map that would look like "no
+// credentials configured" and wrongly flip a resolver back to its fallback.
+func TestUpsertIntegrationConfig_SettingsOnlyUpdate_RefresherSeesExistingCredentials(t *testing.T) {
+	enc := testEncryptor(t)
+	integrations := memory.NewIntegrationConfigStore()
+	refresher := &fakeCredentialsRefresher{}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       enc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresher},
+	})
+	ctx := context.Background()
+
+	if _, err := server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "jira",
+		Credentials:     map[string]string{"api_token": "jira_live_token"},
+		Settings:        map[string]string{"cloud_id": "cloud-123"},
+	}); err != nil {
+		t.Fatalf("initial UpsertIntegrationConfig: %v", err)
+	}
+	refresher.calls = nil
+
+	if _, err := server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "jira",
+		Settings:        map[string]string{"cloud_id": "cloud-456"},
+	}); err != nil {
+		t.Fatalf("settings-only UpsertIntegrationConfig: %v", err)
+	}
+
+	if len(refresher.calls) != 1 {
+		t.Fatalf("refresher calls = %v, want exactly one call", refresher.calls)
+	}
+	call := refresher.calls[0]
+	if call.credentials["api_token"] != "jira_live_token" {
+		t.Errorf("settings-only update passed credentials = %v, want the previously stored api_token preserved", call.credentials)
+	}
+	if call.settings["cloud_id"] != "cloud-456" {
+		t.Errorf("settings-only update passed settings = %v, want the new cloud_id", call.settings)
+	}
+}
+
+// TestUpsertIntegrationConfig_SettingsOnlyUpdate_ExistingCredentialsUndecryptable_Rejected
+// covers the "encrypt/decrypt fails in any way" requirement for the one
+// decrypt UpsertIntegrationConfig still performs after startup: existing
+// credentials that can no longer be decrypted (e.g. ENCRYPTION_KEY rotated
+// since they were written) must fail the request outright — before
+// anything is written or any refresher is consulted — rather than silently
+// treating the integration as unconfigured.
+func TestUpsertIntegrationConfig_SettingsOnlyUpdate_ExistingCredentialsUndecryptable_Rejected(t *testing.T) {
+	writeKeyEnc := testEncryptor(t)
+	readKeyEnc := testEncryptor(t) // different key: decryption will fail
+	integrations := memory.NewIntegrationConfigStore()
+
+	raw, err := json.Marshal(map[string]string{"api_key": "pd_live_key"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	sealed, err := writeKeyEnc.Encrypt(raw)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if err := integrations.Upsert(context.Background(), &store.IntegrationConfig{
+		IntegrationType:      "pagerduty",
+		EncryptedCredentials: sealed,
+	}); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+
+	refresher := &fakeCredentialsRefresher{}
+	server := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
+		Integrations: integrations,
+		Crypto:       readKeyEnc,
+		Refreshers:   []grpchandler.IntegrationCredentialsRefresher{refresher},
+	})
+
+	_, err = server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Settings:        map[string]string{"default_escalation_policy": "P999"},
+	})
+	if grpcCode(err) != codes.FailedPrecondition {
+		t.Fatalf("UpsertIntegrationConfig err = %v, want FailedPrecondition when existing credentials can't be decrypted", err)
+	}
+	if len(refresher.calls) != 0 {
+		t.Error("a refresher must not be consulted when existing credentials can't be decrypted")
+	}
+}
+
+func TestUpsertIntegrationConfig_NoRefreshersConfigured_DoesNotPanic(t *testing.T) {
+	// ConfigServerParams.Refreshers is nil here, matching every other
+	// newTestConfigServer-based test in this file — Upsert must tolerate
+	// that rather than nil-panicking when it ranges over the list.
+	ts := newTestConfigServer(testEncryptor(t))
+	if _, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"api_key": "secret"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig: %v", err)
 	}
 }
 
