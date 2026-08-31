@@ -372,6 +372,85 @@ plumbing; 7b is a typing tighten-up plus a lookup table and one render change).
 
 ---
 
+## Phase 8 — Datastore-driven Slack bot credentials
+
+**Status**: 🔲 not started. The gap is identified and an interim mitigation is
+already shipped — `web/src/pages/admin/AdminIntegrationsPage.tsx`'s Slack entry
+carries a `note` explaining the limitation described below, added during the
+same investigation that fixed `/ws` returning 500 (a `statusWriter` missing
+`http.Hijacker`) and `/sev open`'s invalid `detection_method`.
+
+**The gap**: PagerDuty/GitHub/Jira all prefer datastore-configured credentials
+over their static `*_API_KEY`/`*_TOKEN` env vars (env var as fallback), and
+pick up an admin's change with no restart — see `cmd/server`'s `*Resolver`
+types and `internal/api/grpc/config.go`'s `IntegrationCredentialsRefresher`.
+Slack does not: `cmd/slackbot/main.go` builds its real Slack client
+(`socketmode.New`, `sevitoutslack.NewClient`) directly from `SLACK_BOT_TOKEN`/
+`SLACK_APP_TOKEN` env vars once, at startup. The datastore-configured "slack"
+`IntegrationConfig` today only drives the admin health-check widget
+(`slackHealthChecker`, which builds its own separate, throwaway client) and
+two settings (`default_channel`, `channel_naming_convention`, via
+`loadSlackSettings`/`runSettingsRefresher`) — saving a new bot token via the
+admin UI has no effect on the running bot process.
+
+**Why this isn't the same fix as the other three**: those resolvers run
+*in-process* inside `cmd/server`, with direct access to
+`store.IntegrationConfigStore` and the encryption key, so they decrypt
+locally and plaintext never leaves that process. `cmd/slackbot` is a separate
+binary that only talks to the API over gRPC, and `IntegrationConfigResponse`
+deliberately never returns decrypted credentials over that wire (only
+`credentials_configured: bool`) — a real security boundary, not an oversight.
+Closing the gap means accepting one of two trade-offs: a new gRPC path that
+puts plaintext secrets on the wire for the first time in this system, or
+giving `cmd/slackbot` direct DB + `ENCRYPTION_KEY` access (making it a second
+process with reach into every encrypted secret, not just Slack's).
+
+**Recommended design** — a narrowly-scoped gRPC path, not direct DB access:
+
+- One new RPC, e.g. `ConfigService.GetSlackBotCredential` — **not** a
+  generalized "return any integration's decrypted credentials" method.
+  Scoping it to exactly this one caller/use case keeps the blast radius of
+  "a new way to get plaintext over the wire" as small as possible. It
+  decrypts server-side (reusing the existing `DecryptIntegrationCredentials`)
+  and returns the credential pair, gated to callers authenticated as the
+  specific `SLACKBOT_SERVICE_EMAIL` account — not just any Admin — so an
+  unrelated admin session can't casually pull it.
+- Extend the "slack" `IntegrationConfig`'s credential map to also carry
+  `app_token` alongside `bot_token`, so the whole pair (not just the bot
+  token) can be datastore-sourced — symmetric with how Jira's `cloud_id`/
+  `site_url` already live together in one config.
+- `cmd/slackbot`: fold this call into the existing
+  `runSettingsRefresher`/`loadSlackSettings` polling loop (already hits
+  `ConfigService` on an interval) instead of adding a second poller. Cache
+  the pair behind a mutex, the same pattern `bot.defaultChannel`/
+  `channelNamingConvention` already use.
+- **The genuinely hard part**: `bot.slack` (the REST client behind
+  `CreateChannel`/`PostMessage`/`InviteUsers`) is already an interface, so
+  live-swapping it on refresh is small and mechanical — the same shape as
+  `cmd/server`'s `*Resolver.apply`. Rebuilding the **Socket Mode** connection
+  when the token pair changes is not: `socketmode.New` + `client.RunContext`
+  establish one long-lived session at startup, used for slash commands and
+  mention events, and there's no existing "tear down and re-establish this
+  session" path to reuse. Scope a first version to the REST-client swap alone
+  (a real improvement on its own — `CreateChannel`/`PostMessage` stop needing
+  a container restart to pick up a rotated token) and treat live Socket Mode
+  reconnection as a separate follow-up with its own retry/backoff design.
+- Env vars remain the fallback, exactly like the other three integrations: if
+  the datastore has nothing usable (not configured, or the RPC fails), fall
+  back to `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` — preserves today's behavior for
+  anyone not using the admin UI at all.
+
+**Estimate**: ~2-3 days for the REST-client swap (new RPC + RBAC gate +
+refresher integration + tests). Socket Mode live-reconnection is a separate,
+not-yet-estimated follow-up — likely comparable effort on its own, given it
+needs a genuinely new retry/backoff design. **Depends on**: nothing
+technically; revisit priority once there's a real operational need (e.g.
+Slack token rotation becoming a recurring pain point) — today's
+restart-to-rotate is a known, tolerable limitation for a self-hosted,
+single-org tool.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -385,12 +464,16 @@ plumbing; 7b is a typing tighten-up plus a lookup table and one render change).
 | 6a | Jira integration | — | 2-3 days |
 | 6b | Structured monitoring-tool metadata | — | 1-2 days |
 | 7 | Linked Issues frontend (create-Jira UI + tracker badges) | 6a | 1.5-2.5 days |
+| 8 | Datastore-driven Slack bot credentials (REST client; Socket Mode reconnect deferred) | — | 2-3 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
 each other — run them as a parallel workstream, or sequence after, depending on
 team size. Phase 7 is likewise independent of the observability core, but — unlike
-6a/6b — it specifically depends on Phase 6a's backend RPC.
+6a/6b — it specifically depends on Phase 6a's backend RPC. Phase 8 is independent
+of everything above it and, unlike the others, isn't scheduled — it's a scoped
+design for a known, currently-tolerated gap, to pick up if/when it becomes an
+operational pain point rather than on a fixed timeline.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
