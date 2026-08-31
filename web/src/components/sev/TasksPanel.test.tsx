@@ -158,7 +158,7 @@ describe('TasksPanel', () => {
     expect(await screen.findByText(/jira integration is not configured/i)).toBeInTheDocument()
   })
 
-  it('pre-fills the GitHub assignee from the caller stored identity as a name chip, clearable and omitted when empty', async () => {
+  it('pre-fills the GitHub assignee from the caller stored identity, shown by name, clearable and omitted when empty', async () => {
     localStorage.setItem('sevitout.token', 'test-token')
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
@@ -180,14 +180,15 @@ describe('TasksPanel', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /create github issue/i }))
 
-    // The picker shows the caller's name, not the raw GitHub login.
-    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
-    expect(screen.queryByText('alice-gh')).not.toBeInTheDocument()
+    // The same labeled Assignee field shows the caller's name, not the raw
+    // GitHub login, and is read-only while a value is set.
+    await waitFor(() => expect(screen.getByLabelText('Assignee')).toHaveValue('Alice'))
+    expect(screen.queryByDisplayValue('alice-gh')).not.toBeInTheDocument()
 
-    // Clearable: clearing reveals the search input again, and the next
-    // create omits assignee entirely rather than sending "".
+    // Clearable: clearing makes the field an editable search box again, and
+    // the next create omits assignee entirely rather than sending "".
     await user.click(screen.getByRole('button', { name: /clear assignee/i }))
-    expect(screen.getByLabelText('Assignee')).toBeInTheDocument()
+    expect(screen.getByLabelText('Assignee')).toHaveValue('')
 
     await user.type(screen.getByLabelText('Owner'), 'acme')
     await user.type(screen.getByLabelText('Repo'), 'api')
@@ -236,8 +237,7 @@ describe('TasksPanel', () => {
     expect(screen.queryByText('Bobby')).not.toBeInTheDocument()
 
     await user.click(screen.getByText('Bob'))
-    expect(screen.getByText('Bob')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Assignee')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Assignee')).toHaveValue('Bob')
 
     await user.type(screen.getByLabelText('Owner'), 'acme')
     await user.type(screen.getByLabelText('Repo'), 'api')
@@ -276,7 +276,7 @@ describe('TasksPanel', () => {
     await user.type(screen.getByLabelText('Assignee'), 'car')
 
     await user.click(await screen.findByText('Carol'))
-    expect(screen.getByText('Carol')).toBeInTheDocument()
+    expect(screen.getByLabelText('Assignee')).toHaveValue('Carol')
 
     await user.type(screen.getByLabelText('Project key'), 'OPS')
     await user.type(screen.getByLabelText('Issue type'), 'Bug')

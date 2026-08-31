@@ -63,13 +63,16 @@ describe('AssigneePicker', () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: '1', name: 'Alice', github_username: 'alice-gh' }))
   })
 
-  it('shows the selected name (not the raw value) with a clear control once a value is set', async () => {
+  it('shows the selected name (not the raw value) as the labeled input value, read-only, with a clear control', async () => {
     const onClear = vi.fn()
     renderWithProviders(<AssigneePicker field="github_username" value="alice-gh" selectedName="Alice" onSelect={vi.fn()} onClear={onClear} />)
 
-    expect(screen.getByText('Alice')).toBeInTheDocument()
-    expect(screen.queryByText('alice-gh')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Assignee')).not.toBeInTheDocument()
+    // Still one labeled "Assignee" control the whole time — not swapped for
+    // an unrelated chip element once something's picked.
+    const input = screen.getByLabelText('Assignee')
+    expect(input).toHaveValue('Alice')
+    expect(input).toHaveAttribute('readonly')
+    expect(screen.queryByDisplayValue('alice-gh')).not.toBeInTheDocument()
 
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /clear assignee/i }))
@@ -78,6 +81,11 @@ describe('AssigneePicker', () => {
 
   it('falls back to the raw value when no selectedName is known', async () => {
     renderWithProviders(<AssigneePicker field="jira_account_id" value="acc-42" onSelect={vi.fn()} onClear={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('acc-42')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText('Assignee')).toHaveValue('acc-42'))
+  })
+
+  it('renders a visible "Assignee" label above the field', () => {
+    renderWithProviders(<AssigneePicker field="github_username" value="" onSelect={vi.fn()} onClear={vi.fn()} />)
+    expect(screen.getByText('Assignee')).toBeInTheDocument()
   })
 })
