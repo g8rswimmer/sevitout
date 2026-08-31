@@ -166,7 +166,7 @@ func (b *bot) handleOpen(ctx context.Context, cmd slack.SlashCommand, args []str
 	resp, err := b.api.sevs.CreateSEV(ctx, &pb.CreateSEVRequest{
 		Title:           title,
 		SeverityLevel:   severity,
-		DetectionMethod: "slack",
+		DetectionMethod: string(store.DetectionMethodSlackEscalation),
 	})
 	if err != nil {
 		return fmt.Sprintf("failed to open SEV: %v", err)
