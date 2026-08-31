@@ -69,6 +69,7 @@ Other useful targets:
 ```bash
 make down             # stop the stack
 make migrate          # (re-)run pending migrations
+make migrate-down     # roll back the most recent migration
 make psql             # open a psql shell against the running database
 go run ./cmd/server   # run the API server directly, without Docker
 ```
@@ -92,6 +93,7 @@ refuses to run without one.
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Yes | Database name/user/password used by the `postgres` and `migrate` Compose services |
 | `DATABASE_URL` | Yes | Full PostgreSQL connection string for the API server. Uses `localhost` for host-machine connections (keep in sync with the `POSTGRES_*` vars above); inside Docker, service-to-service traffic uses the `postgres` hostname instead |
 | `JWT_SECRET` | Yes | JWT signing key, minimum 32 characters. Also reused to sign public share-link tokens |
+| `ALLOW_INSECURE_JWT_SECRET` | No | Set to `true` to let the server start with no `JWT_SECRET` set, using a fixed insecure default instead. Fails closed otherwise — the server refuses to start rather than silently signing sessions with a source-visible secret. Local dev/CI convenience only; never set this in a real deployment |
 | `JWT_TTL_HOURS` | No (default `24`) | Session token lifetime |
 | `ENCRYPTION_KEY` | Yes for integrations/AI plugins | AES-256-GCM key (base64-encoded, 32 raw bytes) used to encrypt integration credentials and AI plugin API keys at rest |
 | `LOG_LEVEL` | No (default `info`) | One of `debug`, `info`, `warn`, `error` (case-insensitive). `debug` additionally logs every outbound PagerDuty/GitHub/Slack call and every WebSocket event fan-out |
@@ -121,6 +123,26 @@ make proto                # regenerate protobuf/gRPC/gateway/OpenAPI code from p
 
 Frontend tests and build live under `web/` (`npm test`, `npm run build`).
 
+## Observability
+
+Two unauthenticated endpoints on the same port as everything else (`:8080`),
+alongside `/openapi.json`:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /healthz` | Liveness/readiness probe — checks only that the API server's own database is reachable. Point a container orchestrator's health check here. Distinct from `GET /admin/integrations/health` (Admin-only, checks *third-party* integration connectivity — PagerDuty/GitHub/Slack/Jira) |
+| `GET /metrics` | Prometheus text-format metrics: RPC request/duration counters, a WebSocket connection gauge, an AI-dispatch outcome counter, DB connection-pool gauges, and an open-SEV-count gauge by severity |
+
+Every gRPC/REST API call, plus the three standalone HTTP handlers (`/ws`,
+`/admin/integrations/health`, `/s/{token}`), carries a correlation ID —
+generated per request or honored from an incoming `X-Request-Id` header, echoed
+back in the response, and bound to every log line for that request.
+`/healthz`/`/metrics` themselves are plain scrape/probe targets and don't
+carry one. See [`demo/healthz.md`](demo/healthz.md),
+[`demo/metrics.md`](demo/metrics.md), and
+[`demo/request-scoped-logging.md`](demo/request-scoped-logging.md) for exact
+walkthroughs.
+
 ## Documentation
 
 | Doc | What it's for |
@@ -128,7 +150,7 @@ Frontend tests and build live under `web/` (`npm test`, `npm run build`).
 | [`docs/user-guide.md`](docs/user-guide.md) | How to use Sevitout — creating SEVs, understanding metrics, running postmortems, configuring integrations. Start here if you're an operator, IC, or admin |
 | [`docs/architecture.md`](docs/architecture.md) | System design: services, database schema, API layer, key architectural decisions |
 | [`docs/roadmap.md`](docs/roadmap.md) | The current phased plan for engineering, observability, and feature work — what's next and why, updated as phases ship |
-| [`docs/architecture-evolution.md`](docs/architecture-evolution.md) | Proposed infra additions on top of `docs/architecture.md` — request-scoped logging, metrics, config package — and what's explicitly out of scope for now |
+| [`docs/architecture-evolution.md`](docs/architecture-evolution.md) | Historical design record for the observability/hardening work in `docs/roadmap.md` Phases 0–4 (config package, request-scoped logging, metrics, `codes.Internal` convention, `/healthz`) — all shipped; see `docs/architecture.md` for the as-built description and `demo/` for exact behavior |
 | [`docs/requirements.md`](docs/requirements.md) | Full functional specification |
 | [`docs/project-plan.md`](docs/project-plan.md) | The milestone-by-milestone build plan (historical planning record — see `demo/` and `docs/user-guide.md` for how the system actually behaves today) |
 | [`demo/`](demo/) | One runbook per milestone with exact `curl`/Slack/UI walkthroughs and known limitations — the most detailed reference for exact API behavior |

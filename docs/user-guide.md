@@ -2,7 +2,7 @@
 
 This guide is for people **using** Sevitout day to day: opening and running a
 SEV, writing a postmortem, and — for Admins — wiring up Slack, PagerDuty,
-GitHub, and AI plugins. It describes the web app and the Slack bot.
+GitHub, Jira, and AI plugins. It describes the web app and the Slack bot.
 
 If you're integrating against the API directly, start with
 [`docs/architecture.md`](architecture.md) and the per-milestone runbooks in
@@ -36,14 +36,15 @@ A **postmortem is required for every SEV**, regardless of severity — see
 - **Details** — title (required), severity level, description, and affected
   services (pick from the service registry, or type a new one).
 - **Detection** — *Started at* / *Detected at* timestamps, detection method,
-  monitoring tool, alert name, and optional links (alert link, metric/query
-  link, snapshot image URL).
+  monitoring tool (a closed list: Datadog, Prometheus, CloudWatch, or Other),
+  alert name, and optional links (alert link, dashboard link, a saved
+  query/expression, snapshot image URL).
 - **Tags** — arbitrary key/value pairs for later filtering.
 
 Two checkboxes at the bottom matter for how the SEV is handled downstream:
 
 - **Sensitive** — restricts visibility and excludes the SEV from search,
-  reports, and AI dispatch (see [§14.4](#144-ai-plugins) and
+  reports, and AI dispatch (see [§14.5](#145-ai-plugins) and
   [§13](#13-reporting-dashboards-public-share-links)). Use this for
   security incidents or anything with restricted-visibility requirements.
 - **Disable AI plugin dispatch for this SEV** — opts this one SEV out of AI
@@ -70,7 +71,7 @@ the full CRUD surface.
 - The Slack bot creates a dedicated incident channel for the SEV,
   **regardless of severity** — see [§14.1](#141-slack).
 - SEV-1 and SEV-2 SEVs automatically get an AI-suggested list of responders
-  (if an AI plugin is enabled) — see [§14.4](#144-ai-plugins).
+  (if an AI plugin is enabled) — see [§14.5](#145-ai-plugins).
 - If the SEV's affected service + root cause category matches a prior SEV,
   it's auto-linked to it as `recurrence-of` (only once the root cause
   category is set — see [§13](#13-reporting-dashboards-public-share-links)).
@@ -250,12 +251,14 @@ captures the wrong conversation.
 
 ---
 
-## 9. Linked tasks (GitHub Issues) & SLA due dates
+## 9. Linked tasks (GitHub & Jira Issues) & SLA due dates
 
-Link action items and follow-up work to a SEV. **v1 supports GitHub Issues**
-(Jira and Linear are planned as a fast-follow). Each link has a relationship
-type (`action-item`, `contributing-factor`, `follow-up`, `dependency`) and a
-priority:
+Link action items and follow-up work to a SEV. **GitHub Issues and Jira
+Issues are both supported** (Linear is still planned as a fast-follow). Each
+linked task shows a colored badge for its tracker (GitHub, Jira, or a plain
+manually-linked URL) so the three are easy to tell apart at a glance. Each
+link has a relationship type (`action-item`, `contributing-factor`,
+`follow-up`, `dependency`) and a priority:
 
 | Priority | SLA due date |
 |---|---|
@@ -268,13 +271,15 @@ You can always override the due date manually. A task is **overdue** once
 its due date has passed — overdue tasks surface on the SEV record and on
 the Reports dashboard's overdue count.
 
-From the SEV detail page you can either **link an existing** GitHub Issue
-(paste a URL, or search by repo + issue number) or **create a new one**
-pre-filled with SEV context — the created issue is automatically labeled
-with the SEV ID and its criticality. Creating/linking a GitHub Issue
-requires an Admin to have configured `GITHUB_TOKEN` (a GitHub PAT with
-`repo` scope) — without it, GitHub-specific actions are unavailable, but
-everything else about linked tasks still works.
+From the SEV detail page you can **link an existing** issue (paste a URL, or
+for GitHub search by repo + issue number) or **create a new one** — a
+separate form per tracker — pre-filled with SEV context; the created issue
+is automatically labeled with the SEV ID and its priority. Creating/linking
+a GitHub Issue requires GitHub credentials configured (a PAT with `repo`
+scope — see [§14.3](#143-github)); creating/linking a Jira Issue requires
+Jira credentials (see [§14.4](#144-jira)). Without either configured, that
+tracker's actions are unavailable, but everything else about linked tasks —
+including the other tracker — still works.
 
 ---
 
@@ -314,7 +319,7 @@ Details panel and re-open the postmortem to see them populate.
 Incident Commander or Admin.
 
 An **AI draft suggestion** panel shows the most recent AI-generated
-postmortem draft (see [§14.4](#144-ai-plugins)), always clearly marked
+postmortem draft (see [§14.5](#145-ai-plugins)), always clearly marked
 "AI-generated — not authoritative, review before use." You can regenerate
 it or **Apply to editor** to load it in for editing — it never saves
 automatically.
@@ -389,9 +394,31 @@ read-only, no-login-required link:
 ## 14. Configuring integrations
 
 All integration configuration lives under **Admin → Integrations** (and
-**Admin → AI Plugins** for the AI system specifically) plus the environment
-variables set for the `api`/`slackbot` processes. Only Admins can configure
-integrations.
+**Admin → AI Plugins** for the AI system specifically). Only Admins can
+configure integrations.
+
+**Admin → Integrations** is a sidebar of the five fixed integration types
+(PagerDuty, GitHub, Slack, Jira, Monitoring). Each row shows whether it's
+configured and a live health badge (green **Connected**, red **Error** with
+the underlying error message and a short troubleshooting hint shown right in
+the form, gray **Not configured**/**No health check**). Selecting a row
+opens a form built from that integration's own schema: credential fields are
+password-masked and labeled in plain language (e.g. "Bot Token", not
+`bot_token`); leaving a credential field blank on save keeps whatever's
+already stored, so rotating one secret never requires re-entering the
+others. Monitoring has no credential fields at all — see
+[§14.6](#146-monitoring-datadog--prometheus--cloudwatch).
+
+**Every credential below can also be set via an environment variable
+instead of (or as a fallback for) the admin form** — PagerDuty, GitHub, and
+Jira all prefer whatever's configured in **Admin → Integrations** over their
+env var, falling back to the env var only when nothing's saved there yet;
+Slack does the same for the parts of the bot that make outbound Slack API
+calls (channel creation, messages, invites), though its Socket Mode
+connection (slash commands, `@mentions`) still only picks up a *rotated*
+credential on restart — see [§14.1](#141-slack). A change made in the admin
+form reaches a running process within a few minutes, no restart needed,
+except where noted otherwise below.
 
 ### 14.1 Slack
 
@@ -404,9 +431,8 @@ integrations.
    [`demo/M11-slack-bot.md`](../demo/M11-slack-bot.md#configuring-slack-one-time-setup) —
    copy it as-is unless you need to customize the slash command.
 2. **Generate an app-level token** (Basic Information → App-Level Tokens,
-   scope `connections:write`) → set as `SLACK_APP_TOKEN`.
-3. **Install the app to your workspace** → copy the Bot User OAuth Token →
-   set as `SLACK_BOT_TOKEN`.
+   scope `connections:write`).
+3. **Install the app to your workspace** → copy the Bot User OAuth Token.
 4. **Invite the bot** (`/invite @sevbot`) to whichever channel you'll run
    `/sev open` from.
 5. **Give the bot a service account**: register a normal user (e.g.
@@ -417,16 +443,25 @@ integrations.
    itself in and keeps its own token fresh; there's nothing to rotate by
    hand.
 6. Set `API_GRPC_ADDR` (e.g. `api:8080` in Docker Compose).
+7. Put the two tokens from steps 2–3 **either** in `.env` as
+   `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN`, **or** under **Admin →
+   Integrations → Slack** as `Bot Token`/`App Token` — the bot prefers
+   whatever's saved there over the env vars. For a from-scratch setup,
+   the env vars are the simpler path (there's no Slack config to save to
+   yet on first boot); once running, you can switch to managing them from
+   the admin form instead.
 
-**Once running**, optionally configure from **Admin → Integrations** (type
-`slack`):
+**From Admin → Integrations → Slack**, once running, you can set/rotate:
 
+- **Bot Token** / **App Token** — the pair above. A **rotated** value here
+  reaches the bot's outbound Slack API calls (channel creation, messages,
+  invites, history, user lookup) within a few minutes, no restart needed —
+  but slash commands and `@mentions` (Socket Mode) keep using whichever
+  pair was active when the bot process last started, so rotating a token
+  still needs a `slackbot` restart to take effect there.
 - `default_channel` — a Slack **channel ID** (not `#name`) used only as a
   fallback before a SEV's own incident channel exists.
 - `channel_naming_convention` — default `inc-{id}-{title}`.
-
-Config changes are picked up automatically within a few minutes (no restart
-needed).
 
 **What happens automatically once Slack is configured:**
 
@@ -439,9 +474,11 @@ needed).
 
 ### 14.2 PagerDuty
 
-1. Set `PAGERDUTY_API_KEY` in the environment.
-2. In **Admin → Services**, set the PagerDuty service ID on each service
-   record you want on-call lookups for.
+Either set `PAGERDUTY_API_KEY` in the environment, **or** enter the API Key
+under **Admin → Integrations → PagerDuty** (preferred when both are
+present, and the only option that can be changed without a restart). Then,
+in **Admin → Services**, set the PagerDuty service ID on each service
+record you want on-call lookups for.
 
 Once both are set, creating a SEV against that service auto-populates the
 **on-call** role with the current on-call engineer. Sevitout only *reads*
@@ -450,15 +487,36 @@ outside the system.
 
 ### 14.3 GitHub
 
-1. Create a GitHub Personal Access Token with `repo` scope.
-2. Set it as `GITHUB_TOKEN` in the environment.
+Either set `GITHUB_TOKEN` (a Personal Access Token with `repo` scope) in
+the environment, **or** enter the token under **Admin → Integrations →
+GitHub** (preferred when both are present).
 
-Without a token, linking an *existing* issue by URL still works, but
-creating a new GitHub Issue from Sevitout, and any other GitHub-API-backed
-action, returns "unavailable" rather than failing the whole task-linking
-feature.
+Without a token configured (either way), linking an *existing* issue by
+URL still works, but creating a new GitHub Issue from Sevitout, and any
+other GitHub-API-backed action, returns "unavailable" rather than failing
+the whole task-linking feature.
 
-### 14.4 AI plugins
+### 14.4 Jira
+
+Either set `JIRA_CLOUD_ID`/`JIRA_API_TOKEN` (and optionally `JIRA_SITE_URL`)
+in the environment, **or** enter them under **Admin → Integrations →
+Jira** (preferred when both are present):
+
+- **API Token** — a Jira Cloud API token, sent as a Bearer token.
+- **Cloud ID** (required) — the Jira Cloud tenant's Cloud ID, a UUID — find
+  it under `admin.atlassian.com`, **not** your site's `https://*.atlassian.net`
+  name.
+- **Site URL** (optional) — e.g. `https://acme.atlassian.net`. Purely
+  cosmetic: used to build a clickable `.../browse/{key}` link on created/
+  linked issues. Left unset, issue links fall back to the API's own
+  non-browsable resource URL.
+
+Without both the token and Cloud ID configured, linking an *existing* Jira
+issue by URL still works, but creating a new Jira Issue, and any other
+Jira-API-backed action, returns "unavailable" — the rest of linked tasks
+(including GitHub) is unaffected.
+
+### 14.5 AI plugins
 
 From **Admin → AI Plugins**, register a plugin:
 
@@ -496,12 +554,27 @@ Every AI output is stored separately from the SEV record, clearly marked as
 AI-generated, and never mutates SEV fields on its own — a human must
 explicitly apply a suggestion.
 
-### 14.5 Monitoring (Datadog / Prometheus / CloudWatch)
+### 14.6 Monitoring (Datadog / Prometheus / CloudWatch)
 
-v1 support is link-only: record which tool fired (the "Alert name /
-monitoring tool" field when creating a SEV) and attach dashboard/query
-links. There's no live API integration or embedded chart snapshots yet —
-that's a possible future direction, not current behavior.
+Two independent things are both called "monitoring config," worth telling
+apart:
+
+- **Per-SEV detection metadata** (no admin setup needed) — when creating or
+  editing a SEV, record which tool fired (a closed choice: Datadog,
+  Prometheus, CloudWatch, or Other), the alert name, and optionally a
+  dashboard link and a saved query/expression. See [§2](#2-creating-a-sev).
+- **Admin → Integrations → Monitoring** (a 5th configurable integration,
+  alongside PagerDuty/GitHub/Slack/Jira) — has **no credential fields at
+  all**; it's settings-only: a **Tool** dropdown (Datadog/Prometheus/
+  CloudWatch — no "Other," since there's no base-URL shape to assume for an
+  unnamed tool) and a **Base URL**. This exists purely as a durable place to
+  record which monitoring tool your org uses and where, for reference — it
+  has no live API integration and no health check of its own (its sidebar
+  row always shows "No health check," since there's nothing to poll), and
+  doesn't currently drive any other part of the app.
+
+There's no embedded chart-snapshot rendering yet — that's a possible future
+direction, not current behavior.
 
 ---
 
@@ -531,14 +604,18 @@ preserved so a SEV always shows who was actually on-call at the time.
 
 ### 15.4 Integrations
 
-Per-integration credentials and settings — see [§14](#14-configuring-integrations)
-above. The page also shows a live health status (connected / error / not
-configured) per configured integration.
+A sidebar of the five fixed integrations (PagerDuty, GitHub, Slack, Jira,
+Monitoring), each with a schema-driven credential/settings form — see
+[§14](#14-configuring-integrations) above for what to put in each one. Every
+row also shows a live health badge: green **Connected**, red **Error**
+(clicking through shows the underlying error message plus a short
+troubleshooting hint), or gray **Not configured**/**No health check**
+(Monitoring always shows this last one — it has no live check by design).
 
 ### 15.5 AI plugins
 
 Register/enable/disable plugins and set provider, model, encrypted API key,
-and rate limits — see [§14.4](#144-ai-plugins).
+and rate limits — see [§14.5](#145-ai-plugins).
 
 ### 15.6 Data retention
 
@@ -561,13 +638,24 @@ before it archives if you need a durable copy for compliance.
 
 ## 17. Notifications
 
-Configure notification channels (Slack, email), which events trigger a
-notification (SEV opened, status change, new announcement, postmortem due,
-postmortem approved), and role-based routing (e.g. the IC hears about every
-change; management only hears about SEV-1/SEV-2 opens) from **Admin →
-Integrations** / notification settings. You can also configure an
-escalation threshold — e.g. alert if a SEV-1 has been open more than N
-minutes with no Incident Commander assigned.
+There's no configurable notification-routing or escalation-threshold admin
+page — that's speced in `docs/requirements.md` §16/§18.5 as a future goal,
+but no such UI or API exists today; don't go looking for it under **Admin**.
+
+What actually happens today:
+
+- The web app updates **live** via WebSocket while you have a SEV open —
+  status changes, new announcements, role/task changes all appear without a
+  manual refresh.
+- If Slack is configured (see [§14.1](#141-slack)), `external`/
+  `status-page` announcements and every status change push to the SEV's
+  incident channel — that's the closest thing to a configurable
+  notification channel that exists today, and it isn't role- or
+  threshold-based; everyone in the channel sees the same messages.
+- There's no email channel and no per-role notification routing (e.g. "only
+  page management on a SEV-1") — if you need that, it has to be built
+  outside Sevitout for now (e.g. a Slack workflow watching the incident
+  channel).
 
 ---
 
@@ -577,9 +665,9 @@ minutes with no Incident Commander assigned.
   schema, and every API service.
 - [`docs/roadmap.md`](roadmap.md) — the current phased plan for engineering,
   observability, and feature work, updated as phases ship.
-- [`docs/architecture-evolution.md`](architecture-evolution.md) — proposed
-  observability and infrastructure additions (request-scoped logging,
-  metrics, health checks) building on the system design above.
+- [`docs/architecture-evolution.md`](architecture-evolution.md) — the design
+  record for the observability/hardening work (request-scoped logging,
+  metrics, health checks) now folded into `docs/architecture.md`'s §3.4.
 - [`docs/requirements.md`](requirements.md) — the full functional
   specification this system was built against.
 - [`demo/`](../demo/) — one runbook per milestone with exact `curl`/API

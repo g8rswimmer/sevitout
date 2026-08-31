@@ -8,7 +8,7 @@ a full walkthrough, and `docs/architecture.md` §9 for the intended route map.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173, proxies /v1, /auth, /s/, /ws, /openapi.json to :8080
+npm run dev      # http://localhost:5173, proxies /v1, /auth, /s/, /ws, /admin, /openapi.json to :8080
 ```
 
 Run the API server separately (see the repo root README/Makefile) — this project

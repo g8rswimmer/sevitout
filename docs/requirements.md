@@ -254,13 +254,18 @@ SEVs must be searchable and filterable across all records:
 
 ### 13.3 Task Trackers
 
-**v1 — GitHub Issues only:**
-- Link existing GitHub Issues to a SEV (paste URL or search by repo + issue number)
-- Create a new GitHub Issue from within Sevitout (pre-filled with SEV context)
+**Shipped — GitHub Issues and Jira Issues:**
+- Link an existing issue to a SEV (paste URL, or search by repo/project + issue number)
+- Create a new issue from within Sevitout, pre-filled with SEV context
 - Display issue title and current status (open/closed) inline on the SEV record
+- Visually distinguished in the linked-tasks list by tracker (GitHub vs. Jira vs. a
+  plain manually-linked URL)
+- Not yet built: a default assignee on issue creation (tracked as a future
+  fast-follow, not current behavior)
 
-**v2 (fast follow) — Jira, Linear:**
-- Same link/create/display capabilities extended to Jira and Linear
+**Still fast-follow — Linear:**
+- Same link/create/display capabilities extended to Linear, reusing the same
+  general shape GitHub/Jira already established
 
 ### 13.4 Monitoring (Datadog / Prometheus / CloudWatch)
 
@@ -308,6 +313,13 @@ SEVs must be searchable and filterable across all records:
 
 ## 16. Notifications & Alerting
 
+**Not yet built** — no `NotificationConfig` RPC/service and no admin page
+exist for any of this today (a `notification_config` table exists in the
+schema, unused by any application code). What ships today: live WebSocket
+updates in the web app, and Slack channel pushes for status changes and
+`external`/`status-page` announcements (§13.1) — see
+`docs/user-guide.md` §17.
+
 - Configurable notification channels: Slack, email
 - Notification triggers: SEV opened, status change, new announcement, postmortem due, postmortem approved
 - Role-based routing: IC notified of all changes; management notified of SEV-1/SEV-2 opens only
@@ -353,14 +365,25 @@ Sevitout maintains its own lightweight service registry:
 
 ### 18.4 Integration Configuration
 
-- Per-integration settings managed via admin UI and API:
-  - **Slack**: workspace token, default notification channel, incident channel naming convention
-  - **PagerDuty**: API key, default escalation policy
-  - **Task trackers**: per-system credentials and default project/board
-  - **Monitoring**: tool type and base URL for dashboard link generation
-- Integration health status visible on the admin page (connected / error / not configured)
+- Per-integration settings managed via a schema-driven admin UI and API (a
+  backend field catalog — `internal/integrations/catalog` — is the single
+  source of truth for each integration's fields and drives both the form
+  and server-side validation on save):
+  - **Slack**: bot token, app token, default notification channel, incident
+    channel naming convention
+  - **PagerDuty**: API key. *Not yet built*: a default escalation policy
+    setting — no consumer exists for it in the codebase yet
+  - **Task trackers (GitHub, Jira)**: per-system credentials (a token for
+    GitHub; an API token + Cloud ID for Jira). *Not yet built*: a default
+    project/board setting — no consumer exists for it yet
+  - **Monitoring**: tool type (a closed choice) and base URL, settings-only
+    — no credentials, no live health check by design
+- Integration health status visible on the admin page (connected / error /
+  not configured / no health check)
 
 ### 18.5 Notification & Escalation Settings
+
+**Not yet built** — see §16 above.
 
 - Configure escalation thresholds (e.g., SEV-1 without IC after N minutes)
 - Configure which roles receive which notification events
@@ -423,7 +446,7 @@ Sevitout maintains its own lightweight service registry:
 1. ~~What does the service registry look like — is there an existing list of services, or do we build a lightweight registry into Sevitout?~~
    - **Answered**: Sevitout will maintain its own lightweight service registry, managed via a Configuration API and admin UI page. See §18.
 2. ~~For task trackers (Jira/GitHub/Linear) — do we need all three at launch, or prioritize one?~~
-   - **Answered**: GitHub Issues is the only task tracker integration for v1. Jira and Linear are fast-follow / v2. See §8 and §13.3.
+   - **Answered**: GitHub Issues was the only task tracker integration for v1; Jira Issues shipped as the fast-follow, in the same shape (link existing / create new / per-tracker badge in the linked-tasks list). Linear remains a fast-follow, not yet built. See §8 and §13.3.
 3. ~~Should the Slack incident channel be created automatically by the bot when a SEV-1/SEV-2 is opened?~~
    - **Answered**: Yes — and extended beyond the original SEV-1/2 scope: the Slack bot automatically creates a dedicated incident channel for *every* opened SEV, regardless of severity, so unrelated SEVs never share one channel's discussion. See §13.1.
 4. ~~Are there data retention requirements — how long should resolved SEVs be kept?~~
