@@ -727,6 +727,135 @@ already delivers the higher-value "auto-invite every role" outcome.
 
 ---
 
+## Phase 11 — Integration-aware SEV UI
+
+**Status**: 🔲 not started
+
+The SEV detail page shows every integration-tied action unconditionally today —
+`TasksPanel.tsx` always offers "Create GitHub issue" and "Create Jira issue" even
+when only one (or neither) tracker is configured, and there's no way for a
+non-Admin to even ask "is X configured" (every existing status surface is
+Admin-gated). Separately, Phase 10's Slack-invite work covers assigned roles but
+never the person who actually opened the SEV, and there's no self-service way for
+whoever's viewing a SEV to join its Slack channel on their own. This phase closes
+all three gaps: a viewer-safe "enabled integrations" signal that hides
+unconfigured actions, a self-service "Join Slack channel" button, and
+auto-inviting the SEV creator when the incident channel is created.
+
+**11a. Backend: viewer-safe "enabled integrations" signal**
+
+- New RPC `ConfigService.ListEnabledIntegrations() → ListEnabledIntegrationsResponse{repeated string enabled_types}`,
+  RBAC `store.OrgRoleViewer` — a distinct, narrowly-scoped RPC on the existing
+  service (matching how `ChatService.ListChatEntries` sits at Viewer floor
+  alongside `ChatService`'s higher-gated `AddChatEntry`; RBAC is per-RPC, not
+  per-service). Returns **only** a list of type strings — no settings values, no
+  `credentials_configured` per type, nothing an Admin-only endpoint wouldn't
+  already consider safe to hand to any Viewer.
+- Backed by `IntegrationConfigStore.List()`, filtered to rows with meaningful
+  configuration (`len(EncryptedCredentials) > 0`, or for settings-only types like
+  Monitoring, `len(Settings) > 0`) — the same "configured" concept Phase 9's admin
+  UI already uses.
+- **Known limitation, stated explicitly rather than solved here**: this reflects
+  store-configured integrations only. PagerDuty/GitHub/Jira can also activate via
+  static env-var fallback with zero store rows (see `cmd/server`'s `*Resolver`
+  pattern) — such a setup would show as "not enabled" here and hide its SEV-page
+  action even though the backend would actually serve the request. Acceptable
+  given Phase 9 already steers configuration toward the admin UI as the primary
+  path; a fully accurate signal would need each resolver to expose its own
+  `Active()` state, a bigger change not justified by a UI-hiding feature alone.
+
+**11b. Frontend: gate SEV-page integration actions by enabled status**
+
+- New shared query (e.g. `useEnabledIntegrations()`, React Query, cached) calling
+  the new RPC, used by `TasksPanel.tsx` and wherever Slack actions live.
+- `TasksPanel.tsx`: "Create GitHub issue" renders only when `'github'` is enabled,
+  "Create Jira issue" only when `'jira'` is enabled — if only Jira is configured,
+  GitHub's option simply isn't offered (the concrete case named in this phase's
+  request). If neither tracker is enabled, only "Link existing" (which needs no
+  integration) remains.
+- Slack-tied actions — Phase 10e's per-role "Add to chat" button and this phase's
+  11c "Join Slack channel" button — render only when `'slack'` is enabled **and**
+  `SEV.slack_channel_id` is set (Phase 10e's field).
+
+**11c. Backend + frontend: self-service "Join Slack channel"**
+
+- New RPC `RoleService.JoinSlackChannel(sev_id) → google.protobuf.Empty`, reusing
+  `RoleServer`'s Phase-10e-added Slack dependencies (`IntegrationConfigStore`,
+  `Encryptor`, Slack client construction) and 10d/10e's identity-resolution order,
+  scoped to the caller (`auth.UserFromContext(ctx)`) instead of a role holder:
+  stored `SlackUserID` → `LookupUserIDByEmail(caller's own email)` →
+  `codes.FailedPrecondition` ("no Slack identity on file — set one in your
+  profile") if neither resolves. `codes.FailedPrecondition` also when
+  `SEV.SlackChannelID` is unset (no channel to join).
+- **Security gate, not present in Phase 10's design and worth calling out
+  explicitly**: before resolving/inviting, check the caller has full (non
+  visibility-restricted) access to the SEV via `store.SEVAccessStore` — the same
+  check sensitive-SEV field-level visibility already relies on elsewhere.
+  Self-service Slack join must not become a side-channel around sensitive-SEV
+  restrictions, since Slack channel membership itself isn't gated by Sevitout
+  RBAC once granted. `codes.PermissionDenied` when the caller lacks full access
+  to a sensitive SEV.
+- RBAC floor: `store.OrgRoleViewer` (any authenticated user with real access to
+  the SEV, gated further by the access check above — not an Incident-Commander
+  or Responder-only action).
+- Frontend: a "Join Slack channel" button (SEV detail page, near the Slack/chat
+  area — exact placement decided alongside 10e's "Add to chat" button since
+  they're visually adjacent), gated per 11b.
+
+**11d. Slack: invite the SEV creator when the channel is created**
+
+- `cmd/slackbot/notify.go`: add `CreatedBy string \`json:"created_by"\`` to
+  `sevPayload` (currently silently dropped by `json.Unmarshal` since the field
+  isn't declared) so `handleSEVCreated` actually has it.
+- Thread `sev.CreatedBy` through to `createIncidentChannel`'s invite-building
+  step.
+- Resolve `CreatedBy` (a Sevitout user ID) via the directory lookup this phase
+  requires from Phase 10a: `ListUserDirectory(ids: [CreatedBy])` → stored
+  `SlackUserID` if present, else the returned email → `LookupUserIDByEmail`.
+- **Combine into one invite call**: build a single invite list per
+  channel-creation event — Phase 10d's role-holder invites + this creator invite
+  + `takePendingOpener`'s Slack-native ID (the existing `/sev open` path) —
+  deduped by resolved Slack user ID, then one `InviteUsers` call (today's
+  `inviteOnCall` already does a single call for its narrower role-holder-only
+  list; this just widens what feeds it).
+- **Known limitation, documented not fixed**: for SEVs opened via `/sev open`,
+  `CreatedBy` is not currently set to the human's Sevitout identity (the
+  slash-command handler never sets `created_by` on `CreateSEVRequest`) — the
+  creator-invite resolves to the bot's service account for that path (a harmless
+  no-op/skip), not a duplicate of the human already invited via
+  `takePendingOpener`. Threading the real identity through `/sev open` is a
+  named follow-up, out of scope here.
+
+**11e. Tests + demo doc**
+
+- Go: `ConfigService` test for `ListEnabledIntegrations` (Viewer floor, correct
+  filtering of credential-only vs. settings-only vs. unconfigured rows);
+  `RoleService` test for `JoinSlackChannel` (resolution order, `FailedPrecondition`
+  on missing channel/identity, `PermissionDenied` on restricted sensitive-SEV
+  access); `cmd/slackbot` test for creator-invite resolution and the deduped
+  combined-invite-list construction, including the `/sev open` no-op case.
+- Frontend: `TasksPanel.test.tsx` extended for conditional button rendering
+  (Jira-only, GitHub-only, neither, both); a test for the new "Join Slack
+  channel" button's gating and success/error states.
+- `demo/integration-aware-sev-ui.md` (existing template): walkthrough configures
+  only Jira and shows GitHub's create-issue option absent; unconfigures Slack and
+  shows chat actions absent; creates a SEV as a non-role-holder and shows they're
+  auto-invited to the channel; demonstrates "Join Slack channel" for a different
+  viewer. Known limitations restate: env-var-only integration activation isn't
+  reflected in `ListEnabledIntegrations`; `/sev open`-originated SEVs don't
+  attribute `CreatedBy` to the human opener yet.
+
+**Estimate**: ~3.5-4.5 days (11a ~0.5 day, 11b ~0.75-1 day, 11c ~1-1.25 days, 11d
+~0.75-1 day, 11e ~0.5-0.75 day) — smaller than Phase 10 since it's UI-gating plus
+two focused additions layered on infrastructure Phase 10 already builds, not new
+infrastructure of its own. **Depends on**: **Phase 10** (hard dependency — needs
+`User.SlackUserID`/etc., `ListUserDirectory`, `SEV.SlackChannelID`, and
+`RoleServer`'s Slack-client dependencies; must be sequenced strictly after, not
+just related to, Phase 10). Loosely benefits from Phase 9's "configured" concept
+but doesn't hard-block on it.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -743,6 +872,7 @@ already delivers the higher-value "auto-invite every role" outcome.
 | 8 | Datastore-driven Slack bot credentials (REST client; Socket Mode reconnect deferred) | — | 2-3 days |
 | 9 | Schema-driven integration settings (catalog + sidebar admin UI + Monitoring) | — | 3-4 days |
 | 10 | Per-user integration profiles (Slack/GitHub/Jira identity) | — | 6-8 days |
+| 11 | Integration-aware SEV UI (hide unconfigured actions, self-join Slack, creator invite) | 10 | 3.5-4.5 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -758,7 +888,10 @@ can be sequenced whenever the sidebar-based UI redesign becomes a priority. Phas
 is likewise independent of everything above it, but internally its 10c sub-step (a
 role-assignment user picker) is a hard dependency for 10d/10e (Slack invite
 expansion) — see the phase's own "possible split" note if it needs to be broken up
-across multiple PRs/milestones.
+across multiple PRs/milestones. Phase 11 is the first phase in this document with a
+real hard dependency on another unshipped phase: it needs Phase 10's per-user Slack
+identities, `ListUserDirectory` RPC, and persisted `SEV.SlackChannelID`, so it must
+be sequenced strictly after Phase 10 rather than run independently like 8/9/10.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
