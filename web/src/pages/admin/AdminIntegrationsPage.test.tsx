@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AdminIntegrationsPage } from '@/pages/admin/AdminIntegrationsPage'
 import { renderWithProviders } from '@/test/utils'
-import type { GetIntegrationCatalogResponse, IntegrationConfigResponse } from '@/types/api'
+import type { GetIntegrationCatalogResponse, IntegrationConfigResponse, IntegrationHealth } from '@/types/api'
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -63,16 +63,17 @@ const PAGERDUTY_CONFIG: IntegrationConfigResponse = {
 
 function mockFetch(opts?: {
   configs?: IntegrationConfigResponse[]
+  health?: IntegrationHealth[]
   upsertHandler?: (integrationType: string, body: unknown) => Response
 }) {
   const configs = opts?.configs ?? [PAGERDUTY_CONFIG]
+  const health = opts?.health ?? [{ integration_type: 'pagerduty', status: 'connected' as const }]
   vi.mocked(fetch).mockImplementation((input, init) => {
     const url = String(input)
     const method = init?.method ?? 'GET'
     if (url === '/v1/config/integration-catalog') return Promise.resolve(jsonResponse(CATALOG))
     if (url === '/v1/config/integrations') return Promise.resolve(jsonResponse({ configs }))
-    if (url === '/admin/integrations/health')
-      return Promise.resolve(jsonResponse({ integrations: [{ integration_type: 'pagerduty', status: 'connected' }] }))
+    if (url === '/admin/integrations/health') return Promise.resolve(jsonResponse({ integrations: health }))
     const match = /^\/v1\/config\/integrations\/([^/]+)$/.exec(url)
     if (match && method === 'PUT') {
       const integrationType = match[1]
@@ -101,17 +102,40 @@ describe('AdminIntegrationsPage', () => {
     expect(screen.queryByRole('combobox', { name: /type/i })).not.toBeInTheDocument()
   })
 
-  it('shows configured/not-set and health badges per sidebar row', async () => {
+  it('shows configured/not-set and health badges per sidebar row, with a green "Connected" badge', async () => {
     mockFetch()
     renderWithProviders(<AdminIntegrationsPage />)
 
     const pagerdutyRow = await screen.findByRole('button', { name: /PagerDuty/ })
     expect(within(pagerdutyRow).getByText('Configured')).toBeInTheDocument()
-    expect(within(pagerdutyRow).getByText('Connected')).toBeInTheDocument()
+    const connectedBadge = within(pagerdutyRow).getByText('Connected')
+    expect(connectedBadge.className).toContain('bg-success')
 
     const githubRow = screen.getByRole('button', { name: /GitHub/ })
     expect(within(githubRow).getByText('Not set')).toBeInTheDocument()
     expect(within(githubRow).getByText('No health check')).toBeInTheDocument()
+  })
+
+  it('shows the raw error message and a troubleshooting hint for a failed health check', async () => {
+    mockFetch({
+      configs: [
+        { integration_type: 'jira', credentials_configured: true, created_at: '2026-08-23T20:00:00Z', updated_at: '2026-08-23T20:00:00Z' },
+      ],
+      health: [{ integration_type: 'jira', status: 'error', error: 'jira: status 401: Unauthorized' }],
+    })
+    renderWithProviders(<AdminIntegrationsPage />)
+    await screen.findByText('PagerDuty', { selector: 'h2' })
+
+    const jiraRow = screen.getByRole('button', { name: /Jira/ })
+    expect(within(jiraRow).getByText('Error').className).toContain('bg-destructive')
+
+    const user = userEvent.setup()
+    await user.click(jiraRow)
+    await screen.findByText('Jira', { selector: 'h2' })
+
+    expect(screen.getByText('Health check failed')).toBeInTheDocument()
+    expect(screen.getByText('jira: status 401: Unauthorized')).toBeInTheDocument()
+    expect(screen.getByText(/Cloud ID is under admin.atlassian.com/)).toBeInTheDocument()
   })
 
   it('renders credential fields with real labels as password inputs, pre-selecting the first row', async () => {

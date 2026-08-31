@@ -22,6 +22,12 @@
   --accent-foreground: oklch(0.2 0 0);
   --destructive: oklch(0.55 0.22 25);
   --destructive-foreground: oklch(0.98 0 0);
+  /* Success/"healthy" accent — same lightness/chroma shape as destructive
+   * above, just a green hue, so a "Connected" badge reads unambiguously
+   * positive next to destructive's "Error" and the neutral secondary/outline
+   * badges everything else uses. */
+  --success: oklch(0.55 0.16 145);
+  --success-foreground: oklch(0.98 0 0);
 
   /* SEV severity accent colors, used consistently across the app */
   --sev-1: oklch(0.55 0.22 25);
@@ -49,6 +55,8 @@
     --accent-foreground: oklch(0.98 0 0);
     --destructive: oklch(0.65 0.2 25);
     --destructive-foreground: oklch(0.98 0 0);
+    --success: oklch(0.65 0.16 145);
+    --success-foreground: oklch(0.145 0 0);
   }
 }
 
@@ -70,6 +78,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --color-sev-1: var(--sev-1);
   --color-sev-2: var(--sev-2);
   --color-sev-3: var(--sev-3);

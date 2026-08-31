@@ -82,6 +82,41 @@ fields as dropdowns), reviewed before any backend/frontend code was written.
     `config.integrations.catalog()`, mirroring every other endpoint's
     existing pattern.
 
+**Follow-up, same phase: a readable health status.** Two gaps surfaced once
+an admin actually used the shipped page against real credentials:
+
+- **The `/admin/` path was never proxied at all.** Neither `web/nginx.conf`
+  (production) nor `vite.config.ts`'s dev-server proxy has ever forwarded
+  the `/admin/` prefix to the API — only `/v1`, `/auth`, `/s/`, `/ws`, and
+  `/openapi.json` were. `GET /admin/integrations/health` (a plain
+  `net/http` handler, not under `/v1/` like everything else
+  `ConfigService`-shaped) silently fell through to the SPA's `index.html`
+  fallback instead of reaching the backend, so every health badge always
+  looked empty regardless of what was actually configured — a bug that
+  predates this phase entirely, just never noticed until this page made
+  someone look. Fixed by adding a matching `location /admin/` block to
+  `nginx.conf` and a `/admin` entry to `vite.config.ts`'s proxy map.
+- **"Connected" wasn't visually distinct from "Not set"/"No health
+  check."** `Badge` had no green variant at all — `HEALTH_BADGE.connected`
+  used the same neutral `secondary` styling as everything else. Added a
+  `success` badge variant (new `--success`/`--success-foreground` oklch
+  tokens, same lightness/chroma shape as `--destructive`, just a green hue)
+  and pointed `connected` at it.
+- **A failed health check's detail was hidden behind a hover tooltip.**
+  The error string was already there (`title={h?.error}` on the badge) but
+  invisible until you hovered, and easy to miss even then. It now renders
+  directly in the detail panel — the actual message each integration's
+  client returns (GitHub/Jira include the real API error text, e.g.
+  `"jira: status 401: Unauthorized"`; Slack returns its own error code,
+  e.g. `"invalid_auth"`/`"token_revoked"`), paired with a short static
+  troubleshooting hint per integration type (`TROUBLESHOOTING_HINTS`).
+  PagerDuty's checker previously discarded the response body entirely and
+  reported only a bare `"unexpected status 401"` — the one integration
+  with nothing useful to show — so `internal/integrations/pagerduty`
+  gained its own `APIError` type (mirroring `github.APIError`/
+  `jira.APIError`'s existing pattern) that captures PagerDuty's real
+  `error.message` field.
+
 ## Design notes
 
 **The path-collision bug was caught by actually running the server, not by
@@ -210,14 +245,20 @@ New/updated coverage:
   `default_escalation_policy`, GitHub's `default_repo`, a bare `"datadog"`
   integration_type) are updated to catalog-valid equivalents — confirmed
   those keys were never read by any production code.
-- `web/src/pages/admin/AdminIntegrationsPage.test.tsx` (rewritten, 8 tests):
+- `web/src/pages/admin/AdminIntegrationsPage.test.tsx` (rewritten, 9 tests):
   sidebar shows exactly 5 entries with no "Other…" anywhere; labels render
   as "Bot Token" not `bot_token`; credential inputs are `type="password"`;
   Monitoring's `tool` renders as a 3-option select; switching sidebar rows
   swaps the detail form; an existing settings value pre-fills while
   credential fields stay blank; a blank credential is omitted from the save
   payload while settings are still sent; a server validation error surfaces
-  through the existing error-alert path.
+  through the existing error-alert path; a "Connected" badge carries the
+  green `success` styling; a failed health check shows its raw error
+  message and troubleshooting hint in the detail panel.
+- `internal/integrations/pagerduty/client_test.go`: PagerDuty's real
+  `error.message` reaches both `Error()` and the exported `APIError`'s
+  fields; a non-JSON or unrecognized error body still falls back cleanly
+  to the bare-status message rather than panicking or itself erroring.
 
 Backend aggregate coverage after this change (the same package set and
 `-race -covermode=atomic` invocation as `.github/workflows/backend-ci.yml`'s
@@ -244,3 +285,10 @@ gate step): **80.1%** (gate: 78.0%, see `demo/test-coverage-ci-gate.md`).
   `/v1/config/integration-catalog`, for the path-collision reason explained
   under Design notes above — noted here since it's a deviation from the
   roadmap doc's literal text, not silently reconciled.
+- **Troubleshooting hints are static, per-integration-type text, not
+  derived from the actual error.** Jira's hint mentions both a bad API
+  token and a mismatched Cloud ID as equally likely causes for the same
+  `401`, since the raw error message alone doesn't distinguish which one
+  it actually was. Good enough as a starting point; a real improvement
+  would need per-error-code guidance from each client, which none of the
+  four currently expose in a structured way (just an error string).

@@ -9,13 +9,25 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatDateTime } from '@/lib/format'
-import type { CatalogField, IntegrationCatalogEntry, IntegrationConfigResponse, IntegrationHealthStatus } from '@/types/api'
+import type { CatalogField, IntegrationCatalogEntry, IntegrationConfigResponse, IntegrationHealth, IntegrationHealthStatus } from '@/types/api'
 
 const HEALTH_BADGE: Record<IntegrationHealthStatus, { label: string; variant: BadgeProps['variant'] }> = {
-  connected: { label: 'Connected', variant: 'secondary' },
+  connected: { label: 'Connected', variant: 'success' },
   error: { label: 'Error', variant: 'destructive' },
   not_configured: { label: 'Not configured', variant: 'outline' },
   unknown: { label: 'No health check', variant: 'outline' },
+}
+
+/** A short, generic starting point for troubleshooting a failed health
+ * check — the raw error message (below) already carries the specifics
+ * (PagerDuty/GitHub/Jira all return the real API error text; Slack returns
+ * its own error code, e.g. "invalid_auth"/"token_revoked"), but a bare
+ * "status 401" isn't self-explanatory to everyone. Keyed by integration_type. */
+const TROUBLESHOOTING_HINTS: Record<string, string> = {
+  pagerduty: 'Usually means the API Key is missing, revoked, or was typed incorrectly — generate a new one in PagerDuty under your user profile\'s API access.',
+  github: "Usually means the token is expired, revoked, or lacks read access — check it's still valid and has at least the repo scope.",
+  slack: 'Usually means the Bot Token was revoked or reinstalled — reinstall the Slack app and paste in the new bot_token (starts with xoxb-).',
+  jira: "Usually means the API Token is invalid, or the Cloud ID doesn't match this token's site — verify both (Cloud ID is under admin.atlassian.com, not the *.atlassian.net site name).",
 }
 
 /** A real behavioral gap worth surfacing in the form itself rather than
@@ -51,10 +63,12 @@ function FieldLabel({ field, htmlFor, showRequirement }: { field: CatalogField; 
 function IntegrationDetailForm({
   entry,
   existingConfig,
+  health,
   onSaved,
 }: {
   entry: IntegrationCatalogEntry
   existingConfig?: IntegrationConfigResponse
+  health?: IntegrationHealth
   onSaved: () => void
 }) {
   const [credentialValues, setCredentialValues] = useState<Record<string, string>>(() =>
@@ -95,6 +109,14 @@ function IntegrationDetailForm({
         <h2 className="text-sm font-medium text-muted-foreground">{entry.label}</h2>
         {existingConfig && <p className="text-xs text-muted-foreground">Last updated {formatDateTime(existingConfig.updated_at)}</p>}
       </div>
+
+      {health?.status === 'error' && (
+        <div className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+          <p className="font-medium text-destructive">Health check failed</p>
+          {health.error && <p className="text-destructive">{health.error}</p>}
+          {TROUBLESHOOTING_HINTS[entry.type] && <p className="text-muted-foreground">{TROUBLESHOOTING_HINTS[entry.type]}</p>}
+        </div>
+      )}
 
       {INTEGRATION_NOTES[entry.type] && (
         <div className="flex items-start gap-2 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
@@ -245,7 +267,14 @@ export function AdminIntegrationsPage() {
               key={activeEntry.type}
               entry={activeEntry}
               existingConfig={existingConfig}
-              onSaved={() => void queryClient.invalidateQueries({ queryKey: ['admin', 'integrations'] })}
+              health={healthByType.get(activeEntry.type)}
+              onSaved={() => {
+                void queryClient.invalidateQueries({ queryKey: ['admin', 'integrations'] })
+                // Re-run health checks immediately so a newly-saved (or
+                // rotated) credential's status updates without waiting for
+                // the next manual "Refresh health" click.
+                void health.refetch()
+              }}
             />
           )}
         </div>
