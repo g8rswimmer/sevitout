@@ -553,6 +553,180 @@ unchanged.
 
 ---
 
+## Phase 10 — Per-user integration profiles (Slack / GitHub / Jira identity)
+
+**Status**: 🔲 not started
+
+Today nothing links a Sevitout user to their Slack account, GitHub username, or Jira
+account beyond an email-address coincidence: `inviteOnCall` (`cmd/slackbot/channel.go`)
+only invites the **on-call** role, and only resolves an invitee by regex-scraping an
+email out of `SEVRole.DisplayName` — a format that happens to hold only because
+PagerDuty's auto-assign writes it that way, and silently fails for a manually-typed name
+or any other role type. GitHub/Jira issues created from a SEV never get an assignee at
+all. This phase adds a self-service "integration identity" (Slack user ID, GitHub
+username, Jira account ID) that each user manages for themselves, and uses it to widen
+Slack auto-invite to every assigned role, add a manual "add to chat" action, and default
+new tracker issues to the creating user.
+
+**10a. Backend: integration-identity data model + self-service API**
+
+- `internal/store/models.go`: add `SlackUserID`, `GitHubUsername`, `JiraAccountID
+  *string` to `User`. Nullable, no uniqueness constraint (a stale/duplicate ID just
+  resolves to the wrong/no invite — no integrity risk worth enforcing).
+- New migration `migrations/000012_integration_identities.up/down.sql`:
+  `ALTER TABLE users ADD COLUMN slack_user_id TEXT, ADD COLUMN github_username TEXT, ADD COLUMN jira_account_id TEXT;`
+  (down drops all three), following 000002/000003's naming convention.
+- `UserStore` (`internal/store/store.go`) gains a **dedicated** method —
+  `UpdateIntegrationIdentities(ctx, userID string, slackUserID, githubUsername, jiraAccountID *string) (*User, error)`
+  — rather than widening the existing `Update` (which already deliberately excludes
+  `Email`/`PasswordHash`). Mirrors how `ConfigService` already prefers narrow methods
+  (`UpdateUserRole`, `Deactivate/ReactivateUser`) over one generic mutator. Implement in
+  `internal/store/postgres/user.go` and the in-memory test fake.
+- Extend `AuthService` (not `ConfigService` — that's the Admin-only "manage other users"
+  surface, and this is a write-side sibling of the existing self-identity RPC `WhoAmI`,
+  which already acts purely on the caller via `auth.UserFromContext(ctx)`):
+  - `rpc UpdateMyIntegrationIdentities(UpdateMyIntegrationIdentitiesRequest) returns (WhoAmIResponse)`
+    → `PATCH /v1/auth/me`. **Full-replace semantics** (all 3 fields sent every call,
+    empty string clears that field) — a deliberate deviation from `UpdateSEV`'s
+    sparse-patch convention, since this endpoint only ever touches these 3 fields and
+    "empty = leave alone" would make clearing one impossible.
+  - `WhoAmIResponse` gains `slack_user_id`, `github_username`, `jira_account_id` so the
+    profile page pre-fills off the same call it already makes today. (`oauth_provider` on
+    this message is a stale leftover from removed OAuth — pre-existing, not touched here.)
+  - RBAC: `"/sevitout.v1.AuthService/UpdateMyIntegrationIdentities": store.OrgRoleViewer`,
+    same floor as `WhoAmI`.
+- New minimal directory RPC, needed by both 10c and 10d (neither can use the Admin-gated
+  `ConfigService.ListUsers`): `AuthService.ListUserDirectory(query, ids) →
+  {users: [{id, name, email, slack_user_id}]}`, `store.OrgRoleViewer`. Deliberately
+  narrower than `ConfigService.ListUsers` — an org-wide "who is this person" lookup, not
+  a user-management surface.
+
+**10b. Frontend: My Profile page**
+
+- New `web/src/pages/ProfilePage.tsx`, route `/profile` in `App.tsx`'s authenticated
+  route tree (sibling of `/reports`/`/sevs` — not under `/admin/*`, Viewer-floor
+  self-service).
+- Nav entry point: `AppLayout.tsx` has no user-menu today, just a name/role label and a
+  Logout icon button — add a second icon button (`UserCog` from `lucide-react`) linking
+  to `/profile`, matching that existing minimal pattern.
+- Page: read-only Name + Email (from `WhoAmIResponse`), 3 editable inputs (Slack User ID,
+  GitHub Username, Jira Account ID) with short help text, Save calling
+  `UpdateMyIntegrationIdentities`, inline success/error feedback.
+- **Explicitly out of scope this phase**: name/avatar/password editing — flagged as a
+  known limitation/follow-up, not silently expanded into.
+
+**10c. `RolesPanel.tsx`: user picker (hard dependency for 10d/10e)**
+
+Without this, `SEVRole.UserID` is never set by the current UI, and "every assigned role"
+auto-invite has nothing to resolve beyond today's DisplayName-regex path for anything but
+on-call — this sub-step is required, not optional polish, and is sized into the estimate.
+
+- Assign form gains an optional user combobox (built on `ListUserDirectory`'s `query`
+  search) alongside the existing free-text `display_name` input — picking a real user
+  sets `user_id` on the `AssignRole` call (the field already exists end-to-end). The
+  free-text-only path stays fully supported; nothing is removed.
+- `web/src/lib/api.ts` / `types/api.ts` gain the directory response types/method.
+
+**10d. Slack: widen SEV-creation auto-invite to every assigned role**
+
+- `cmd/slackbot/channel.go`: generalize `inviteOnCall` → `inviteRoleHolders`, dropping
+  the `RoleType == store.SEVRoleOnCall` filter so every role type is covered.
+- Resolution order per role, replacing today's regex-only path:
+  1. `SEVRole.UserID` set → batch-resolve via `ListUserDirectory(ids: [...])` (one call
+     for all roles, not one per role) → if that user has a stored `SlackUserID`, use it.
+  2. Else (UserID set, no stored `SlackUserID`) → `LookupUserIDByEmail(user.Email)`, as today.
+  3. Else (no `UserID`, e.g. an older or free-text-only assignment) → fall back to
+     today's `emailInAngleBrackets` regex scrape of `DisplayName` — kept, not deleted.
+  4. Else → skip, as today.
+- `cmd/slackbot/apiclient.go`: extend `roleAPI` (or add a narrow `directoryAPI`
+  interface, per the file's consumer-owned-interface convention) with
+  `ListUserDirectory`.
+
+**10e. Slack: manual "add to chat" action**
+
+Persist the SEV→channel mapping (currently in-memory only in `cmd/slackbot`, an accepted
+v1 limitation per `demo/M11-slack-bot.md`) so `cmd/server` can act on it directly:
+
+- Add `SlackChannelID *string` to `store.SEV` + a nullable `sevs.slack_channel_id`
+  column (same or a sibling migration to 10a's).
+- `cmd/slackbot/channel.go`'s `createIncidentChannel`, right after recording the channel
+  locally, also calls `UpdateSEV{id: sevID, slack_channel_id: channelID}` (safe due to
+  sparse-patch semantics) — a bonus side effect that finally closes the in-memory-only
+  limitation, for SEVs created after this ships (older SEVs have no retroactive value;
+  the button must handle that as disabled, not an error).
+- New RPC `RoleService.InviteRoleToSlack(sev_id, role_id) → google.protobuf.Empty`, RBAC
+  `store.OrgRoleResponder` (auxiliary invite action, not role *management* — lower than
+  `AssignRole`/`RemoveRole`'s IC floor). Implemented in `internal/api/grpc/role.go`,
+  reusing 10d's identity-resolution order server-side: reads `SEV.SlackChannelID`
+  (`codes.FailedPrecondition` if nil, so the UI can grey the button out), builds a
+  `slack.Client` from the config-store's decrypted `bot_token` (same pattern as
+  `slackHealthChecker`), calls `InviteUsers` directly — no round trip through the live
+  bot process. A small (~20-line) resolver duplicated between `cmd/slackbot` and
+  `internal/api/grpc/role.go` is an accepted trade-off for two call sites in two
+  different binaries, not worth a shared package until a third consumer appears.
+- `SEVResponse` gains `slack_channel_id` (not sensitive — raw IDs are already exposed
+  elsewhere) so the frontend knows whether to enable the button.
+- `RolesPanel.tsx` gets a per-role-row "Add to chat" icon button next to Remove,
+  disabled when `SEV.slack_channel_id` is unset.
+
+**10f. GitHub/Jira: default assignee on issue creation**
+
+- Proto: `CreateGitHubIssueRequest` gains `string assignee = 8;` (wrapped into GitHub's
+  `assignees: []string` at the client layer). `CreateJiraIssueRequest` gains `string
+  assignee_account_id = 8;` (sent as Jira's `assignee: {accountId: "..."}`). `TaskResponse`
+  gains `string assignee = 11;` so the Tasks list can show it without a live re-fetch.
+- `internal/integrations/tasktracker/github/client.go`'s `CreateIssueRequest` gains
+  `Assignees []string`; `.../jira/client.go`'s gains `AssigneeAccountID *string`, sent
+  only when non-nil.
+- `internal/api/grpc/task.go` handlers pass the field straight through — no server-side
+  default-injection; all defaulting happens client-side.
+- `TasksPanel.tsx`: both create-issue forms gain an editable "Assignee" input, pre-filled
+  from the already-fetched `WhoAmIResponse` (via `useAuth()`) when present,
+  clearable/editable before submit, omitted from the payload when empty.
+- **UX risk, surfaced not solved here**: Jira Cloud account IDs are opaque strings not
+  visible in Jira's UI without hitting `/rest/api/3/user/search?query=email` — and the
+  Jira client has no user-search method today (only `Ping/GetIssue/CreateIssue`). Most
+  users won't know their own account ID. The demo doc documents a manual workaround; an
+  email→accountId lookup is a named follow-up, not built in this phase.
+
+**10g. Tests + demo doc**
+
+- Go: store tests for `UpdateIntegrationIdentities`; `AuthService` handler tests for
+  `UpdateMyIntegrationIdentities` (full-replace/clear, RBAC floor) and
+  `ListUserDirectory` (query/ids filtering); `RoleService` tests for
+  `InviteRoleToSlack` (resolution precedence, `FailedPrecondition` on no channel,
+  Responder floor); `cmd/slackbot` tests for generalized `inviteRoleHolders` (every role
+  type, UserID-first order, regex fallback preserved, skip-on-no-match) and the
+  `UpdateSEV` write-back; tracker-client tests for the new request fields
+  serializing/omitting correctly; `task.go` tests extended for assignee passthrough.
+- Frontend: new `ProfilePage.test.tsx`; `RolesPanel.test.tsx` extended for the picker and
+  "Add to chat" enabled/disabled states; `TasksPanel.test.tsx` extended for assignee
+  pre-fill/clear/omit; `AdminUsersPage.test.tsx` extended for a new read-only
+  "Integrations" column (dot/badge per identity set, no edit control).
+- `demo/integration-user-profiles.md` (existing template): walkthrough sets a user's
+  identities, assigns several role types (via picker and free-text), shows auto-invite
+  covering all of them, demonstrates "Add to chat" for a role added after channel
+  creation, creates a GitHub/Jira issue showing assignee pre-fill. Known limitations
+  restate: name/avatar/password out of scope; no Jira account-ID lookup helper; "Add to
+  chat" only works for SEVs whose channel was created after this ships; the role picker
+  is optional, not mandatory.
+
+**Estimate**: ~6-8 days (10a ~1 day, 10b ~0.75-1 day, 10c ~1-1.25 days, 10d ~0.75-1 day,
+10e ~1.25-1.5 days, 10f ~1 day, 10g distributed + ~0.5 day demo doc) — larger than Phase
+9 because this phase touches six independent layers (DB, two extended/new gRPC surfaces,
+two tracker clients, the `cmd/slackbot` binary, two frontend surfaces) rather than one
+backend/frontend pair. **Depends on**: nothing already in the roadmap (Phase 9 is
+unrelated). 10c is an internal hard dependency for 10d/10e.
+
+**Possible split if too large for one PR/phase**: pull **10f** into its own follow-up —
+it only needs 10a's `User` fields and `WhoAmIResponse` extension, no dependency on
+10c/10d/10e, and is the most self-contained piece. A more aggressive trim would also defer
+**10e** — the secondary use case in the stated goal, and the riskiest sub-piece (new
+persisted `SEV` field + a new direct-Slack-API path in `cmd/server`) — while 10d alone
+already delivers the higher-value "auto-invite every role" outcome.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -568,6 +742,7 @@ unchanged.
 | 7 | Linked Issues frontend (create-Jira UI + tracker badges) | 6a | 1.5-2.5 days |
 | 8 | Datastore-driven Slack bot credentials (REST client; Socket Mode reconnect deferred) | — | 2-3 days |
 | 9 | Schema-driven integration settings (catalog + sidebar admin UI + Monitoring) | — | 3-4 days |
+| 10 | Per-user integration profiles (Slack/GitHub/Jira identity) | — | 6-8 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -579,7 +754,11 @@ design for a known, currently-tolerated gap, to pick up if/when it becomes an
 operational pain point rather than on a fixed timeline. Phase 9 is also independent
 of everything above it — it reuses PagerDuty/GitHub/Slack/Jira's existing resolvers
 and health checkers unchanged, and Monitoring needs no new backend client — so it
-can be sequenced whenever the sidebar-based UI redesign becomes a priority.
+can be sequenced whenever the sidebar-based UI redesign becomes a priority. Phase 10
+is likewise independent of everything above it, but internally its 10c sub-step (a
+role-assignment user picker) is a hard dependency for 10d/10e (Slack invite
+expansion) — see the phase's own "possible split" note if it needs to be broken up
+across multiple PRs/milestones.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
