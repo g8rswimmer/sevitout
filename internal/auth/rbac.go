@@ -75,20 +75,24 @@ var rpcMinRole = map[string]store.OrgRole{
 	// Config service — service registry and on-call rotations are readable
 	// by any authenticated user (referenced elsewhere in the UI); everything
 	// else is Admin-only per docs/requirements.md §18.
-	"/sevitout.v1.ConfigService/CreateService":           store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetService":              store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/UpdateService":           store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteService":           store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListServices":            store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/ListUsers":               store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/UpdateUserRole":          store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeactivateUser":          store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ReactivateUser":          store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/CreateOnCallRotation":    store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetOnCallRotation":       store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/UpdateOnCallRotation":    store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteOnCallRotation":    store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListOnCallRotations":     store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/CreateService":        store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetService":           store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpdateService":        store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteService":        store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListServices":         store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/ListUsers":            store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateUserRole":       store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeactivateUser":       store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ReactivateUser":       store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateOnCallRotation": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetOnCallRotation":    store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpdateOnCallRotation": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteOnCallRotation": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListOnCallRotations":  store.OrgRoleViewer,
+	// GetIntegrationCatalog is a pure static-schema read (no store access,
+	// nothing per-integration sensitive) but stays Admin-only for
+	// consistency with the rest of this integration-config group.
+	"/sevitout.v1.ConfigService/GetIntegrationCatalog":   store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/UpsertIntegrationConfig": store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/GetIntegrationConfig":    store.OrgRoleAdmin,
 	// GetSlackBotCredential sits at the same Admin floor as every other

@@ -46,10 +46,20 @@ type ConfigServiceClient interface {
 	// ListOnCallRotations is readable by any authenticated user (Viewer+) so
 	// the UI can show who is currently on-call.
 	ListOnCallRotations(ctx context.Context, in *ListOnCallRotationsRequest, opts ...grpc.CallOption) (*ListOnCallRotationsResponse, error)
+	// GetIntegrationCatalog returns the fixed, ordered field schema for every
+	// integration_type this server recognizes (docs/roadmap.md Phase 9) — a
+	// pure translation of internal/integrations/catalog.All with no store
+	// access. It's the single source of truth the admin UI renders its
+	// sidebar + schema-driven detail form from, and UpsertIntegrationConfig
+	// validates incoming requests against the same catalog.
+	GetIntegrationCatalog(ctx context.Context, in *GetIntegrationCatalogRequest, opts ...grpc.CallOption) (*GetIntegrationCatalogResponse, error)
 	// UpsertIntegrationConfig creates or replaces the settings and credentials
 	// for one integration type. Credentials are encrypted (AES-256-GCM) before
 	// being written to storage and are never returned by any RPC in this
-	// service — only whether credentials are currently configured.
+	// service — only whether credentials are currently configured. The
+	// integration_type and every credential/settings key (and, for a select
+	// field, its value) are validated against GetIntegrationCatalog's schema
+	// before anything is written — see this RPC's handler doc comment.
 	UpsertIntegrationConfig(ctx context.Context, in *UpsertIntegrationConfigRequest, opts ...grpc.CallOption) (*IntegrationConfigResponse, error)
 	GetIntegrationConfig(ctx context.Context, in *GetIntegrationConfigRequest, opts ...grpc.CallOption) (*IntegrationConfigResponse, error)
 	// GetSlackBotCredential returns the decrypted "slack" integration
@@ -210,6 +220,15 @@ func (c *configServiceClient) ListOnCallRotations(ctx context.Context, in *ListO
 	return out, nil
 }
 
+func (c *configServiceClient) GetIntegrationCatalog(ctx context.Context, in *GetIntegrationCatalogRequest, opts ...grpc.CallOption) (*GetIntegrationCatalogResponse, error) {
+	out := new(GetIntegrationCatalogResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/GetIntegrationCatalog", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *configServiceClient) UpsertIntegrationConfig(ctx context.Context, in *UpsertIntegrationConfigRequest, opts ...grpc.CallOption) (*IntegrationConfigResponse, error) {
 	out := new(IntegrationConfigResponse)
 	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/UpsertIntegrationConfig", in, out, opts...)
@@ -345,10 +364,20 @@ type ConfigServiceServer interface {
 	// ListOnCallRotations is readable by any authenticated user (Viewer+) so
 	// the UI can show who is currently on-call.
 	ListOnCallRotations(context.Context, *ListOnCallRotationsRequest) (*ListOnCallRotationsResponse, error)
+	// GetIntegrationCatalog returns the fixed, ordered field schema for every
+	// integration_type this server recognizes (docs/roadmap.md Phase 9) — a
+	// pure translation of internal/integrations/catalog.All with no store
+	// access. It's the single source of truth the admin UI renders its
+	// sidebar + schema-driven detail form from, and UpsertIntegrationConfig
+	// validates incoming requests against the same catalog.
+	GetIntegrationCatalog(context.Context, *GetIntegrationCatalogRequest) (*GetIntegrationCatalogResponse, error)
 	// UpsertIntegrationConfig creates or replaces the settings and credentials
 	// for one integration type. Credentials are encrypted (AES-256-GCM) before
 	// being written to storage and are never returned by any RPC in this
-	// service — only whether credentials are currently configured.
+	// service — only whether credentials are currently configured. The
+	// integration_type and every credential/settings key (and, for a select
+	// field, its value) are validated against GetIntegrationCatalog's schema
+	// before anything is written — see this RPC's handler doc comment.
 	UpsertIntegrationConfig(context.Context, *UpsertIntegrationConfigRequest) (*IntegrationConfigResponse, error)
 	GetIntegrationConfig(context.Context, *GetIntegrationConfigRequest) (*IntegrationConfigResponse, error)
 	// GetSlackBotCredential returns the decrypted "slack" integration
@@ -421,6 +450,9 @@ func (UnimplementedConfigServiceServer) DeleteOnCallRotation(context.Context, *D
 }
 func (UnimplementedConfigServiceServer) ListOnCallRotations(context.Context, *ListOnCallRotationsRequest) (*ListOnCallRotationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListOnCallRotations not implemented")
+}
+func (UnimplementedConfigServiceServer) GetIntegrationCatalog(context.Context, *GetIntegrationCatalogRequest) (*GetIntegrationCatalogResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetIntegrationCatalog not implemented")
 }
 func (UnimplementedConfigServiceServer) UpsertIntegrationConfig(context.Context, *UpsertIntegrationConfigRequest) (*IntegrationConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpsertIntegrationConfig not implemented")
@@ -723,6 +755,24 @@ func _ConfigService_ListOnCallRotations_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConfigService_GetIntegrationCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIntegrationCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetIntegrationCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/GetIntegrationCatalog",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetIntegrationCatalog(ctx, req.(*GetIntegrationCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConfigService_UpsertIntegrationConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpsertIntegrationConfigRequest)
 	if err := dec(in); err != nil {
@@ -1001,6 +1051,10 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListOnCallRotations",
 			Handler:    _ConfigService_ListOnCallRotations_Handler,
+		},
+		{
+			MethodName: "GetIntegrationCatalog",
+			Handler:    _ConfigService_GetIntegrationCatalog_Handler,
 		},
 		{
 			MethodName: "UpsertIntegrationConfig",

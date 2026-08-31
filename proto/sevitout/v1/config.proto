@@ -110,10 +110,30 @@ service ConfigService {
 
   // --- Integration configuration (§18.4) ---
 
+  // GetIntegrationCatalog returns the fixed, ordered field schema for every
+  // integration_type this server recognizes (docs/roadmap.md Phase 9) — a
+  // pure translation of internal/integrations/catalog.All with no store
+  // access. It's the single source of truth the admin UI renders its
+  // sidebar + schema-driven detail form from, and UpsertIntegrationConfig
+  // validates incoming requests against the same catalog.
+  rpc GetIntegrationCatalog(GetIntegrationCatalogRequest) returns (GetIntegrationCatalogResponse) {
+    option (google.api.http) = {
+      // Deliberately not nested under /v1/config/integrations/{integration_type}
+      // — "catalog" would collide with that path template (grpc-gateway
+      // resolves the ambiguity in favor of the wildcard route, silently
+      // routing this to GetIntegrationConfig instead), so this lives as a
+      // sibling path instead, matching GetSlackBotCredential's same reasoning
+      // for its own non-colliding path just above.
+      get: "/v1/config/integration-catalog"
+    };
+  }
   // UpsertIntegrationConfig creates or replaces the settings and credentials
   // for one integration type. Credentials are encrypted (AES-256-GCM) before
   // being written to storage and are never returned by any RPC in this
-  // service — only whether credentials are currently configured.
+  // service — only whether credentials are currently configured. The
+  // integration_type and every credential/settings key (and, for a select
+  // field, its value) are validated against GetIntegrationCatalog's schema
+  // before anything is written — see this RPC's handler doc comment.
   rpc UpsertIntegrationConfig(UpsertIntegrationConfigRequest) returns (IntegrationConfigResponse) {
     option (google.api.http) = {
       put: "/v1/config/integrations/{integration_type}"
@@ -347,6 +367,44 @@ message ListOnCallRotationsResponse {
 
 // ── Integration configuration ────────────────────────────────────────────────
 
+// CatalogField describes one credential or settings key an integration_type
+// accepts — see internal/integrations/catalog.Field, which this mirrors
+// field-for-field.
+message CatalogField {
+  // key is the storage key exactly as read/written by UpsertIntegrationConfig
+  // (e.g. "bot_token", "cloud_id") — never itself shown to an admin; see label.
+  string key = 1;
+  string label = 2;
+  // kind: "text" | "secret" | "select". "secret" fields are write-only
+  // credentials, rendered password-masked; "select" fields must be one of
+  // options.
+  string kind = 3;
+  // required is a UI-only affordance — see UpsertIntegrationConfig's doc
+  // comment for why it isn't enforced server-side at upsert time.
+  bool required = 4;
+  string help = 5;
+  // options lists the valid values for a "select" field; empty otherwise.
+  repeated string options = 6;
+}
+
+// IntegrationCatalogEntry describes one integration_type's complete field
+// schema — see internal/integrations/catalog.Integration.
+message IntegrationCatalogEntry {
+  string type = 1;
+  string label = 2;
+  // credential_fields is empty for a settings-only integration (Monitoring).
+  repeated CatalogField credential_fields = 3;
+  repeated CatalogField settings_fields = 4;
+}
+
+message GetIntegrationCatalogRequest {}
+
+message GetIntegrationCatalogResponse {
+  // integrations is fixed-order — the order the admin UI's sidebar renders
+  // in — matching internal/integrations/catalog.All exactly.
+  repeated IntegrationCatalogEntry integrations = 1;
+}
+
 message IntegrationConfigResponse {
   string integration_type = 1;
   // credentials_configured is true when a non-empty credentials blob has
@@ -358,7 +416,9 @@ message IntegrationConfigResponse {
 }
 
 message UpsertIntegrationConfigRequest {
-  // integration_type: e.g. "slack", "pagerduty", "github", "datadog".
+  // integration_type: one of GetIntegrationCatalog's fixed set — e.g.
+  // "slack", "pagerduty", "github", "jira", "monitoring". Any other value is
+  // rejected.
   string integration_type = 1;
   // credentials is write-only: encrypted with AES-256-GCM before storage.
   // Omit (leave empty) to keep the existing stored credentials unchanged
