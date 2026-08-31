@@ -15,14 +15,19 @@ import type { IntegrationHealthStatus } from '@/types/api'
 
 /** The integration types with a live connectivity check registered
  * server-side (cmd/server/main.go's healthCheckers map) — each also has one
- * well-known credential key its HealthChecker reads, and (Jira only) one or
- * more well-known non-secret settings keys used alongside the credential:
- * cloud_id (required — the datastore path won't activate without it, see
- * jiraIssueResolver.apply) and site_url (optional — cosmetic browse-link
- * generation only, mirroring JIRA_SITE_URL's independently-optional
- * treatment in internal/config.Config). "Other" covers any integration_type
- * not in this fixed list (e.g. a future Datadog/Prometheus integration),
- * stored and displayed exactly as typed. */
+ * well-known credential key its HealthChecker reads, and (Jira and Slack)
+ * one or more well-known non-secret settings keys used alongside the
+ * credential:
+ *  - Jira: cloud_id (required — the datastore path won't activate without
+ *    it, see jiraIssueResolver.apply) and site_url (optional — cosmetic
+ *    browse-link generation only, mirroring JIRA_SITE_URL's independently-
+ *    optional treatment in internal/config.Config).
+ *  - Slack: default_channel and channel_naming_convention (both optional —
+ *    read by cmd/slackbot's loadSlackSettings/runSettingsRefresher, each
+ *    with a safe built-in fallback when unset; not read by
+ *    slackHealthChecker, which only needs the bot_token credential).
+ * "Other" covers any integration_type not in this fixed list (e.g. a future
+ * Datadog/Prometheus integration), stored and displayed exactly as typed. */
 const KNOWN_INTEGRATIONS: {
   value: string
   label: string
@@ -31,7 +36,15 @@ const KNOWN_INTEGRATIONS: {
 }[] = [
   { value: 'pagerduty', label: 'PagerDuty', credentialKey: 'api_key' },
   { value: 'github', label: 'GitHub', credentialKey: 'token' },
-  { value: 'slack', label: 'Slack', credentialKey: 'bot_token' },
+  {
+    value: 'slack',
+    label: 'Slack',
+    credentialKey: 'bot_token',
+    settingsKeys: [
+      { key: 'default_channel', required: false },
+      { key: 'channel_naming_convention', required: false },
+    ],
+  },
   {
     value: 'jira',
     label: 'Jira',
