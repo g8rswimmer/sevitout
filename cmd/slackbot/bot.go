@@ -179,6 +179,7 @@ func (b *bot) namingConvention() string {
 func (b *bot) setSlackSettings(defaultChannel, namingConvention string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.log.Info("setting the default channel", "default_channel", defaultChannel, "naming_conv", namingConvention)
 	b.defaultChannel = defaultChannel
 	b.channelNamingConvention = namingConvention
 }

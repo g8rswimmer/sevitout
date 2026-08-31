@@ -29,7 +29,7 @@ const wsReconnectDelay = 5 * time.Second
 func (b *bot) runEventListener(ctx context.Context, wsURL string, tokens *tokenSource) {
 	for ctx.Err() == nil {
 		if err := b.connectAndListen(ctx, wsURL, tokens); err != nil && ctx.Err() == nil {
-			b.log.ErrorContext(ctx, "event stream connection lost, reconnecting", "err", err, "retry_in", wsReconnectDelay)
+			b.log.ErrorContext(ctx, "event stream connection lost, reconnecting", "err", err, "retry_in_ms", wsReconnectDelay.Milliseconds())
 		}
 		select {
 		case <-ctx.Done():

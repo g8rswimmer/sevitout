@@ -169,7 +169,7 @@ func runSocketMode(ctx context.Context, log *slog.Logger, b *bot, smClient *sock
 // returns zero values, which the bot treats as "no default channel
 // configured" / "use the built-in naming convention" rather than failing to
 // start entirely.
-func loadSlackSettings(ctx context.Context, log *slog.Logger, config configAPI) (defaultChannel, namingConvention string) {
+func loadSlackSettings(ctx context.Context, log *slog.Logger, config configAPI) (string, string) {
 	var lastErr error
 	for attempt := 1; attempt <= slackSettingsRetryAttempts; attempt++ {
 		resp, err := config.GetIntegrationConfig(ctx, &pb.GetIntegrationConfigRequest{IntegrationType: "slack"})
@@ -183,8 +183,10 @@ func loadSlackSettings(ctx context.Context, log *slog.Logger, config configAPI) 
 		case <-time.After(slackSettingsRetryDelay):
 		}
 	}
-	log.Warn("could not load slack integration config, using defaults", "err", lastErr)
-	return "", ""
+	defaultChannel := os.Getenv("SLACK_DEFAULT_CHANNEL")
+	defaultChannelNaming := os.Getenv("SLACK_CHANNEL_NAMING_CONVENTION")
+	log.Warn("could not load slack integration config, using defaults", "err", lastErr, "default_channel", defaultChannel, "channel_naming_convention", defaultChannelNaming)
+	return defaultChannel, defaultChannelNaming
 }
 
 // optionalEnv reads name from the environment, logging which variable was
