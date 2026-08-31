@@ -1,6 +1,7 @@
 # Sevitout — System Architecture
 
-**Version**: 0.1 (draft)
+**Version**: 0.2 — as-built, updated as the system changes (no longer a
+pre-implementation draft; see `docs/roadmap.md` for what's shipped and what's next)
 **Stack**: Go (backend) · React/TypeScript (frontend) · PostgreSQL · gRPC + REST gateway · WebSockets · Docker Compose
 
 ---
@@ -52,17 +53,26 @@ sevitout/
 │   ├── integrations/
 │   │   ├── slack/      # Slack client (announcements, channel creation, chat capture)
 │   │   ├── pagerduty/  # PagerDuty on-call lookup
-│   │   ├── github/     # GitHub Issues link/create
-│   │   └── monitoring/ # Dashboard link metadata (Datadog, Prometheus, CloudWatch)
+│   │   ├── tasktracker/
+│   │   │   ├── github/ # GitHub Issues link/create
+│   │   │   └── jira/   # Jira Issues link/create
+│   │   ├── catalog/    # Static field-schema registry driving the admin
+│   │   │                # integrations UI and its upsert validation
+│   │   └── monitoring/ # Unused placeholder (.gitkeep only) — Monitoring is
+│   │                    # settings-only (tool + base URL via catalog above),
+│   │                    # with no live client of its own
 │   ├── store/          # Repository interfaces + PostgreSQL implementations
 │   │   ├── postgres/
 │   │   └── queries/    # sqlc-generated query code
-│   ├── auth/           # OAuth 2.0, JWT, RBAC middleware/interceptors
+│   ├── auth/           # JWT, RBAC middleware/interceptors
+│   ├── telemetry/      # Request-ID + context-bound *slog.Logger propagation (§3.4)
 │   ├── api/
 │   │   ├── grpc/       # gRPC service handler implementations
-│   │   ├── gateway/    # gRPC-Gateway REST transcoding setup
+│   │   ├── gateway/    # Unused placeholder (.gitkeep only) — the actual
+│   │   │                # grpc-gateway REST transcoding setup lives directly
+│   │   │                # in cmd/server/main.go, not in a separate package
 │   │   └── ws/         # WebSocket hub and event broadcasting
-│   └── config/         # App configuration (env, file)
+│   └── config/         # Typed env-var configuration, loaded once at startup
 ├── proto/
 │   └── sevitout/v1/    # Protobuf definitions (source of truth for all APIs)
 ├── migrations/         # PostgreSQL migration files (golang-migrate)
@@ -70,7 +80,6 @@ sevitout/
 │   ├── src/
 │   │   ├── pages/
 │   │   ├── components/
-│   │   ├── hooks/
 │   │   └── lib/        # API client, WebSocket client, auth
 │   └── ...
 ├── deploy/
@@ -86,18 +95,24 @@ sevitout/
 
 All API capabilities are defined in Protocol Buffers under `proto/sevitout/v1/`. The REST API is generated automatically by [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) from proto annotations — there is no hand-written REST routing.
 
-**gRPC services:**
+**gRPC services** (15, one file per service under `proto/sevitout/v1/`):
 
 | Service | Responsibility |
 |---|---|
-| `SEVService` | CRUD for SEV records, status transitions, role management |
+| `SEVService` | CRUD for SEV records, status transitions |
+| `RoleService` | Assign/remove/list roles on a SEV (IC, Communications Lead, Recorder, Responders, On-call) |
+| `SEVAccessService` | Grant/revoke/list per-user visibility into a Sensitive SEV |
+| `SEVLinkService` | Typed bidirectional SEV-to-SEV relationships (related, caused-by, duplicate, recurrence-of) |
 | `PostmortemService` | Postmortem CRUD, status transitions, lock/unlock |
 | `SearchService` | Full-text search and filtered listing of SEVs |
-| `ConfigService` | Service registry, users, on-call, integration config, AI plugins, retention |
+| `ReportService` | Dashboard metrics, MTTR/frequency trends, CSV export |
+| `ConfigService` | Service registry, users, on-call, integration config + catalog, AI plugins, retention |
 | `AIService` | Trigger AI actions, stream AI output, list AI plugin configurations |
 | `AuditService` | Read audit log entries for a SEV |
+| `AuthService` | Login/register, `WhoAmI` |
 | `AnnouncementService` | Announcements and updates on a SEV |
-| `TaskService` | Linked task management |
+| `ChatService` | Chat/communication log entries |
+| `TaskService` | Linked task management (GitHub Issues, Jira Issues) |
 | `ShareService` | Generate and revoke public shareable links |
 
 The REST gateway runs on the same port as the gRPC server using the `cmux` multiplexer — gRPC (h2c) and HTTP/1.1 are served on the same listener.
@@ -133,6 +148,47 @@ All gRPC calls pass through a server-side unary and stream interceptor that:
 4. Enforces RBAC — unauthenticated or unauthorized calls are rejected before reaching the service handler
 
 Public shareable link views bypass JWT auth and use a signed token in the URL path (`/s/:token`), validated separately in the HTTP gateway layer.
+
+### 3.4 Observability
+
+Three unauthenticated endpoints share `httpMux` alongside `/openapi.json`
+(deliberately: this matches the standard scrape/probe convention for each,
+not an accidental gap in the otherwise fully JWT-gated surface):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /healthz` | Liveness/readiness — checks only that the database is reachable (`Stores.Ping`; a no-op against the in-memory dev fallback). Distinct from `GET /admin/integrations/health` below |
+| `GET /metrics` | Prometheus text format (`prometheus/client_golang`): RPC request/duration counters and histograms (folded into the existing `logRPC` helper rather than a second interceptor), a WebSocket connection gauge, an AI-dispatch outcome counter, `pgxpool.Pool.Stat()`-derived DB pool gauges, and a periodically-refreshed open-SEV-count gauge by severity |
+| `GET /admin/integrations/health` | Admin-only (JWT + RBAC checked by hand, since this is a plain `net/http` handler bypassing the gRPC interceptor chain) — live connectivity check against each *configured* third-party integration (PagerDuty/GitHub/Jira/Slack), run concurrently. Distinct from `/healthz`: this is about third-party reachability, not process liveness |
+
+**`internal/telemetry`** provides the cross-cutting request-ID + bound-logger
+plumbing every one of the above (and every other RPC) rides on:
+
+- `RequestIDUnaryInterceptor`/`RequestIDStreamInterceptor` sit outermost in
+  the interceptor chain (ahead of the auth interceptor in §3.3, ahead of
+  logging) — `context.WithValue` only propagates inward, so request-ID
+  generation has to run before anything that wants to log with it,
+  including an auth *rejection*.
+- `telemetry.WithLogger`/`LoggerFromContext` stash and retrieve a
+  `*slog.Logger` pre-bound with `request_id` and `user_id` via `log.With(...)`;
+  handlers call `telemetry.LoggerFromContext(ctx)` once instead of
+  re-deriving `user_id` from `auth.UserFromContext` at each call site.
+  Background work with no live request (the AI dispatcher's worker pool)
+  falls back to `slog.Default()`.
+- The same request ID is bridged through grpc-gateway (`X-Request-Id`
+  header ↔ `x-request-id` gRPC metadata) and through the three standalone
+  `net/http` handlers (`/ws`, `/admin/integrations/health`, `/s/{token}`),
+  so one correlation ID survives every hop for a given request.
+- A shared `internalError(ctx, msg, err)` helper (`internal/api/grpc/errors.go`)
+  logs `err`'s real detail via this bound logger at Error level while still
+  returning the same generic `status.Error(codes.Internal, msg)` to the
+  caller — the wire contract stays unchanged; the previously-discarded
+  detail now reaches the logs.
+
+See `docs/architecture-evolution.md` for the full design rationale (library
+choice, interceptor ordering, non-goals) and `demo/healthz.md`,
+`demo/metrics.md`, `demo/request-scoped-logging.md`,
+`demo/internal-error-cleanup.md` for exact, live-verified walkthroughs.
 
 ---
 
@@ -197,7 +253,7 @@ Full-text search uses PostgreSQL's native `tsvector`/`tsquery` with GIN indexes 
 | `oncall_rotations` | On-call rotation definitions and overrides |
 | `ai_plugins` | Registered AI plugin configurations |
 | `integration_config` | Per-integration credentials and settings |
-| `notification_config` | Role-based notification routing rules |
+| `notification_config` | Role-based notification routing rules — schema exists, unused by any application code today (see `docs/requirements.md` §16) |
 | `retention_config` | Per-severity-level retention policy |
 | `shareable_links` | Public link tokens (signed, revocable) |
 
@@ -221,8 +277,9 @@ The `sevs` table carries a `search_vector tsvector` column populated by a trigge
 | `golang.org/x/crypto` | bcrypt password hashing |
 | `github.com/golang-jwt/jwt/v5` | JWT session tokens |
 | `github.com/slack-go/slack` | Slack API client (bot + events) |
-| `log/slog` (stdlib) | Structured logging |
-| `github.com/shurcooL/githubv4` | GitHub GraphQL API (Issues) |
+| `log/slog` (stdlib) | Structured logging, request-ID/user-bound via `internal/telemetry` |
+| `github.com/prometheus/client_golang` | `/metrics` — RPC, WebSocket, AI-dispatch, and DB-pool metrics |
+| `net/http` (stdlib) | GitHub Issues, Jira Issues, and PagerDuty clients are all plain hand-rolled REST clients over `net/http` — no GraphQL or vendor SDK for any of the three |
 
 SQL queries are written by hand and type-checked by `sqlc`. No ORM.
 
@@ -246,6 +303,18 @@ server multiplexes both over one TCP port) using a durable `SLACKBOT_SERVICE_EMA
 manually rotated JWT. It refreshes proactively on a fixed interval and reactively on
 any RPC the server rejects as unauthenticated, so it stays authenticated indefinitely
 without operator intervention.
+
+**Credential resolution**: like PagerDuty/GitHub/Jira's own resolvers in
+`cmd/server` (configured via `ConfigService.UpsertIntegrationConfig`), the
+bot prefers a datastore-configured `bot_token`/`app_token` pair over the
+static `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` env vars, resolved once at startup via a
+narrowly-scoped RPC (`ConfigService.GetSlackBotCredential`, gated to this one
+service account specifically — the only RPC in the system that returns a
+decrypted credential over the wire at all). The REST calls above (channel
+creation, messages, invites, history, user lookup) pick up a *later* config
+change within one polling interval, no restart needed; the long-lived Socket
+Mode connection itself does not — reconnecting it live is a deferred
+follow-up (see `demo/datastore-slack-bot-credentials.md`).
 
 ---
 

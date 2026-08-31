@@ -1,12 +1,21 @@
 # Sevitout — Architecture Evolution
 
-**Version**: 0.1 (proposal)
+**Version**: 0.2 — **historical: every phase described below (`docs/roadmap.md`
+Phases 0–4) has shipped.** This document is kept as the design record for *why*
+each piece looks the way it does (library choices, ordering constraints,
+non-goals) — see `docs/architecture.md`'s §3.4 Observability and §7 Slack Bot
+for the as-built description, and the `demo/` runbook linked from each phase's
+status line in `docs/roadmap.md` for exact, verified behavior. Nothing below
+was rewritten to read as historical prose; it's left in the present tense it
+was written in, since the design reasoning itself hasn't changed — only its
+status (proposed → shipped) has.
+
 **Relationship to `docs/architecture.md`**: this document is additive, not a
 rewrite. It references that document's existing section numbers (§3 API Layer,
 §3.3 Auth Interceptor, §8 AI Plugin System, §12 Resolved Architectural Decisions)
 rather than duplicating them, and reads as a continuation of §12's
-"proposed/in-progress decisions" — but lives in its own file since these decisions
-aren't resolved yet.
+"proposed/in-progress decisions" — but lives in its own file since, at the time
+it was written, these decisions weren't resolved yet.
 
 ---
 
