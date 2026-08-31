@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -57,15 +58,18 @@ func (s *UserStore) Get(ctx context.Context, id string) (*store.User, error) {
 		return nil, fmt.Errorf("postgres user: get: %w", err)
 	}
 	return &store.User{
-		ID:           row.ID,
-		Email:        row.Email,
-		Name:         row.Name,
-		AvatarURL:    row.AvatarUrl,
-		OrgRole:      store.OrgRole(row.OrgRole),
-		Active:       row.Active,
-		PasswordHash: row.PasswordHash,
-		CreatedAt:    row.CreatedAt.Time,
-		UpdatedAt:    row.UpdatedAt.Time,
+		ID:             row.ID,
+		Email:          row.Email,
+		Name:           row.Name,
+		AvatarURL:      row.AvatarUrl,
+		OrgRole:        store.OrgRole(row.OrgRole),
+		Active:         row.Active,
+		PasswordHash:   row.PasswordHash,
+		SlackUserID:    row.SlackUserID,
+		GitHubUsername: row.GithubUsername,
+		JiraAccountID:  row.JiraAccountID,
+		CreatedAt:      row.CreatedAt.Time,
+		UpdatedAt:      row.UpdatedAt.Time,
 	}, nil
 }
 
@@ -79,15 +83,18 @@ func (s *UserStore) GetByEmail(ctx context.Context, email string) (*store.User, 
 		return nil, fmt.Errorf("postgres user: get by email: %w", err)
 	}
 	return &store.User{
-		ID:           row.ID,
-		Email:        row.Email,
-		Name:         row.Name,
-		AvatarURL:    row.AvatarUrl,
-		OrgRole:      store.OrgRole(row.OrgRole),
-		Active:       row.Active,
-		PasswordHash: row.PasswordHash,
-		CreatedAt:    row.CreatedAt.Time,
-		UpdatedAt:    row.UpdatedAt.Time,
+		ID:             row.ID,
+		Email:          row.Email,
+		Name:           row.Name,
+		AvatarURL:      row.AvatarUrl,
+		OrgRole:        store.OrgRole(row.OrgRole),
+		Active:         row.Active,
+		PasswordHash:   row.PasswordHash,
+		SlackUserID:    row.SlackUserID,
+		GitHubUsername: row.GithubUsername,
+		JiraAccountID:  row.JiraAccountID,
+		CreatedAt:      row.CreatedAt.Time,
+		UpdatedAt:      row.UpdatedAt.Time,
 	}, nil
 }
 
@@ -121,18 +128,45 @@ func (s *UserStore) List(ctx context.Context) ([]*store.User, error) {
 	users := make([]*store.User, 0, len(rows))
 	for _, r := range rows {
 		users = append(users, &store.User{
-			ID:           r.ID,
-			Email:        r.Email,
-			Name:         r.Name,
-			AvatarURL:    r.AvatarUrl,
-			OrgRole:      store.OrgRole(r.OrgRole),
-			Active:       r.Active,
-			PasswordHash: r.PasswordHash,
-			CreatedAt:    r.CreatedAt.Time,
-			UpdatedAt:    r.UpdatedAt.Time,
+			ID:             r.ID,
+			Email:          r.Email,
+			Name:           r.Name,
+			AvatarURL:      r.AvatarUrl,
+			OrgRole:        store.OrgRole(r.OrgRole),
+			Active:         r.Active,
+			PasswordHash:   r.PasswordHash,
+			SlackUserID:    r.SlackUserID,
+			GitHubUsername: r.GithubUsername,
+			JiraAccountID:  r.JiraAccountID,
+			CreatedAt:      r.CreatedAt.Time,
+			UpdatedAt:      r.UpdatedAt.Time,
 		})
 	}
 	return users, nil
+}
+
+// UpdateIntegrationIdentities full-replaces user's self-service integration
+// identities (Slack user ID, GitHub username, Jira account ID) and returns
+// the updated record.
+func (s *UserStore) UpdateIntegrationIdentities(ctx context.Context, userID string, slackUserID, githubUsername, jiraAccountID *string) (*store.User, error) {
+	q := queries.New(s.pool)
+	if _, err := q.GetUser(ctx, userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		return nil, fmt.Errorf("postgres user: pre-update-identities get: %w", err)
+	}
+	now := time.Now()
+	if err := q.UpdateUserIntegrationIdentities(ctx, queries.UpdateUserIntegrationIdentitiesParams{
+		ID:             userID,
+		SlackUserID:    slackUserID,
+		GithubUsername: githubUsername,
+		JiraAccountID:  jiraAccountID,
+		UpdatedAt:      pgtype.Timestamptz{Time: now.UTC(), Valid: true},
+	}); err != nil {
+		return nil, fmt.Errorf("postgres user: update integration identities: %w", err)
+	}
+	return s.Get(ctx, userID)
 }
 
 func (s *UserStore) Count(ctx context.Context) (int64, error) {

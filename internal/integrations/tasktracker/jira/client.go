@@ -54,6 +54,9 @@ type CreateIssueRequest struct {
 	Summary     string
 	Description string
 	Labels      []string
+	// AssigneeAccountID is a Jira Cloud account ID to assign the new issue to
+	// (docs/roadmap.md Phase 10f), sent only when non-nil.
+	AssigneeAccountID *string
 }
 
 // APIError is returned when the Jira API responds with a non-success status
@@ -214,6 +217,9 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 	}
 	if len(req.Labels) > 0 {
 		fields["labels"] = req.Labels
+	}
+	if req.AssigneeAccountID != nil {
+		fields["assignee"] = map[string]string{"accountId": *req.AssigneeAccountID}
 	}
 	payload := map[string]any{"fields": fields}
 

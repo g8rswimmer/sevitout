@@ -87,10 +87,13 @@ type fakeSevAPI struct {
 	getErr     error
 	transResp  *pb.SEVResponse
 	transErr   error
+	updateResp *pb.SEVResponse
+	updateErr  error
 
 	lastCreateReq *pb.CreateSEVRequest
 	lastGetReq    *pb.GetSEVRequest
 	lastTransReq  *pb.TransitionStatusRequest
+	lastUpdateReq *pb.UpdateSEVRequest
 }
 
 func (f *fakeSevAPI) CreateSEV(_ context.Context, in *pb.CreateSEVRequest, _ ...grpc.CallOption) (*pb.SEVResponse, error) {
@@ -115,6 +118,32 @@ func (f *fakeSevAPI) TransitionStatus(_ context.Context, in *pb.TransitionStatus
 		return nil, f.transErr
 	}
 	return f.transResp, nil
+}
+
+func (f *fakeSevAPI) UpdateSEV(_ context.Context, in *pb.UpdateSEVRequest, _ ...grpc.CallOption) (*pb.SEVResponse, error) {
+	f.lastUpdateReq = in
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+	return f.updateResp, nil
+}
+
+// fakeDirectoryAPI is a directoryAPI that returns a scripted directory.
+type fakeDirectoryAPI struct {
+	resp    *pb.ListUserDirectoryResponse
+	err     error
+	lastReq *pb.ListUserDirectoryRequest
+}
+
+func (f *fakeDirectoryAPI) ListUserDirectory(_ context.Context, in *pb.ListUserDirectoryRequest, _ ...grpc.CallOption) (*pb.ListUserDirectoryResponse, error) {
+	f.lastReq = in
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.resp == nil {
+		return &pb.ListUserDirectoryResponse{}, nil
+	}
+	return f.resp, nil
 }
 
 // fakeRoleAPI is a roleAPI that returns a scripted role list.
@@ -225,7 +254,7 @@ func newTestBot(slackC *fakeSlack, sevs *fakeSevAPI, roles *fakeRoleAPI, ann *fa
 	}
 	return newBot(botParams{
 		Slack:                   slackC,
-		API:                     apiClients{sevs: sevs, roles: roles, announcements: ann, chats: chats},
+		API:                     apiClients{sevs: sevs, roles: roles, announcements: ann, chats: chats, directory: &fakeDirectoryAPI{}},
 		DefaultChannel:          defaultChannel,
 		ChannelNamingConvention: naming,
 	})

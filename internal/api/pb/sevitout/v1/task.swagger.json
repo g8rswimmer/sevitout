@@ -274,6 +274,10 @@
         "priority": {
           "type": "string",
           "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "assignee": {
+          "type": "string",
+          "description": "assignee is a GitHub login to assign the new issue to (wrapped into\nGitHub's assignees: []string at the client layer). Optional — an empty\nvalue creates the issue unassigned (docs/roadmap.md Phase 10f)."
         }
       }
     },
@@ -303,6 +307,10 @@
         "priority": {
           "type": "string",
           "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "assigneeAccountId": {
+          "type": "string",
+          "description": "assignee_account_id is a Jira Cloud account ID to assign the new issue\nto (sent as Jira's assignee: {accountId: \"...\"}). Optional — an empty\nvalue creates the issue unassigned. Unlike a GitHub login, this is an\nopaque ID a user typically can't see in Jira's own UI without an\nemail-\u003eaccountId lookup (docs/roadmap.md Phase 10f's documented UX risk)."
         }
       }
     },
@@ -441,6 +449,10 @@
         },
         "createdBy": {
           "type": "string"
+        },
+        "assignee": {
+          "type": "string",
+          "description": "assignee is the tracker-native assignee identifier set at issue-creation\ntime (a GitHub login, or a Jira account ID) — see\nCreateGitHubIssueRequest.assignee / CreateJiraIssueRequest.assignee_account_id\n(docs/roadmap.md Phase 10f). Absent for tasks linked via LinkTask, or\ncreated before this field existed."
         }
       },
       "description": "TaskResponse is the linked task record returned by all TaskService RPCs."

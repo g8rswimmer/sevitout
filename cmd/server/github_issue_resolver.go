@@ -81,14 +81,14 @@ var newGitHubIssueClient = func(token string) grpchandler.IssueClient {
 	return &githubIssueClient{c: github.NewClient(token)}
 }
 
-func (r *githubIssueResolver) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*grpchandler.CreatedIssue, error) {
+func (r *githubIssueResolver) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, assignee string) (*grpchandler.CreatedIssue, error) {
 	r.mu.RLock()
 	current := r.current
 	r.mu.RUnlock()
 	if current == nil {
 		return nil, grpchandler.ErrIntegrationNotConfigured
 	}
-	return current.CreateIssue(ctx, owner, repo, title, body, labels)
+	return current.CreateIssue(ctx, owner, repo, title, body, labels, assignee)
 }
 
 var (

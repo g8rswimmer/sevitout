@@ -26,6 +26,14 @@ type RoleServiceClient interface {
 	AssignRole(ctx context.Context, in *AssignRoleRequest, opts ...grpc.CallOption) (*SEVRoleResponse, error)
 	RemoveRole(ctx context.Context, in *RemoveRoleRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListRoles(ctx context.Context, in *ListRolesRequest, opts ...grpc.CallOption) (*ListRolesResponse, error)
+	// InviteRoleToSlack invites the person holding one role assignment into
+	// the SEV's already-created incident Slack channel (docs/roadmap.md Phase
+	// 10e) — a manual "add to chat" action for a role assigned after the
+	// channel was created (auto-invite at channel-creation time only covers
+	// roles that existed at that moment). Fails FailedPrecondition when the
+	// SEV has no Slack channel recorded, or when the role holder has no
+	// resolvable Slack identity.
+	InviteRoleToSlack(ctx context.Context, in *InviteRoleToSlackRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type roleServiceClient struct {
@@ -63,6 +71,15 @@ func (c *roleServiceClient) ListRoles(ctx context.Context, in *ListRolesRequest,
 	return out, nil
 }
 
+func (c *roleServiceClient) InviteRoleToSlack(ctx context.Context, in *InviteRoleToSlackRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.RoleService/InviteRoleToSlack", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RoleServiceServer is the server API for RoleService service.
 // All implementations must embed UnimplementedRoleServiceServer
 // for forward compatibility
@@ -70,6 +87,14 @@ type RoleServiceServer interface {
 	AssignRole(context.Context, *AssignRoleRequest) (*SEVRoleResponse, error)
 	RemoveRole(context.Context, *RemoveRoleRequest) (*emptypb.Empty, error)
 	ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error)
+	// InviteRoleToSlack invites the person holding one role assignment into
+	// the SEV's already-created incident Slack channel (docs/roadmap.md Phase
+	// 10e) — a manual "add to chat" action for a role assigned after the
+	// channel was created (auto-invite at channel-creation time only covers
+	// roles that existed at that moment). Fails FailedPrecondition when the
+	// SEV has no Slack channel recorded, or when the role holder has no
+	// resolvable Slack identity.
+	InviteRoleToSlack(context.Context, *InviteRoleToSlackRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedRoleServiceServer()
 }
 
@@ -85,6 +110,9 @@ func (UnimplementedRoleServiceServer) RemoveRole(context.Context, *RemoveRoleReq
 }
 func (UnimplementedRoleServiceServer) ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRoles not implemented")
+}
+func (UnimplementedRoleServiceServer) InviteRoleToSlack(context.Context, *InviteRoleToSlackRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InviteRoleToSlack not implemented")
 }
 func (UnimplementedRoleServiceServer) mustEmbedUnimplementedRoleServiceServer() {}
 
@@ -153,6 +181,24 @@ func _RoleService_ListRoles_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RoleService_InviteRoleToSlack_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InviteRoleToSlackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RoleServiceServer).InviteRoleToSlack(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.RoleService/InviteRoleToSlack",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RoleServiceServer).InviteRoleToSlack(ctx, req.(*InviteRoleToSlackRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RoleService_ServiceDesc is the grpc.ServiceDesc for RoleService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -171,6 +217,10 @@ var RoleService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRoles",
 			Handler:    _RoleService_ListRoles_Handler,
+		},
+		{
+			MethodName: "InviteRoleToSlack",
+			Handler:    _RoleService_InviteRoleToSlack_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

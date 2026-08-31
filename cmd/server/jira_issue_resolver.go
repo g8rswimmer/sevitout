@@ -83,14 +83,14 @@ var newJiraIssueClientFn = func(cloudID, apiToken, siteURL string) grpchandler.J
 	return &jiraIssueClient{c: jira.NewClient(cloudID, apiToken, siteURL)}
 }
 
-func (r *jiraIssueResolver) CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string) (*grpchandler.CreatedIssue, error) {
+func (r *jiraIssueResolver) CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string, assigneeAccountID string) (*grpchandler.CreatedIssue, error) {
 	r.mu.RLock()
 	current := r.current
 	r.mu.RUnlock()
 	if current == nil {
 		return nil, grpchandler.ErrIntegrationNotConfigured
 	}
-	return current.CreateIssue(ctx, projectKey, issueType, summary, description, labels)
+	return current.CreateIssue(ctx, projectKey, issueType, summary, description, labels, assigneeAccountID)
 }
 
 var (

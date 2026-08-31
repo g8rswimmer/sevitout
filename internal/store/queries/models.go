@@ -152,6 +152,7 @@ type Sev struct {
 	GithubRepo            *string            `json:"github_repo"`
 	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 	Query                 *string            `json:"query"`
+	SlackChannelID        *string            `json:"slack_channel_id"`
 }
 
 type SevAccess struct {
@@ -207,6 +208,7 @@ type SevLinkedTask struct {
 	Overdue          bool               `json:"overdue"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	CreatedBy        string             `json:"created_by"`
+	Assignee         *string            `json:"assignee"`
 }
 
 type SevRole struct {
@@ -254,13 +256,16 @@ type ShareableLink struct {
 }
 
 type User struct {
-	ID           string             `json:"id"`
-	Email        string             `json:"email"`
-	Name         string             `json:"name"`
-	AvatarUrl    *string            `json:"avatar_url"`
-	OrgRole      string             `json:"org_role"`
-	Active       bool               `json:"active"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	PasswordHash string             `json:"password_hash"`
+	ID             string             `json:"id"`
+	Email          string             `json:"email"`
+	Name           string             `json:"name"`
+	AvatarUrl      *string            `json:"avatar_url"`
+	OrgRole        string             `json:"org_role"`
+	Active         bool               `json:"active"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	PasswordHash   string             `json:"password_hash"`
+	SlackUserID    *string            `json:"slack_user_id"`
+	GithubUsername *string            `json:"github_username"`
+	JiraAccountID  *string            `json:"jira_account_id"`
 }

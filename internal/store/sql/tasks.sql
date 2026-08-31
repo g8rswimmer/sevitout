@@ -1,13 +1,15 @@
 -- name: InsertLinkedTask :one
 INSERT INTO sev_linked_tasks (
     sev_id, external_system, task_id, url, title, description,
-    relationship_type, priority, due_date, overdue, created_at, created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    relationship_type, priority, due_date, overdue, created_at, created_by,
+    assignee
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING id;
 
 -- name: GetLinkedTask :one
 SELECT id, sev_id, external_system, task_id, url, title, description,
-       relationship_type, priority, due_date, overdue, created_at, created_by
+       relationship_type, priority, due_date, overdue, created_at, created_by,
+       assignee
 FROM sev_linked_tasks
 WHERE id = $1;
 
@@ -26,7 +28,8 @@ DELETE FROM sev_linked_tasks WHERE id = $1;
 
 -- name: ListLinkedTasksBySEVID :many
 SELECT id, sev_id, external_system, task_id, url, title, description,
-       relationship_type, priority, due_date, overdue, created_at, created_by
+       relationship_type, priority, due_date, overdue, created_at, created_by,
+       assignee
 FROM sev_linked_tasks
 WHERE sev_id = $1
 ORDER BY created_at;

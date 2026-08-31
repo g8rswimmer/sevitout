@@ -27,7 +27,7 @@ func TestGitHubIssueResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *te
 	fallback := &fakeIssueClient{issue: &grpchandler.CreatedIssue{Number: 1}}
 	resolver := newGitHubIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestGitHubIssueResolver_NoDatastoreRowAtStartup_FallsBack(t *testing.T) {
 	fallback := &fakeIssueClient{issue: wantIssue}
 	resolver := newGitHubIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestGitHubIssueResolver_DatastoreRowMissingCredentialAtStartup_FallsBack(t 
 	fallback := &fakeIssueClient{issue: wantIssue}
 	resolver := newGitHubIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestGitHubIssueResolver_DecryptionFailsAtStartup_FallsBackWithoutError(t *t
 	fallback := &fakeIssueClient{issue: wantIssue}
 	resolver := newGitHubIssueResolver(context.Background(), integrations, readKeyEnc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue should swallow decrypt failures, got err: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestGitHubIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigure
 
 	resolver := newGitHubIssueResolver(context.Background(), integrations, enc, nil)
 
-	_, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	_, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if !errors.Is(err, grpchandler.ErrIntegrationNotConfigured) {
 		t.Errorf("CreateIssue err = %v, want ErrIntegrationNotConfigured", err)
 	}
@@ -124,7 +124,7 @@ func TestGitHubIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUse
 		t.Fatal("RefreshIntegrationCredentials with no usable token should return an error")
 	}
 
-	got, createErr := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, createErr := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if createErr != nil {
 		t.Fatalf("CreateIssue: %v", createErr)
 	}
@@ -158,7 +158,7 @@ func TestGitHubIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *
 	fallback := &fakeIssueClient{issue: fallbackIssue}
 	resolver := newGitHubIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, err := resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestGitHubIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *
 	if err := resolver.RefreshIntegrationCredentials(context.Background(), "jira", map[string]string{"token": "ghp_live_token"}, nil); err != nil {
 		t.Fatalf("RefreshIntegrationCredentials: %v", err)
 	}
-	got, err = resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, err = resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestGitHubIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *
 	if err := resolver.RefreshIntegrationCredentials(context.Background(), "github", map[string]string{"token": "ghp_live_token"}, nil); err != nil {
 		t.Fatalf("RefreshIntegrationCredentials: %v", err)
 	}
-	got, err = resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil)
+	got, err = resolver.CreateIssue(context.Background(), "o", "r", "title", "body", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

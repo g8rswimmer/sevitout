@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
-	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
 // channelNameDisallowed matches everything Slack does not allow in a channel
@@ -57,11 +56,14 @@ func incidentChannelName(convention string, severityLevel int32, sevID, title st
 var emailInAngleBrackets = regexp.MustCompile(`<([^>@\s]+@[^>]+)>`)
 
 // createIncidentChannel creates a dedicated Slack channel for every newly
-// opened SEV (docs/requirements.md §13.1), invites its on-call person (if
-// one is assigned and resolvable to a Slack account) and whoever opened it
-// via `/sev open` (if anyone — see takePendingOpener), posts a link back to
-// the SEV, and records the mapping so future lifecycle notifications for
-// this SEV land in the new channel instead of the default one.
+// opened SEV (docs/requirements.md §13.1), invites every assigned role's
+// holder (docs/roadmap.md Phase 10d — widened from on-call-only) and
+// whoever opened it via `/sev open` (if anyone — see takePendingOpener),
+// posts a link back to the SEV, records the mapping so future lifecycle
+// notifications for this SEV land in the new channel instead of the default
+// one, and writes the channel ID back onto the SEV record (Phase 10e) so
+// cmd/server can act on it directly (e.g. RoleService.InviteRoleToSlack)
+// without depending on this bot's in-memory-only copy.
 //
 // Best-effort throughout: a failure at any step is logged, not returned,
 // since incident-channel creation must never be the reason a SEV-open
@@ -77,7 +79,11 @@ func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, se
 	b.setChannelFor(sevID, channelID)
 	b.log.InfoContext(ctx, "auto-created incident channel", "sev_id", sevID, "channel_id", channelID, "channel_name", name)
 
-	b.inviteOnCall(ctx, sevID, channelID)
+	if _, err := b.api.sevs.UpdateSEV(ctx, &pb.UpdateSEVRequest{Id: sevID, SlackChannelId: channelID}); err != nil {
+		b.log.ErrorContext(ctx, "write back slack_channel_id failed", "sev_id", sevID, "channel_id", channelID, "err", err)
+	}
+
+	b.inviteRoleHolders(ctx, sevID, channelID)
 
 	if opener := b.takePendingOpener(sevID); opener != "" {
 		if err := b.slack.InviteUsers(ctx, channelID, []string{opener}); err != nil {
@@ -90,30 +96,54 @@ func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, se
 	}
 }
 
-// inviteOnCall looks up sevID's on-call role (if any) and invites the
-// matching Slack user (resolved by email) into channelID. Not every on-call
-// entry carries a resolvable email (a free-form team name, e.g.) and not
-// every Sevitout user has a Slack account — both are silently skipped rather
-// than treated as errors.
-func (b *bot) inviteOnCall(ctx context.Context, sevID, channelID string) {
+// inviteRoleHolders looks up every role assigned to sevID (any role type —
+// generalized from on-call-only, docs/roadmap.md Phase 10d) and invites
+// each holder's Slack account into channelID, resolved in order:
+//
+//  1. SEVRole.UserID set → batch-resolved via one ListUserDirectory(ids)
+//     call for every role → a stored SlackUserID is used directly.
+//  2. UserID set but no stored SlackUserID → LookupUserIDByEmail(the
+//     directory-returned email).
+//  3. No UserID (an older or free-text-only assignment) → the original
+//     emailInAngleBrackets regex scrape of DisplayName.
+//  4. Otherwise → skipped.
+//
+// Not every role carries a resolvable identity and not every Sevitout user
+// has a Slack account — both are silently skipped rather than treated as
+// errors, and the whole batch is invited in one InviteUsers call.
+func (b *bot) inviteRoleHolders(ctx context.Context, sevID, channelID string) {
 	resp, err := b.api.roles.ListRoles(ctx, &pb.ListRolesRequest{SevId: sevID})
 	if err != nil {
 		b.log.ErrorContext(ctx, "list roles for incident channel invite failed", "sev_id", sevID, "err", err)
 		return
 	}
+	roles := resp.GetRoles()
+
+	// One batch directory lookup for every UserID-carrying role, rather than
+	// one ListUserDirectory call per role.
+	var ids []string
+	for _, r := range roles {
+		if r.GetUserId() != "" {
+			ids = append(ids, r.GetUserId())
+		}
+	}
+	directory := make(map[string]*pb.DirectoryUser, len(ids))
+	if len(ids) > 0 && b.api.directory != nil {
+		dirResp, err := b.api.directory.ListUserDirectory(ctx, &pb.ListUserDirectoryRequest{Ids: ids})
+		if err != nil {
+			b.log.ErrorContext(ctx, "list user directory for incident channel invite failed", "sev_id", sevID, "err", err)
+		} else {
+			for _, u := range dirResp.GetUsers() {
+				directory[u.GetId()] = u
+			}
+		}
+	}
 
 	var userIDs []string
-	for _, r := range resp.GetRoles() {
-		if r.GetRoleType() != string(store.SEVRoleOnCall) {
-			continue
-		}
-		m := emailInAngleBrackets.FindStringSubmatch(r.GetDisplayName())
-		if len(m) != 2 {
-			continue
-		}
-		userID, err := b.slack.LookupUserIDByEmail(ctx, m[1])
+	for _, r := range roles {
+		userID, err := b.resolveRoleSlackUserID(ctx, r, directory)
 		if err != nil {
-			b.log.ErrorContext(ctx, "look up on-call Slack user failed", "sev_id", sevID, "email", m[1], "err", err)
+			b.log.ErrorContext(ctx, "resolve role holder Slack identity failed", "sev_id", sevID, "role_id", r.GetId(), "err", err)
 			continue
 		}
 		if userID != "" {
@@ -122,6 +152,31 @@ func (b *bot) inviteOnCall(ctx context.Context, sevID, channelID string) {
 	}
 
 	if err := b.slack.InviteUsers(ctx, channelID, userIDs); err != nil {
-		b.log.ErrorContext(ctx, "invite on-call to incident channel failed", "sev_id", sevID, "channel_id", channelID, "err", err)
+		b.log.ErrorContext(ctx, "invite role holders to incident channel failed", "sev_id", sevID, "channel_id", channelID, "err", err)
 	}
+}
+
+// resolveRoleSlackUserID resolves one role assignment to a Slack user ID
+// per inviteRoleHolders' doc comment's four-step order. directory is the
+// batch ListUserDirectory result, keyed by user ID. Returns ("", nil) — not
+// an error — when nothing resolves.
+func (b *bot) resolveRoleSlackUserID(ctx context.Context, r *pb.SEVRoleResponse, directory map[string]*pb.DirectoryUser) (string, error) {
+	if uid := r.GetUserId(); uid != "" {
+		du, ok := directory[uid]
+		if !ok {
+			return "", nil
+		}
+		if du.GetSlackUserId() != "" {
+			return du.GetSlackUserId(), nil
+		}
+		if du.GetEmail() != "" {
+			return b.slack.LookupUserIDByEmail(ctx, du.GetEmail())
+		}
+		return "", nil
+	}
+	m := emailInAngleBrackets.FindStringSubmatch(r.GetDisplayName())
+	if len(m) != 2 {
+		return "", nil
+	}
+	return b.slack.LookupUserIDByEmail(ctx, m[1])
 }

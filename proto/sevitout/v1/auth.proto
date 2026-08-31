@@ -14,6 +14,32 @@ service AuthService {
       get: "/v1/auth/me"
     };
   }
+
+  // UpdateMyIntegrationIdentities lets the caller manage their own
+  // self-service integration identities (Slack user ID, GitHub username,
+  // Jira account ID — docs/roadmap.md Phase 10a), used to widen Slack
+  // auto-invite and default new tracker issues to the creating user. Unlike
+  // UpdateSEV's sparse-patch convention, this is full-replace: all three
+  // fields are sent on every call, and an empty string clears that field —
+  // this endpoint only ever touches these three fields, so "empty = leave
+  // alone" would make clearing one impossible.
+  rpc UpdateMyIntegrationIdentities(UpdateMyIntegrationIdentitiesRequest) returns (WhoAmIResponse) {
+    option (google.api.http) = {
+      patch: "/v1/auth/me"
+      body: "*"
+    };
+  }
+
+  // ListUserDirectory is a minimal org-wide "who is this person" lookup —
+  // deliberately narrower than ConfigService.ListUsers (an Admin-only
+  // user-management surface): open to any authenticated Viewer, and returns
+  // only the fields needed to resolve a role assignment or a Slack invite
+  // (docs/roadmap.md Phase 10a), never role/active-status/audit fields.
+  rpc ListUserDirectory(ListUserDirectoryRequest) returns (ListUserDirectoryResponse) {
+    option (google.api.http) = {
+      get: "/v1/auth/directory"
+    };
+  }
 }
 
 message WhoAmIRequest {}
@@ -25,4 +51,41 @@ message WhoAmIResponse {
   string avatar_url = 4;
   string org_role = 5;
   string oauth_provider = 6;
+  // slack_user_id, github_username, and jira_account_id are the caller's
+  // own self-service integration identities (docs/roadmap.md Phase 10a),
+  // set via UpdateMyIntegrationIdentities.
+  string slack_user_id = 7;
+  string github_username = 8;
+  string jira_account_id = 9;
+}
+
+message UpdateMyIntegrationIdentitiesRequest {
+  string slack_user_id = 1;
+  string github_username = 2;
+  string jira_account_id = 3;
+}
+
+message ListUserDirectoryRequest {
+  // query filters by a case-insensitive substring match against name or
+  // email, for the role-assignment user picker's search box (§10c); empty
+  // returns everyone. Mutually composable with ids below (both may be set,
+  // though typical callers use one or the other).
+  string query = 1;
+  // ids, when non-empty, restricts the result to exactly these user IDs —
+  // used for a batch resolve of already-known IDs (e.g. Slack auto-invite
+  // resolving every assigned role's user in one call).
+  repeated string ids = 2;
+}
+
+message DirectoryUser {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  // slack_user_id is included since resolving it is exactly why the Slack
+  // auto-invite path calls this RPC — see docs/roadmap.md Phase 10d.
+  string slack_user_id = 4;
+}
+
+message ListUserDirectoryResponse {
+  repeated DirectoryUser users = 1;
 }

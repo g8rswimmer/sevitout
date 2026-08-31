@@ -204,6 +204,12 @@ func main() {
 	authServer := grpchandler.NewAuthServer(stores.User)
 	roleServer := grpchandler.NewRoleServer(grpchandler.RoleServerParams{
 		Roles: stores.Role, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit, Publisher: wsHub,
+		Users: stores.User, Integrations: stores.IntegrationConfig, Crypto: encryptor,
+		// SlackFactory builds a real slack.Client from a decrypted bot
+		// token, per-call — InviteRoleToSlack (§10e) reads the "slack"
+		// integration config fresh each time rather than caching a client,
+		// mirroring slackHealthChecker below.
+		SlackFactory: func(botToken string) grpchandler.SlackInviteClient { return slack.NewClient(botToken) },
 	})
 	postmortemServer := grpchandler.NewPostmortemServer(grpchandler.PostmortemServerParams{
 		Postmortems: stores.Postmortem,
@@ -549,14 +555,18 @@ type githubIssueClient struct {
 	c *github.Client
 }
 
-func (a *githubIssueClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*grpchandler.CreatedIssue, error) {
-	issue, err := a.c.CreateIssue(ctx, github.CreateIssueRequest{
+func (a *githubIssueClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, assignee string) (*grpchandler.CreatedIssue, error) {
+	req := github.CreateIssueRequest{
 		Owner:  owner,
 		Repo:   repo,
 		Title:  title,
 		Body:   body,
 		Labels: labels,
-	})
+	}
+	if assignee != "" {
+		req.Assignees = []string{assignee}
+	}
+	issue, err := a.c.CreateIssue(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -574,14 +584,18 @@ type jiraIssueClient struct {
 	c *jira.Client
 }
 
-func (a *jiraIssueClient) CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string) (*grpchandler.CreatedIssue, error) {
-	issue, err := a.c.CreateIssue(ctx, jira.CreateIssueRequest{
+func (a *jiraIssueClient) CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string, assigneeAccountID string) (*grpchandler.CreatedIssue, error) {
+	req := jira.CreateIssueRequest{
 		ProjectKey:  projectKey,
 		IssueType:   issueType,
 		Summary:     summary,
 		Description: description,
 		Labels:      labels,
-	})
+	}
+	if assigneeAccountID != "" {
+		req.AssigneeAccountID = &assigneeAccountID
+	}
+	issue, err := a.c.CreateIssue(ctx, req)
 	if err != nil {
 		return nil, err
 	}

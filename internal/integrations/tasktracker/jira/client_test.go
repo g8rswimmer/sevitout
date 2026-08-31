@@ -331,6 +331,62 @@ func TestCreateIssue_SendsLabels(t *testing.T) {
 	}
 }
 
+// TestCreateIssue_SendsAssigneeAccountID covers docs/roadmap.md Phase 10f: a
+// non-nil AssigneeAccountID is sent as Jira's assignee.accountId field.
+func TestCreateIssue_SendsAssigneeAccountID(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1"})
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
+	accountID := "acc-123"
+	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{
+		ProjectKey: "PROJ", IssueType: "Task", Summary: "s", AssigneeAccountID: &accountID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	fields, _ := gotBody["fields"].(map[string]any)
+	assignee, _ := fields["assignee"].(map[string]any)
+	if assignee["accountId"] != accountID {
+		t.Errorf("assignee.accountId: got %v, want %q", fields["assignee"], accountID)
+	}
+}
+
+// TestCreateIssue_OmitsAssigneeWhenNil asserts a nil AssigneeAccountID never
+// sends the field at all.
+func TestCreateIssue_OmitsAssigneeWhenNil(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1"})
+	}))
+	defer srv.Close()
+
+	c := jira.NewClientWithBaseURL(srv.URL, "test-token", "")
+	_, err := c.CreateIssue(context.Background(), jira.CreateIssueRequest{ProjectKey: "PROJ", IssueType: "Task", Summary: "s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	fields, _ := gotBody["fields"].(map[string]any)
+	if _, ok := fields["assignee"]; ok {
+		t.Errorf("assignee key present, want omitted: %v", fields)
+	}
+}
+
 func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

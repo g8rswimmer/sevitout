@@ -155,6 +155,60 @@ func TestCreateIssue_SendsLabels(t *testing.T) {
 	}
 }
 
+// TestCreateIssue_SendsAssignees covers docs/roadmap.md Phase 10f: a
+// non-empty Assignees is sent as GitHub's assignees field.
+func TestCreateIssue_SendsAssignees(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": 1, "html_url": "https://github.com/owner/repo/issues/1"})
+	}))
+	defer srv.Close()
+
+	c := github.NewClientWithBaseURL("test-token", srv.URL)
+	_, err := c.CreateIssue(context.Background(), github.CreateIssueRequest{
+		Owner: "owner", Repo: "repo", Title: "SEV issue",
+		Assignees: []string{"alice-gh"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assignees, _ := gotBody["assignees"].([]any)
+	if len(assignees) != 1 || assignees[0] != "alice-gh" {
+		t.Errorf("assignees: got %v, want [alice-gh]", gotBody["assignees"])
+	}
+}
+
+// TestCreateIssue_OmitsAssigneesWhenEmpty asserts an empty Assignees never
+// sends the field at all.
+func TestCreateIssue_OmitsAssigneesWhenEmpty(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": 1, "html_url": "https://github.com/owner/repo/issues/1"})
+	}))
+	defer srv.Close()
+
+	c := github.NewClientWithBaseURL("test-token", srv.URL)
+	_, err := c.CreateIssue(context.Background(), github.CreateIssueRequest{Owner: "owner", Repo: "repo", Title: "SEV issue"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := gotBody["assignees"]; ok {
+		t.Errorf("assignees key present, want omitted: %v", gotBody)
+	}
+}
+
 func TestCreateIssue_UnexpectedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

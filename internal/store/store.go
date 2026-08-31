@@ -96,6 +96,12 @@ type UserStore interface {
 	Update(ctx context.Context, user *User) error
 	List(ctx context.Context) ([]*User, error)
 	Count(ctx context.Context) (int64, error)
+	// UpdateIntegrationIdentities full-replaces a user's self-service
+	// integration identities (Slack user ID, GitHub username, Jira account
+	// ID) — a dedicated method rather than widening Update, which already
+	// deliberately excludes Email/PasswordHash (docs/roadmap.md Phase 10a).
+	// A nil pointer clears that field; ErrNotFound when userID doesn't exist.
+	UpdateIntegrationIdentities(ctx context.Context, userID string, slackUserID, githubUsername, jiraAccountID *string) (*User, error)
 }
 
 // ServiceStore manages the lightweight internal service registry.

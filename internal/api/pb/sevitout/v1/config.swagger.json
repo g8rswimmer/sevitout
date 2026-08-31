@@ -1507,6 +1507,16 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "slackUserId": {
+          "type": "string",
+          "description": "slack_user_id, github_username, and jira_account_id mirror\nWhoAmIResponse's self-service identity fields (docs/roadmap.md Phase\n10a) — read-only here (AdminUsersPage shows, but never edits, another\nuser's identities; each user manages their own via /profile)."
+        },
+        "githubUsername": {
+          "type": "string"
+        },
+        "jiraAccountId": {
+          "type": "string"
         }
       }
     }

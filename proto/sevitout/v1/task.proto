@@ -79,6 +79,12 @@ message TaskResponse {
   bool overdue = 11;
   google.protobuf.Timestamp created_at = 12;
   string created_by = 13;
+  // assignee is the tracker-native assignee identifier set at issue-creation
+  // time (a GitHub login, or a Jira account ID) — see
+  // CreateGitHubIssueRequest.assignee / CreateJiraIssueRequest.assignee_account_id
+  // (docs/roadmap.md Phase 10f). Absent for tasks linked via LinkTask, or
+  // created before this field existed.
+  string assignee = 14;
 }
 
 message LinkTaskRequest {
@@ -130,6 +136,10 @@ message CreateGitHubIssueRequest {
   string relationship_type = 6;
   // priority: critical | non-critical (controls default SLA due date).
   string priority = 7;
+  // assignee is a GitHub login to assign the new issue to (wrapped into
+  // GitHub's assignees: []string at the client layer). Optional — an empty
+  // value creates the issue unassigned (docs/roadmap.md Phase 10f).
+  string assignee = 8;
 }
 
 message CreateJiraIssueRequest {
@@ -149,4 +159,10 @@ message CreateJiraIssueRequest {
   string relationship_type = 6;
   // priority: critical | non-critical (controls default SLA due date).
   string priority = 7;
+  // assignee_account_id is a Jira Cloud account ID to assign the new issue
+  // to (sent as Jira's assignee: {accountId: "..."}). Optional — an empty
+  // value creates the issue unassigned. Unlike a GitHub login, this is an
+  // opaque ID a user typically can't see in Jira's own UI without an
+  // email->accountId lookup (docs/roadmap.md Phase 10f's documented UX risk).
+  string assignee_account_id = 8;
 }

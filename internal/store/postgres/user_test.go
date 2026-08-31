@@ -124,4 +124,36 @@ func TestUserStore(t *testing.T) {
 			t.Fatalf("want 1, got %d", n)
 		}
 	})
+
+	t.Run("UpdateIntegrationIdentities", func(t *testing.T) {
+		slackID, ghUser, jiraID := "U123", "alice-gh", "acc-1"
+		got, err := s.UpdateIntegrationIdentities(ctx, user.ID, &slackID, &ghUser, &jiraID)
+		if err != nil {
+			t.Fatalf("UpdateIntegrationIdentities: %v", err)
+		}
+		if got.SlackUserID == nil || *got.SlackUserID != slackID {
+			t.Errorf("SlackUserID = %v, want %s", got.SlackUserID, slackID)
+		}
+		if got.GitHubUsername == nil || *got.GitHubUsername != ghUser {
+			t.Errorf("GitHubUsername = %v, want %s", got.GitHubUsername, ghUser)
+		}
+		if got.JiraAccountID == nil || *got.JiraAccountID != jiraID {
+			t.Errorf("JiraAccountID = %v, want %s", got.JiraAccountID, jiraID)
+		}
+
+		// A nil field clears it (full-replace, not sparse-patch).
+		got, err = s.UpdateIntegrationIdentities(ctx, user.ID, nil, &ghUser, &jiraID)
+		if err != nil {
+			t.Fatalf("UpdateIntegrationIdentities (clear): %v", err)
+		}
+		if got.SlackUserID != nil {
+			t.Errorf("SlackUserID = %v, want cleared", *got.SlackUserID)
+		}
+	})
+
+	t.Run("UpdateIntegrationIdentitiesNotFound", func(t *testing.T) {
+		if _, err := s.UpdateIntegrationIdentities(ctx, "missing", nil, nil, nil); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
 }

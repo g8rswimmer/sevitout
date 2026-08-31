@@ -191,3 +191,102 @@ func TestAuthInterceptor_ExpiredToken(t *testing.T) {
 		t.Errorf("wrong-secret token: code = %v, want %v", status.Code(err), codes.Unauthenticated)
 	}
 }
+
+// ── UpdateMyIntegrationIdentities / ListUserDirectory (Phase 10a) ─────────────
+
+func TestUpdateMyIntegrationIdentities_FullReplaceAndClear(t *testing.T) {
+	users := memory.NewUserStore()
+	srv := grpchandler.NewAuthServer(users)
+	now := time.Now()
+	if err := users.Create(context.Background(), &store.User{
+		ID: "user-1", Email: "alice@example.com", Name: "Alice",
+		OrgRole: store.OrgRoleResponder, Active: true, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-1", Email: "alice@example.com", OrgRole: store.OrgRoleResponder})
+
+	resp, err := srv.UpdateMyIntegrationIdentities(ctx, &pb.UpdateMyIntegrationIdentitiesRequest{
+		SlackUserId: "U123", GithubUsername: "alice-gh", JiraAccountId: "acc-1",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMyIntegrationIdentities: %v", err)
+	}
+	if resp.GetSlackUserId() != "U123" || resp.GetGithubUsername() != "alice-gh" || resp.GetJiraAccountId() != "acc-1" {
+		t.Errorf("got %+v, want all three set", resp)
+	}
+
+	// Full-replace: omitting slack_user_id on the next call clears it, it
+	// doesn't leave the previous value alone.
+	resp, err = srv.UpdateMyIntegrationIdentities(ctx, &pb.UpdateMyIntegrationIdentitiesRequest{
+		GithubUsername: "alice-gh", JiraAccountId: "acc-1",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMyIntegrationIdentities (clear): %v", err)
+	}
+	if resp.GetSlackUserId() != "" {
+		t.Errorf("SlackUserId = %q, want cleared", resp.GetSlackUserId())
+	}
+	if resp.GetGithubUsername() != "alice-gh" {
+		t.Errorf("GithubUsername should be unaffected, got %q", resp.GetGithubUsername())
+	}
+}
+
+func TestUpdateMyIntegrationIdentities_Unauthenticated(t *testing.T) {
+	srv := grpchandler.NewAuthServer(memory.NewUserStore())
+	_, err := srv.UpdateMyIntegrationIdentities(context.Background(), &pb.UpdateMyIntegrationIdentitiesRequest{SlackUserId: "U1"})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
+	}
+}
+
+func TestListUserDirectory_FiltersByQueryAndIDs(t *testing.T) {
+	users := memory.NewUserStore()
+	srv := grpchandler.NewAuthServer(users)
+	now := time.Now()
+	for _, u := range []*store.User{
+		{ID: "user-1", Email: "alice@example.com", Name: "Alice", OrgRole: store.OrgRoleResponder, CreatedAt: now, UpdatedAt: now},
+		{ID: "user-2", Email: "bob@example.com", Name: "Bob", OrgRole: store.OrgRoleViewer, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := users.Create(context.Background(), u); err != nil {
+			t.Fatalf("seed %s: %v", u.ID, err)
+		}
+	}
+	slackID := "U-ALICE"
+	if _, err := users.UpdateIntegrationIdentities(context.Background(), "user-1", &slackID, nil, nil); err != nil {
+		t.Fatalf("set slack id: %v", err)
+	}
+
+	t.Run("QueryFilter", func(t *testing.T) {
+		resp, err := srv.ListUserDirectory(context.Background(), &pb.ListUserDirectoryRequest{Query: "bob"})
+		if err != nil {
+			t.Fatalf("ListUserDirectory: %v", err)
+		}
+		if len(resp.GetUsers()) != 1 || resp.GetUsers()[0].GetId() != "user-2" {
+			t.Errorf("got %+v, want only user-2", resp.GetUsers())
+		}
+	})
+
+	t.Run("IDsFilterIncludesStoredSlackUserID", func(t *testing.T) {
+		resp, err := srv.ListUserDirectory(context.Background(), &pb.ListUserDirectoryRequest{Ids: []string{"user-1"}})
+		if err != nil {
+			t.Fatalf("ListUserDirectory: %v", err)
+		}
+		if len(resp.GetUsers()) != 1 {
+			t.Fatalf("got %d users, want 1", len(resp.GetUsers()))
+		}
+		if resp.GetUsers()[0].GetSlackUserId() != "U-ALICE" {
+			t.Errorf("SlackUserId = %q, want U-ALICE", resp.GetUsers()[0].GetSlackUserId())
+		}
+	})
+
+	t.Run("NoFilterReturnsEveryone", func(t *testing.T) {
+		resp, err := srv.ListUserDirectory(context.Background(), &pb.ListUserDirectoryRequest{})
+		if err != nil {
+			t.Fatalf("ListUserDirectory: %v", err)
+		}
+		if len(resp.GetUsers()) != 2 {
+			t.Errorf("got %d users, want 2", len(resp.GetUsers()))
+		}
+	})
+}

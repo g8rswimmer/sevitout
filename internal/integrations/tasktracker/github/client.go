@@ -35,6 +35,9 @@ type CreateIssueRequest struct {
 	Title  string
 	Body   string
 	Labels []string
+	// Assignees are GitHub logins to assign the new issue to (docs/roadmap.md
+	// Phase 10f). Empty creates the issue unassigned.
+	Assignees []string
 }
 
 // APIError is returned when the GitHub API responds with a non-success
@@ -146,6 +149,9 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 	}
 	if len(req.Labels) > 0 {
 		payload["labels"] = req.Labels
+	}
+	if len(req.Assignees) > 0 {
+		payload["assignees"] = req.Assignees
 	}
 
 	body, err := json.Marshal(payload)

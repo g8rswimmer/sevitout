@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
@@ -89,4 +90,23 @@ func (s *UserStore) Count(_ context.Context) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return int64(len(s.data)), nil
+}
+
+// UpdateIntegrationIdentities full-replaces user's self-service integration
+// identities (Slack user ID, GitHub username, Jira account ID).
+func (s *UserStore) UpdateIntegrationIdentities(_ context.Context, userID string, slackUserID, githubUsername, jiraAccountID *string) (*store.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.data[userID]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	cp := *u
+	cp.SlackUserID = slackUserID
+	cp.GitHubUsername = githubUsername
+	cp.JiraAccountID = jiraAccountID
+	cp.UpdatedAt = time.Now()
+	s.data[userID] = &cp
+	out := cp
+	return &out, nil
 }

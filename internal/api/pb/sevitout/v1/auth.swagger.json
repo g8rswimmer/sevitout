@@ -16,6 +16,49 @@
     "application/json"
   ],
   "paths": {
+    "/v1/auth/directory": {
+      "get": {
+        "summary": "ListUserDirectory is a minimal org-wide \"who is this person\" lookup —\ndeliberately narrower than ConfigService.ListUsers (an Admin-only\nuser-management surface): open to any authenticated Viewer, and returns\nonly the fields needed to resolve a role assignment or a Slack invite\n(docs/roadmap.md Phase 10a), never role/active-status/audit fields.",
+        "operationId": "AuthService_ListUserDirectory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListUserDirectoryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "query",
+            "description": "query filters by a case-insensitive substring match against name or\nemail, for the role-assignment user picker's search box (§10c); empty\nreturns everyone. Mutually composable with ids below (both may be set,\nthough typical callers use one or the other).",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "ids",
+            "description": "ids, when non-empty, restricts the result to exactly these user IDs —\nused for a batch resolve of already-known IDs (e.g. Slack auto-invite\nresolving every assigned role's user in one call).",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
     "/v1/auth/me": {
       "get": {
         "summary": "WhoAmI returns the identity of the currently authenticated caller.",
@@ -34,6 +77,37 @@
             }
           }
         },
+        "tags": [
+          "AuthService"
+        ]
+      },
+      "patch": {
+        "summary": "UpdateMyIntegrationIdentities lets the caller manage their own\nself-service integration identities (Slack user ID, GitHub username,\nJira account ID — docs/roadmap.md Phase 10a), used to widen Slack\nauto-invite and default new tracker issues to the creating user. Unlike\nUpdateSEV's sparse-patch convention, this is full-replace: all three\nfields are sent on every call, and an empty string clears that field —\nthis endpoint only ever touches these three fields, so \"empty = leave\nalone\" would make clearing one impossible.",
+        "operationId": "AuthService_UpdateMyIntegrationIdentities",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1WhoAmIResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1UpdateMyIntegrationIdentitiesRequest"
+            }
+          }
+        ],
         "tags": [
           "AuthService"
         ]
@@ -71,6 +145,50 @@
         }
       }
     },
+    "v1DirectoryUser": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "slackUserId": {
+          "type": "string",
+          "description": "slack_user_id is included since resolving it is exactly why the Slack\nauto-invite path calls this RPC — see docs/roadmap.md Phase 10d."
+        }
+      }
+    },
+    "v1ListUserDirectoryResponse": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1DirectoryUser"
+          }
+        }
+      }
+    },
+    "v1UpdateMyIntegrationIdentitiesRequest": {
+      "type": "object",
+      "properties": {
+        "slackUserId": {
+          "type": "string"
+        },
+        "githubUsername": {
+          "type": "string"
+        },
+        "jiraAccountId": {
+          "type": "string"
+        }
+      }
+    },
     "v1WhoAmIResponse": {
       "type": "object",
       "properties": {
@@ -90,6 +208,16 @@
           "type": "string"
         },
         "oauthProvider": {
+          "type": "string"
+        },
+        "slackUserId": {
+          "type": "string",
+          "description": "slack_user_id, github_username, and jira_account_id are the caller's\nown self-service integration identities (docs/roadmap.md Phase 10a),\nset via UpdateMyIntegrationIdentities."
+        },
+        "githubUsername": {
+          "type": "string"
+        },
+        "jiraAccountId": {
           "type": "string"
         }
       }

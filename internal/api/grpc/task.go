@@ -36,9 +36,11 @@ type CreatedIssue struct {
 }
 
 // IssueClient creates issues in an external task tracker (e.g. GitHub
-// Issues). Implementations must be safe for concurrent use.
+// Issues). assignee is a GitHub login to assign the new issue to, or "" for
+// unassigned (docs/roadmap.md Phase 10f). Implementations must be safe for
+// concurrent use.
 type IssueClient interface {
-	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*CreatedIssue, error)
+	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, assignee string) (*CreatedIssue, error)
 }
 
 // JiraIssueClient creates issues in Jira. A second, Jira-shaped interface
@@ -49,8 +51,10 @@ type IssueClient interface {
 // signature would mean one side or the other passing parameters that don't
 // mean what their names say. Implementations must be safe for concurrent
 // use.
+// assigneeAccountID is a Jira Cloud account ID to assign the new issue to,
+// or "" for unassigned (docs/roadmap.md Phase 10f).
 type JiraIssueClient interface {
-	CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string) (*CreatedIssue, error)
+	CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string, assigneeAccountID string) (*CreatedIssue, error)
 }
 
 // httpStatusError is implemented by integration errors that carry an
@@ -381,12 +385,12 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 	priority := store.TaskPriority(req.GetPriority())
 	labels := []string{req.GetSevId(), string(priority)}
 
-	issue, err := s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), labels)
+	issue, err := s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), labels, req.GetAssignee())
 	if err != nil && isUnprocessable(err) {
 		// A 422 here is most often caused by a label that doesn't already
 		// exist and the org restricting who can create new labels. Don't
 		// let a cosmetic labeling failure block issue creation.
-		issue, err = s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), nil)
+		issue, err = s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), nil, req.GetAssignee())
 	}
 	if errors.Is(err, ErrIntegrationNotConfigured) {
 		return nil, status.Error(codes.Unavailable, "GitHub integration is not configured (set GITHUB_TOKEN, or add credentials via the Integration Config API)")
@@ -416,6 +420,9 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		DueDate:          computeDueDate(priority, sev.ResolvedAt),
 		CreatedAt:        now,
 		CreatedBy:        callerID,
+	}
+	if v := req.GetAssignee(); v != "" {
+		task.Assignee = &v
 	}
 
 	if err := s.tasks.Create(ctx, task); err != nil {
@@ -487,7 +494,7 @@ func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssu
 	// create new ones; Jira Cloud auto-creates unrecognized labels on the
 	// issue instead of rejecting the request, so that failure mode doesn't
 	// apply here.
-	issue, err := s.jira.CreateIssue(ctx, req.GetProjectKey(), req.GetIssueType(), req.GetSummary(), req.GetDescription(), labels)
+	issue, err := s.jira.CreateIssue(ctx, req.GetProjectKey(), req.GetIssueType(), req.GetSummary(), req.GetDescription(), labels, req.GetAssigneeAccountId())
 	if errors.Is(err, ErrIntegrationNotConfigured) {
 		return nil, status.Error(codes.Unavailable, "Jira integration is not configured (set JIRA_CLOUD_ID/JIRA_API_TOKEN, or add credentials via the Integration Config API)")
 	}
@@ -515,6 +522,9 @@ func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssu
 		DueDate:          computeDueDate(priority, sev.ResolvedAt),
 		CreatedAt:        now,
 		CreatedBy:        callerID,
+	}
+	if v := req.GetAssigneeAccountId(); v != "" {
+		task.Assignee = &v
 	}
 
 	if err := s.tasks.Create(ctx, task); err != nil {
@@ -653,6 +663,9 @@ func taskToProto(t *store.LinkedTask, now time.Time) *pb.TaskResponse {
 	}
 	if t.DueDate != nil {
 		resp.DueDate = timestamppb.New(*t.DueDate)
+	}
+	if t.Assignee != nil {
+		resp.Assignee = *t.Assignee
 	}
 	return resp
 }
