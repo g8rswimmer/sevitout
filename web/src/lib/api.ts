@@ -16,6 +16,7 @@ import type {
   AddChatEntryRequest,
   AIOutputResponse,
   ExportSEVsParams,
+  GetIntegrationCatalogResponse,
   GrantAccessRequest,
   IntegrationConfigResponse,
   IntegrationsHealthResponse,
@@ -382,6 +383,11 @@ export const api = {
       delete: (id: string) => request<void>(`/v1/config/oncall/${id}`, { method: 'DELETE' }),
     },
     integrations: {
+      // Roadmap Phase 9's field catalog — the single source of truth the
+      // admin page renders its sidebar + schema-driven detail form from.
+      // Deliberately not nested under /v1/config/integrations/{type} — see
+      // the RPC's proto doc comment for why.
+      catalog: () => request<GetIntegrationCatalogResponse>('/v1/config/integration-catalog'),
       list: () => request<ListIntegrationConfigsResponse>('/v1/config/integrations'),
       upsert: (integrationType: string, req: UpsertIntegrationConfigRequest) =>
         request<IntegrationConfigResponse>(`/v1/config/integrations/${integrationType}`, {

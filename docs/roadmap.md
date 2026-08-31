@@ -456,7 +456,10 @@ single-org tool.
 
 ## Phase 9 — Schema-driven integration settings
 
-**Status**: 🔲 not started
+**Status**: ✅ shipped, see [`demo/admin-integrations-settings.md`](../demo/admin-integrations-settings.md)
+(`GetIntegrationCatalog` ended up at `/v1/config/integration-catalog`, not the
+`.../integrations/catalog` path below — it collided with
+`GetIntegrationConfig`'s path template; see the demo doc's Design notes)
 
 Today's `AdminIntegrationsPage.tsx` / `IntegrationConfig` blob has no schema: credentials
 and settings are both generic `map[string]string` rows edited through the same
