@@ -42,6 +42,7 @@ services:
       JIRA_CLOUD_ID: ${JIRA_CLOUD_ID}
       JIRA_API_TOKEN: ${JIRA_API_TOKEN}
       JIRA_SITE_URL: ${JIRA_SITE_URL}
+      SLACKBOT_SERVICE_EMAIL: ${SLACKBOT_SERVICE_EMAIL}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       migrate:

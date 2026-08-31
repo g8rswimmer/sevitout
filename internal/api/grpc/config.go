@@ -56,44 +56,50 @@ type IntegrationCredentialsRefresher interface {
 // config_retention.go.
 type ConfigServer struct {
 	pb.UnimplementedConfigServiceServer
-	services     store.ServiceStore
-	users        store.UserStore
-	oncall       store.OnCallStore
-	integrations store.IntegrationConfigStore
-	retention    store.RetentionConfigStore
-	aiPlugins    store.AIPluginStore
-	crypto       Encryptor                         // nil when ENCRYPTION_KEY is not set
-	rateLimits   RateLimitEvictor                  // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
-	refreshers   []IntegrationCredentialsRefresher // notified after every successful UpsertIntegrationConfig
+	services             store.ServiceStore
+	users                store.UserStore
+	oncall               store.OnCallStore
+	integrations         store.IntegrationConfigStore
+	retention            store.RetentionConfigStore
+	aiPlugins            store.AIPluginStore
+	crypto               Encryptor                         // nil when ENCRYPTION_KEY is not set
+	rateLimits           RateLimitEvictor                  // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
+	refreshers           []IntegrationCredentialsRefresher // notified after every successful UpsertIntegrationConfig
+	slackbotServiceEmail string                            // gates GetSlackBotCredential; see its doc comment
 }
 
 // ConfigServerParams groups NewConfigServer's dependencies. Crypto may be
 // nil, in which case UpsertIntegrationConfig and CreateAIPlugin/
 // UpdateAIPlugin reject any request that supplies credentials/an API key.
-// RateLimits and Refreshers may also be nil/empty.
+// RateLimits and Refreshers may also be nil/empty. SlackbotServiceEmail may
+// also be empty, in which case GetSlackBotCredential rejects every caller
+// (fail closed, rather than silently letting any Admin through) — see that
+// method's doc comment.
 type ConfigServerParams struct {
-	Services     store.ServiceStore
-	Users        store.UserStore
-	OnCall       store.OnCallStore
-	Integrations store.IntegrationConfigStore
-	Retention    store.RetentionConfigStore
-	AIPlugins    store.AIPluginStore
-	Crypto       Encryptor
-	RateLimits   RateLimitEvictor
-	Refreshers   []IntegrationCredentialsRefresher
+	Services             store.ServiceStore
+	Users                store.UserStore
+	OnCall               store.OnCallStore
+	Integrations         store.IntegrationConfigStore
+	Retention            store.RetentionConfigStore
+	AIPlugins            store.AIPluginStore
+	Crypto               Encryptor
+	RateLimits           RateLimitEvictor
+	Refreshers           []IntegrationCredentialsRefresher
+	SlackbotServiceEmail string
 }
 
 func NewConfigServer(p ConfigServerParams) *ConfigServer {
 	return &ConfigServer{
-		services:     p.Services,
-		users:        p.Users,
-		oncall:       p.OnCall,
-		integrations: p.Integrations,
-		retention:    p.Retention,
-		aiPlugins:    p.AIPlugins,
-		crypto:       p.Crypto,
-		rateLimits:   p.RateLimits,
-		refreshers:   p.Refreshers,
+		services:             p.Services,
+		users:                p.Users,
+		oncall:               p.OnCall,
+		integrations:         p.Integrations,
+		retention:            p.Retention,
+		aiPlugins:            p.AIPlugins,
+		crypto:               p.Crypto,
+		rateLimits:           p.RateLimits,
+		refreshers:           p.Refreshers,
+		slackbotServiceEmail: p.SlackbotServiceEmail,
 	}
 }
 

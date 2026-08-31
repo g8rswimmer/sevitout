@@ -22,6 +22,7 @@ func clearEnv(t *testing.T) {
 		"JIRA_CLOUD_ID",
 		"JIRA_API_TOKEN",
 		"JIRA_SITE_URL",
+		"SLACKBOT_SERVICE_EMAIL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -56,6 +57,7 @@ func TestLoad_ReadsEveryField(t *testing.T) {
 	t.Setenv("JIRA_CLOUD_ID", "1a11d016-8984-4c3e-b9ab-142dd06acb1b")
 	t.Setenv("JIRA_API_TOKEN", "jira-token")
 	t.Setenv("JIRA_SITE_URL", "https://acme.atlassian.net")
+	t.Setenv("SLACKBOT_SERVICE_EMAIL", "slackbot@example.com")
 
 	cfg, err := Load()
 	if err != nil {
@@ -73,6 +75,7 @@ func TestLoad_ReadsEveryField(t *testing.T) {
 		JiraCloudID:            "1a11d016-8984-4c3e-b9ab-142dd06acb1b",
 		JiraAPIToken:           "jira-token",
 		JiraSiteURL:            "https://acme.atlassian.net",
+		SlackbotServiceEmail:   "slackbot@example.com",
 	}
 	if *cfg != *want {
 		t.Errorf("Load() = %+v, want %+v", *cfg, *want)

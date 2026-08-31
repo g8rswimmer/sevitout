@@ -52,6 +52,19 @@ type ConfigServiceClient interface {
 	// service — only whether credentials are currently configured.
 	UpsertIntegrationConfig(ctx context.Context, in *UpsertIntegrationConfigRequest, opts ...grpc.CallOption) (*IntegrationConfigResponse, error)
 	GetIntegrationConfig(ctx context.Context, in *GetIntegrationConfigRequest, opts ...grpc.CallOption) (*IntegrationConfigResponse, error)
+	// GetSlackBotCredential returns the decrypted "slack" integration
+	// credential pair (bot_token/app_token) — the one deliberate exception to
+	// "credentials are never returned by any RPC in this service" above. It
+	// exists solely so cmd/slackbot (a separate process that only talks to
+	// this API over gRPC, with no direct datastore/encryption-key access) can
+	// pick up a datastore-configured Slack token without a restart; see
+	// docs/roadmap.md Phase 8. Gated server-side to the specific slackbot
+	// service account (SLACKBOT_SERVICE_EMAIL), not merely Admin+ — an
+	// unrelated admin session must not be able to pull plaintext Slack tokens
+	// through this call. Returns empty fields (not an error) when the "slack"
+	// integration has no credentials configured, so callers can fall back to
+	// their own static tokens.
+	GetSlackBotCredential(ctx context.Context, in *GetSlackBotCredentialRequest, opts ...grpc.CallOption) (*GetSlackBotCredentialResponse, error)
 	ListIntegrationConfigs(ctx context.Context, in *ListIntegrationConfigsRequest, opts ...grpc.CallOption) (*ListIntegrationConfigsResponse, error)
 	GetRetentionConfig(ctx context.Context, in *GetRetentionConfigRequest, opts ...grpc.CallOption) (*RetentionConfigResponse, error)
 	UpdateRetentionConfig(ctx context.Context, in *UpdateRetentionConfigRequest, opts ...grpc.CallOption) (*RetentionConfigResponse, error)
@@ -215,6 +228,15 @@ func (c *configServiceClient) GetIntegrationConfig(ctx context.Context, in *GetI
 	return out, nil
 }
 
+func (c *configServiceClient) GetSlackBotCredential(ctx context.Context, in *GetSlackBotCredentialRequest, opts ...grpc.CallOption) (*GetSlackBotCredentialResponse, error) {
+	out := new(GetSlackBotCredentialResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/GetSlackBotCredential", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *configServiceClient) ListIntegrationConfigs(ctx context.Context, in *ListIntegrationConfigsRequest, opts ...grpc.CallOption) (*ListIntegrationConfigsResponse, error) {
 	out := new(ListIntegrationConfigsResponse)
 	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListIntegrationConfigs", in, out, opts...)
@@ -329,6 +351,19 @@ type ConfigServiceServer interface {
 	// service — only whether credentials are currently configured.
 	UpsertIntegrationConfig(context.Context, *UpsertIntegrationConfigRequest) (*IntegrationConfigResponse, error)
 	GetIntegrationConfig(context.Context, *GetIntegrationConfigRequest) (*IntegrationConfigResponse, error)
+	// GetSlackBotCredential returns the decrypted "slack" integration
+	// credential pair (bot_token/app_token) — the one deliberate exception to
+	// "credentials are never returned by any RPC in this service" above. It
+	// exists solely so cmd/slackbot (a separate process that only talks to
+	// this API over gRPC, with no direct datastore/encryption-key access) can
+	// pick up a datastore-configured Slack token without a restart; see
+	// docs/roadmap.md Phase 8. Gated server-side to the specific slackbot
+	// service account (SLACKBOT_SERVICE_EMAIL), not merely Admin+ — an
+	// unrelated admin session must not be able to pull plaintext Slack tokens
+	// through this call. Returns empty fields (not an error) when the "slack"
+	// integration has no credentials configured, so callers can fall back to
+	// their own static tokens.
+	GetSlackBotCredential(context.Context, *GetSlackBotCredentialRequest) (*GetSlackBotCredentialResponse, error)
 	ListIntegrationConfigs(context.Context, *ListIntegrationConfigsRequest) (*ListIntegrationConfigsResponse, error)
 	GetRetentionConfig(context.Context, *GetRetentionConfigRequest) (*RetentionConfigResponse, error)
 	UpdateRetentionConfig(context.Context, *UpdateRetentionConfigRequest) (*RetentionConfigResponse, error)
@@ -392,6 +427,9 @@ func (UnimplementedConfigServiceServer) UpsertIntegrationConfig(context.Context,
 }
 func (UnimplementedConfigServiceServer) GetIntegrationConfig(context.Context, *GetIntegrationConfigRequest) (*IntegrationConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetIntegrationConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) GetSlackBotCredential(context.Context, *GetSlackBotCredentialRequest) (*GetSlackBotCredentialResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSlackBotCredential not implemented")
 }
 func (UnimplementedConfigServiceServer) ListIntegrationConfigs(context.Context, *ListIntegrationConfigsRequest) (*ListIntegrationConfigsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListIntegrationConfigs not implemented")
@@ -721,6 +759,24 @@ func _ConfigService_GetIntegrationConfig_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConfigService_GetSlackBotCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSlackBotCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetSlackBotCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/GetSlackBotCredential",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetSlackBotCredential(ctx, req.(*GetSlackBotCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConfigService_ListIntegrationConfigs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListIntegrationConfigsRequest)
 	if err := dec(in); err != nil {
@@ -953,6 +1009,10 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetIntegrationConfig",
 			Handler:    _ConfigService_GetIntegrationConfig_Handler,
+		},
+		{
+			MethodName: "GetSlackBotCredential",
+			Handler:    _ConfigService_GetSlackBotCredential_Handler,
 		},
 		{
 			MethodName: "ListIntegrationConfigs",

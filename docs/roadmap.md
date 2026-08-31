@@ -374,7 +374,10 @@ plumbing; 7b is a typing tighten-up plus a lookup table and one render change).
 
 ## Phase 8 — Datastore-driven Slack bot credentials
 
-**Status**: 🔲 not started. The gap is identified and an interim mitigation is
+**Status**: ✅ shipped (REST-client swap only; Socket Mode live-reconnection
+remains a follow-up, as scoped below), see
+[`demo/datastore-slack-bot-credentials.md`](../demo/datastore-slack-bot-credentials.md).
+The gap is identified and an interim mitigation is
 already shipped — `web/src/pages/admin/AdminIntegrationsPage.tsx`'s Slack entry
 carries a `note` explaining the limitation described below, added during the
 same investigation that fixed `/ws` returning 500 (a `statusWriter` missing

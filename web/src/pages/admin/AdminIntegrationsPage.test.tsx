@@ -67,7 +67,7 @@ describe('AdminIntegrationsPage', () => {
     expect(screen.getByDisplayValue('api_key')).toBeInTheDocument()
     // PagerDuty has no gap between "credential saved here" and "credential
     // actually used" the way Slack does, so it must not show Slack's note.
-    expect(screen.queryByText(/won.t pick up a value saved here/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/periodically pulls bot_token\/app_token from here/)).not.toBeInTheDocument()
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('Tag value'), 'secret-key')
@@ -125,7 +125,7 @@ describe('AdminIntegrationsPage', () => {
     })
   })
 
-  it('includes Slack\'s optional settings keys as editable rows, not just credentials', async () => {
+  it("includes Slack's optional settings keys as editable rows, not just credentials", async () => {
     mockFetch()
     renderWithProviders(<AdminIntegrationsPage />)
     await screen.findByText('PagerDuty')
@@ -134,20 +134,25 @@ describe('AdminIntegrationsPage', () => {
     await user.selectOptions(screen.getByLabelText('Type'), 'Slack')
 
     expect(screen.getByDisplayValue('bot_token')).toBeInTheDocument()
+    // app_token is Slack's second well-known credential key (Phase 8), also
+    // pre-filled as its own row, not just mentioned in the hint text.
+    expect(screen.getByDisplayValue('app_token')).toBeInTheDocument()
     expect(screen.getByDisplayValue('default_channel')).toBeInTheDocument()
     expect(screen.getByDisplayValue('channel_naming_convention')).toBeInTheDocument()
     expect(screen.getByText(/"default_channel" \(optional\)/)).toBeInTheDocument()
     expect(screen.getByText(/"channel_naming_convention" \(optional\)/)).toBeInTheDocument()
-    // Slack's credential here doesn't reach the running bot process (a
-    // separate binary reading SLACK_BOT_TOKEN from its own environment) —
-    // the form must say so rather than implying it does.
-    expect(screen.getByText(/won.t pick up a value saved here/)).toBeInTheDocument()
+    // Since Phase 8, this credential does reach the running bot's REST
+    // client periodically — the form must say so, and must still flag that
+    // Socket Mode (slash commands/@mentions) needs a restart.
+    expect(screen.getByText(/periodically pulls bot_token\/app_token from here/)).toBeInTheDocument()
+    expect(screen.getByText(/Socket Mode .* requires a restart/)).toBeInTheDocument()
 
-    // Credentials section (1 row: bot_token) + settings section (2 rows:
-    // default_channel, channel_naming_convention) — the first "Tag value"
-    // belongs to the credentials row.
-    const [credentialValueInput] = screen.getAllByLabelText('Tag value')
-    await user.type(credentialValueInput, 'xoxb-slack-secret')
+    // Credentials section (2 rows: bot_token, app_token) + settings section
+    // (2 rows: default_channel, channel_naming_convention) — the first two
+    // "Tag value" inputs belong to the credentials rows.
+    const [botTokenInput, appTokenInput] = screen.getAllByLabelText('Tag value')
+    await user.type(botTokenInput, 'xoxb-slack-secret')
+    await user.type(appTokenInput, 'xapp-slack-secret')
     await user.click(screen.getByRole('button', { name: /save integration/i }))
 
     await waitFor(() => {
@@ -161,7 +166,7 @@ describe('AdminIntegrationsPage', () => {
       .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/slack' && init?.method === 'PUT')!
     expect(JSON.parse(String(call[1]!.body))).toMatchObject({
       integration_type: 'slack',
-      credentials: { bot_token: 'xoxb-slack-secret' },
+      credentials: { bot_token: 'xoxb-slack-secret', app_token: 'xapp-slack-secret' },
     })
   })
 

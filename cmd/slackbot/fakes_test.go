@@ -178,6 +178,10 @@ func (f *fakeChatAPI) AddChatEntry(_ context.Context, in *pb.AddChatEntryRequest
 type fakeConfigAPI struct {
 	resp *pb.IntegrationConfigResponse
 	err  error
+
+	credentialResp  *pb.GetSlackBotCredentialResponse
+	credentialErr   error
+	credentialCalls int
 }
 
 func (f *fakeConfigAPI) GetIntegrationConfig(_ context.Context, _ *pb.GetIntegrationConfigRequest, _ ...grpc.CallOption) (*pb.IntegrationConfigResponse, error) {
@@ -185,6 +189,17 @@ func (f *fakeConfigAPI) GetIntegrationConfig(_ context.Context, _ *pb.GetIntegra
 		return nil, f.err
 	}
 	return f.resp, nil
+}
+
+func (f *fakeConfigAPI) GetSlackBotCredential(_ context.Context, _ *pb.GetSlackBotCredentialRequest, _ ...grpc.CallOption) (*pb.GetSlackBotCredentialResponse, error) {
+	f.credentialCalls++
+	if f.credentialErr != nil {
+		return nil, f.credentialErr
+	}
+	if f.credentialResp == nil {
+		return &pb.GetSlackBotCredentialResponse{}, nil
+	}
+	return f.credentialResp, nil
 }
 
 // errAlways is a stand-in error for tests that don't care about the message.

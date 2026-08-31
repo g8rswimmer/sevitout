@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
@@ -159,6 +160,49 @@ func (s *ConfigServer) GetIntegrationConfig(ctx context.Context, req *pb.GetInte
 		return nil, internalError(ctx, "failed to get integration config", err)
 	}
 	return integrationConfigToProto(cfg), nil
+}
+
+// GetSlackBotCredential returns the decrypted "slack" integration
+// credential pair (bot_token/app_token) — see docs/roadmap.md Phase 8 and
+// this RPC's proto doc comment for why this is the one deliberate exception
+// to "credentials never cross this service's wire". It exists solely for
+// cmd/slackbot, which has no in-process access to the datastore or
+// ENCRYPTION_KEY the way cmd/server's PagerDuty/GitHub/Jira resolvers do.
+//
+// Gated to the specific slackbot service account, not "any Admin": the RBAC
+// floor (rpcMinRole) still requires OrgRoleAdmin, but that alone would let
+// an unrelated admin session pull a plaintext Slack token, which the other
+// three integrations' resolvers never expose over any wire at all. This
+// caller-identity check narrows it further to whoever is authenticated as
+// SlackbotServiceEmail. An empty SlackbotServiceEmail (not configured at
+// server startup) fails closed — rejecting every caller — rather than
+// silently falling back to "any Admin may call this".
+func (s *ConfigServer) GetSlackBotCredential(ctx context.Context, _ *pb.GetSlackBotCredentialRequest) (*pb.GetSlackBotCredentialResponse, error) {
+	if s.slackbotServiceEmail == "" {
+		return nil, status.Error(codes.PermissionDenied, "no slackbot service account is configured for this server")
+	}
+	uc, ok := auth.UserFromContext(ctx)
+	if !ok || uc.Email != s.slackbotServiceEmail {
+		return nil, status.Error(codes.PermissionDenied, "only the slackbot service account may call GetSlackBotCredential")
+	}
+
+	cfg, err := s.integrations.Get(ctx, "slack")
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// Nothing configured — an empty response, not an error, so the
+			// caller's own static-token fallback applies.
+			return &pb.GetSlackBotCredentialResponse{}, nil
+		}
+		return nil, internalError(ctx, "failed to get slack integration config", err)
+	}
+	creds, err := DecryptIntegrationCredentials(s.crypto, cfg)
+	if err != nil {
+		return nil, internalError(ctx, "failed to decrypt slack integration credentials", err)
+	}
+	return &pb.GetSlackBotCredentialResponse{
+		BotToken: creds["bot_token"],
+		AppToken: creds["app_token"],
+	}, nil
 }
 
 func (s *ConfigServer) ListIntegrationConfigs(ctx context.Context, _ *pb.ListIntegrationConfigsRequest) (*pb.ListIntegrationConfigsResponse, error) {

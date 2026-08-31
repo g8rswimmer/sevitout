@@ -80,19 +80,27 @@ func main() {
 		config:        pb.NewConfigServiceClient(conn),
 	}
 
-	defaultChannel, namingConvention := loadSlackSettings(ctx, log, api.config)
+	defaultChannel, namingConvention, restBotToken, _ := loadSlackSettings(ctx, log, api.config, botToken, appToken)
 
+	// Socket Mode (slash commands, app-mention events) always uses the
+	// static env-var tokens — live-reconnecting it on a datastore-configured
+	// token change is an explicit follow-up (docs/roadmap.md Phase 8), not
+	// built here. Only the REST client behind bot.slack (CreateChannel/
+	// PostMessage/etc., wrapped in slackResolver below) prefers the
+	// datastore-configured pair when one's available.
 	slackAPI := slack.New(botToken, slack.OptionAppLevelToken(appToken))
 	smClient := socketmode.New(slackAPI)
 
+	slackResolver := newSlackClientResolver(sevitoutslack.NewClient(restBotToken), restBotToken)
+
 	b := newBot(botParams{
-		Slack: sevitoutslack.NewClient(botToken), API: api, Log: log,
+		Slack: slackResolver, API: api, Log: log,
 		DefaultChannel: defaultChannel, ChannelNamingConvention: namingConvention,
 	})
 
 	wsURL := (&url.URL{Scheme: "ws", Host: apiAddr, Path: "/ws", RawQuery: "sev_id=" + url.QueryEscape(ws.BroadcastRoom)}).String()
 	go b.runEventListener(ctx, wsURL, tokens)
-	go b.runSettingsRefresher(ctx, api.config)
+	go b.runSettingsRefresher(ctx, api.config, slackResolver)
 	go tokens.runTokenRefresher(ctx)
 
 	go runSocketMode(ctx, log, b, smClient)
@@ -164,29 +172,55 @@ func runSocketMode(ctx context.Context, log *slog.Logger, b *bot, smClient *sock
 
 // loadSlackSettings fetches the "slack" integration config's non-secret
 // settings (docs/requirements.md §18.4: default notification channel,
-// incident channel naming convention). Retries briefly since the API server
-// may still be starting up; on persistent failure it logs a warning and
-// returns zero values, which the bot treats as "no default channel
-// configured" / "use the built-in naming convention" rather than failing to
-// start entirely.
-func loadSlackSettings(ctx context.Context, log *slog.Logger, config configAPI) (string, string) {
+// incident channel naming convention) and, per docs/roadmap.md Phase 8,
+// resolves the bot/app token pair the REST client should start with —
+// preferring a datastore-configured credential over staticBotToken/
+// staticAppToken (SLACK_BOT_TOKEN/SLACK_APP_TOKEN), the same
+// datastore-preferred-with-env-fallback pattern PagerDuty/GitHub/Jira use in
+// cmd/server. Retries briefly since the API server may still be starting
+// up; on persistent failure it logs a warning and falls back to
+// SLACK_DEFAULT_CHANNEL/SLACK_CHANNEL_NAMING_CONVENTION for the settings and
+// the static tokens for the credential pair, rather than failing to start
+// entirely.
+func loadSlackSettings(ctx context.Context, log *slog.Logger, config configAPI, staticBotToken, staticAppToken string) (defaultChannel, namingConvention, botToken, appToken string) {
 	var lastErr error
 	for attempt := 1; attempt <= slackSettingsRetryAttempts; attempt++ {
 		resp, err := config.GetIntegrationConfig(ctx, &pb.GetIntegrationConfigRequest{IntegrationType: "slack"})
 		if err == nil {
-			return resp.GetSettings()["default_channel"], resp.GetSettings()["channel_naming_convention"]
+			botToken, appToken = resolveSlackBotCredential(ctx, log, config, staticBotToken, staticAppToken)
+			return resp.GetSettings()["default_channel"], resp.GetSettings()["channel_naming_convention"], botToken, appToken
 		}
 		lastErr = err
 		select {
 		case <-ctx.Done():
-			return "", ""
+			return "", "", staticBotToken, staticAppToken
 		case <-time.After(slackSettingsRetryDelay):
 		}
 	}
-	defaultChannel := os.Getenv("SLACK_DEFAULT_CHANNEL")
-	defaultChannelNaming := os.Getenv("SLACK_CHANNEL_NAMING_CONVENTION")
-	log.Warn("could not load slack integration config, using defaults", "err", lastErr, "default_channel", defaultChannel, "channel_naming_convention", defaultChannelNaming)
-	return defaultChannel, defaultChannelNaming
+	defaultChannel = os.Getenv("SLACK_DEFAULT_CHANNEL")
+	namingConvention = os.Getenv("SLACK_CHANNEL_NAMING_CONVENTION")
+	log.Warn("could not load slack integration config, using defaults", "err", lastErr, "default_channel", defaultChannel, "channel_naming_convention", namingConvention)
+	return defaultChannel, namingConvention, staticBotToken, staticAppToken
+}
+
+// resolveSlackBotCredential returns the bot/app token pair the REST client
+// (slackClientResolver) should use at startup: the datastore-configured pair
+// via ConfigService.GetSlackBotCredential when one is available, falling
+// back to staticBotToken/staticAppToken otherwise. A fetch error or an empty
+// bot_token (no "slack" integration configured, or this server has no
+// slackbot service account set up — see internal/config.Config's
+// SlackbotServiceEmail) is treated as "nothing usable in the datastore," not
+// a fatal error, since the static tokens remain a valid fallback.
+func resolveSlackBotCredential(ctx context.Context, log *slog.Logger, config configAPI, staticBotToken, staticAppToken string) (botToken, appToken string) {
+	resp, err := config.GetSlackBotCredential(ctx, &pb.GetSlackBotCredentialRequest{})
+	if err != nil {
+		log.Debug("no datastore-configured slack bot credential, using static tokens", "err", err)
+		return staticBotToken, staticAppToken
+	}
+	if resp.GetBotToken() == "" {
+		return staticBotToken, staticAppToken
+	}
+	return resp.GetBotToken(), resp.GetAppToken()
 }
 
 // optionalEnv reads name from the environment, logging which variable was

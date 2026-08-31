@@ -188,6 +188,29 @@
         ]
       }
     },
+    "/v1/config/integrations/slack/bot-credential": {
+      "get": {
+        "summary": "GetSlackBotCredential returns the decrypted \"slack\" integration\ncredential pair (bot_token/app_token) — the one deliberate exception to\n\"credentials are never returned by any RPC in this service\" above. It\nexists solely so cmd/slackbot (a separate process that only talks to\nthis API over gRPC, with no direct datastore/encryption-key access) can\npick up a datastore-configured Slack token without a restart; see\ndocs/roadmap.md Phase 8. Gated server-side to the specific slackbot\nservice account (SLACKBOT_SERVICE_EMAIL), not merely Admin+ — an\nunrelated admin session must not be able to pull plaintext Slack tokens\nthrough this call. Returns empty fields (not an error) when the \"slack\"\nintegration has no credentials configured, so callers can fall back to\ntheir own static tokens.",
+        "operationId": "ConfigService_GetSlackBotCredential",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetSlackBotCredentialResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
     "/v1/config/integrations/{integrationType}": {
       "get": {
         "operationId": "ConfigService_GetIntegrationConfig",
@@ -1146,6 +1169,18 @@
           "additionalProperties": {
             "type": "string"
           }
+        }
+      }
+    },
+    "v1GetSlackBotCredentialResponse": {
+      "type": "object",
+      "properties": {
+        "botToken": {
+          "type": "string",
+          "description": "bot_token / app_token are empty when the \"slack\" integration has no\ndatastore-configured credentials — not an error, since the caller has a\nstatic-env-var fallback of its own."
+        },
+        "appToken": {
+          "type": "string"
         }
       }
     },
