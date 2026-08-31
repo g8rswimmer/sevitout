@@ -72,6 +72,11 @@ export interface DirectoryUser {
   name: string
   email: string
   slack_user_id?: string
+  // github_username and jira_account_id back the GitHub/Jira issue-creation
+  // assignee picker (TasksPanel.tsx) — only present when that user has set
+  // the corresponding field on their own profile.
+  github_username?: string
+  jira_account_id?: string
 }
 
 export interface ListUserDirectoryResponse {

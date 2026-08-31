@@ -252,9 +252,9 @@ func TestListUserDirectory_FiltersByQueryAndIDs(t *testing.T) {
 			t.Fatalf("seed %s: %v", u.ID, err)
 		}
 	}
-	slackID := "U-ALICE"
-	if _, err := users.UpdateIntegrationIdentities(context.Background(), "user-1", &slackID, nil, nil); err != nil {
-		t.Fatalf("set slack id: %v", err)
+	slackID, ghUser, jiraID := "U-ALICE", "alice-gh", "acc-1"
+	if _, err := users.UpdateIntegrationIdentities(context.Background(), "user-1", &slackID, &ghUser, &jiraID); err != nil {
+		t.Fatalf("set identities: %v", err)
 	}
 
 	t.Run("QueryFilter", func(t *testing.T) {
@@ -277,6 +277,12 @@ func TestListUserDirectory_FiltersByQueryAndIDs(t *testing.T) {
 		}
 		if resp.GetUsers()[0].GetSlackUserId() != "U-ALICE" {
 			t.Errorf("SlackUserId = %q, want U-ALICE", resp.GetUsers()[0].GetSlackUserId())
+		}
+		if resp.GetUsers()[0].GetGithubUsername() != "alice-gh" {
+			t.Errorf("GithubUsername = %q, want alice-gh", resp.GetUsers()[0].GetGithubUsername())
+		}
+		if resp.GetUsers()[0].GetJiraAccountId() != "acc-1" {
+			t.Errorf("JiraAccountId = %q, want acc-1", resp.GetUsers()[0].GetJiraAccountId())
 		}
 	})
 

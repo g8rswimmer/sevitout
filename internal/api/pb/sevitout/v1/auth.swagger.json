@@ -160,6 +160,13 @@
         "slackUserId": {
           "type": "string",
           "description": "slack_user_id is included since resolving it is exactly why the Slack\nauto-invite path calls this RPC — see docs/roadmap.md Phase 10d."
+        },
+        "githubUsername": {
+          "type": "string",
+          "description": "github_username and jira_account_id back the GitHub/Jira issue-creation\nassignee picker (docs/roadmap.md Phase 10f UX follow-up): the frontend\nsearches this directory and offers only users with the relevant field\nset, displaying their name instead of the raw tracker-native ID."
+        },
+        "jiraAccountId": {
+          "type": "string"
         }
       }
     },

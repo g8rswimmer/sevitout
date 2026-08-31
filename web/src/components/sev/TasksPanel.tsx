@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Section } from '@/components/sev/Section'
+import { AssigneePicker } from '@/components/sev/AssigneePicker'
 import { ExternalSystemBadge } from '@/components/sev/badges'
 import { formatDateTime } from '@/lib/format'
 import { TASK_RELATIONSHIP_LABELS, type TaskPriority, type TaskRelationshipType } from '@/types/api'
@@ -51,11 +52,15 @@ export function TasksPanel({
   const [repo, setRepo] = useState('')
   const [projectKey, setProjectKey] = useState('')
   const [issueType, setIssueType] = useState('')
-  // Assignee inputs, pre-filled from the caller's own stored integration
-  // identity (Roadmap Phase 10f) — editable/clearable before submit, and
-  // omitted from the request payload when empty.
+  // Assignee: the tracker-native value actually submitted (a GitHub login
+  // or Jira account ID) plus the display name shown in its place, set
+  // together by AssigneePicker.tsx's search-and-pick UI — pre-filled from
+  // the caller's own stored integration identity (Roadmap Phase 10f),
+  // clearable, and omitted from the request payload when empty.
   const [githubAssignee, setGithubAssignee] = useState('')
+  const [githubAssigneeName, setGithubAssigneeName] = useState('')
   const [jiraAssignee, setJiraAssignee] = useState('')
+  const [jiraAssigneeName, setJiraAssigneeName] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sevs', sevId, 'tasks'] })
@@ -98,6 +103,7 @@ export function TasksPanel({
       setTitle('')
       setDescription('')
       setGithubAssignee('')
+      setGithubAssigneeName('')
       setError(null)
       void invalidate()
     },
@@ -121,6 +127,7 @@ export function TasksPanel({
       setTitle('')
       setDescription('')
       setJiraAssignee('')
+      setJiraAssigneeName('')
       setError(null)
       void invalidate()
     },
@@ -205,7 +212,10 @@ export function TasksPanel({
                     setRepo(parsed.repo)
                   }
                 }
-                if (!githubAssignee && user?.github_username) setGithubAssignee(user.github_username)
+                if (!githubAssignee && user?.github_username) {
+                  setGithubAssignee(user.github_username)
+                  setGithubAssigneeName(user.name)
+                }
               }}
             >
               Create GitHub issue
@@ -216,7 +226,10 @@ export function TasksPanel({
               variant={mode === 'jira' ? 'default' : 'outline'}
               onClick={() => {
                 setMode('jira')
-                if (!jiraAssignee && user?.jira_account_id) setJiraAssignee(user.jira_account_id)
+                if (!jiraAssignee && user?.jira_account_id) {
+                  setJiraAssignee(user.jira_account_id)
+                  setJiraAssigneeName(user.name)
+                }
               }}
             >
               Create Jira issue
@@ -241,11 +254,18 @@ export function TasksPanel({
                   <Input aria-label="Owner" placeholder="owner" value={owner} onChange={(e) => setOwner(e.target.value)} className="w-1/2" />
                   <Input aria-label="Repo" placeholder="repo" value={repo} onChange={(e) => setRepo(e.target.value)} className="w-1/2" />
                 </div>
-                <Input
-                  aria-label="Assignee"
-                  placeholder="Assignee (GitHub username, optional)"
+                <AssigneePicker
+                  field="github_username"
                   value={githubAssignee}
-                  onChange={(e) => setGithubAssignee(e.target.value)}
+                  selectedName={githubAssigneeName}
+                  onSelect={(u) => {
+                    setGithubAssignee(u.github_username!)
+                    setGithubAssigneeName(u.name)
+                  }}
+                  onClear={() => {
+                    setGithubAssignee('')
+                    setGithubAssigneeName('')
+                  }}
                 />
               </>
             )}
@@ -267,11 +287,18 @@ export function TasksPanel({
                     className="w-1/2"
                   />
                 </div>
-                <Input
-                  aria-label="Assignee"
-                  placeholder="Assignee (Jira account ID, optional)"
+                <AssigneePicker
+                  field="jira_account_id"
                   value={jiraAssignee}
-                  onChange={(e) => setJiraAssignee(e.target.value)}
+                  selectedName={jiraAssigneeName}
+                  onSelect={(u) => {
+                    setJiraAssignee(u.jira_account_id!)
+                    setJiraAssigneeName(u.name)
+                  }}
+                  onClear={() => {
+                    setJiraAssignee('')
+                    setJiraAssigneeName('')
+                  }}
                 />
               </>
             )}

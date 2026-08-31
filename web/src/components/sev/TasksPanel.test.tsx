@@ -158,7 +158,7 @@ describe('TasksPanel', () => {
     expect(await screen.findByText(/jira integration is not configured/i)).toBeInTheDocument()
   })
 
-  it('pre-fills the GitHub assignee from the caller stored identity, clearable and omitted when empty', async () => {
+  it('pre-fills the GitHub assignee from the caller stored identity as a name chip, clearable and omitted when empty', async () => {
     localStorage.setItem('sevitout.token', 'test-token')
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
@@ -180,10 +180,15 @@ describe('TasksPanel', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /create github issue/i }))
 
-    await waitFor(() => expect(screen.getByLabelText('Assignee')).toHaveValue('alice-gh'))
+    // The picker shows the caller's name, not the raw GitHub login.
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
+    expect(screen.queryByText('alice-gh')).not.toBeInTheDocument()
 
-    // Clearable: an empty assignee is omitted from the payload, not sent as "".
-    await user.clear(screen.getByLabelText('Assignee'))
+    // Clearable: clearing reveals the search input again, and the next
+    // create omits assignee entirely rather than sending "".
+    await user.click(screen.getByRole('button', { name: /clear assignee/i }))
+    expect(screen.getByLabelText('Assignee')).toBeInTheDocument()
+
     await user.type(screen.getByLabelText('Owner'), 'acme')
     await user.type(screen.getByLabelText('Repo'), 'api')
     await user.type(screen.getByLabelText('Title'), 'Checkout errors')
@@ -196,5 +201,94 @@ describe('TasksPanel', () => {
     const [, init] = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/github-issues`)!
     const body = JSON.parse(String(init!.body))
     expect(body.assignee).toBeUndefined()
+  })
+
+  it('searching and picking a GitHub assignee submits their github_username and shows their name', async () => {
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url === `/v1/sevs/${SEV_ID}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
+      if (url.startsWith('/v1/auth/directory') && method === 'GET') {
+        return Promise.resolve(
+          jsonResponse({
+            users: [
+              { id: 'user-2', name: 'Bob', email: 'bob@example.com', github_username: 'bob-gh' },
+              // No github_username set — must be filtered out of the results.
+              { id: 'user-3', name: 'Bobby', email: 'bobby@example.com' },
+            ],
+          }),
+        )
+      }
+      if (url === `/v1/sevs/${SEV_ID}/github-issues` && method === 'POST') {
+        return Promise.resolve(jsonResponse(task({ id: '9', external_system: 'github', title: 'Checkout errors' })))
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+    renderWithProviders(<TasksPanel sevId={SEV_ID} canManage />)
+
+    await screen.findByText('No tasks linked yet.')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /create github issue/i }))
+    await user.type(screen.getByLabelText('Assignee'), 'bob')
+
+    // Only the candidate with a github_username set is offered.
+    await screen.findByText('Bob')
+    expect(screen.queryByText('Bobby')).not.toBeInTheDocument()
+
+    await user.click(screen.getByText('Bob'))
+    expect(screen.getByText('Bob')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Assignee')).not.toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Owner'), 'acme')
+    await user.type(screen.getByLabelText('Repo'), 'api')
+    await user.type(screen.getByLabelText('Title'), 'Checkout errors')
+    await user.click(screen.getByRole('button', { name: /create issue/i }))
+
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/github-issues`)
+      expect(call).toBeDefined()
+    })
+    const [, init] = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/github-issues`)!
+    const body = JSON.parse(String(init!.body))
+    expect(body.assignee).toBe('bob-gh')
+  })
+
+  it('searching and picking a Jira assignee submits their jira_account_id', async () => {
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url === `/v1/sevs/${SEV_ID}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
+      if (url.startsWith('/v1/auth/directory') && method === 'GET') {
+        return Promise.resolve(
+          jsonResponse({ users: [{ id: 'user-2', name: 'Carol', email: 'carol@example.com', jira_account_id: 'acc-42' }] }),
+        )
+      }
+      if (url === `/v1/sevs/${SEV_ID}/jira-issues` && method === 'POST') {
+        return Promise.resolve(jsonResponse(task({ id: '9', external_system: 'jira', title: 'Checkout errors' })))
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+    renderWithProviders(<TasksPanel sevId={SEV_ID} canManage />)
+
+    await screen.findByText('No tasks linked yet.')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /create jira issue/i }))
+    await user.type(screen.getByLabelText('Assignee'), 'car')
+
+    await user.click(await screen.findByText('Carol'))
+    expect(screen.getByText('Carol')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Project key'), 'OPS')
+    await user.type(screen.getByLabelText('Issue type'), 'Bug')
+    await user.type(screen.getByLabelText('Summary'), 'Checkout errors')
+    await user.click(screen.getByRole('button', { name: /create issue/i }))
+
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/jira-issues`)
+      expect(call).toBeDefined()
+    })
+    const [, init] = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/jira-issues`)!
+    const body = JSON.parse(String(init!.body))
+    expect(body.assignee_account_id).toBe('acc-42')
   })
 })

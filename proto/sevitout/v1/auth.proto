@@ -84,6 +84,12 @@ message DirectoryUser {
   // slack_user_id is included since resolving it is exactly why the Slack
   // auto-invite path calls this RPC — see docs/roadmap.md Phase 10d.
   string slack_user_id = 4;
+  // github_username and jira_account_id back the GitHub/Jira issue-creation
+  // assignee picker (docs/roadmap.md Phase 10f UX follow-up): the frontend
+  // searches this directory and offers only users with the relevant field
+  // set, displaying their name instead of the raw tracker-native ID.
+  string github_username = 5;
+  string jira_account_id = 6;
 }
 
 message ListUserDirectoryResponse {

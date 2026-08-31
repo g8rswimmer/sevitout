@@ -89,6 +89,12 @@ func (s *AuthServer) ListUserDirectory(ctx context.Context, req *pb.ListUserDire
 		if u.SlackUserID != nil {
 			du.SlackUserId = *u.SlackUserID
 		}
+		if u.GitHubUsername != nil {
+			du.GithubUsername = *u.GitHubUsername
+		}
+		if u.JiraAccountID != nil {
+			du.JiraAccountId = *u.JiraAccountID
+		}
 		resp.Users = append(resp.Users, du)
 	}
 	return resp, nil

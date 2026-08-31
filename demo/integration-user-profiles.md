@@ -95,10 +95,18 @@ action, and default new tracker issues to the creating user.
   `TaskResponse` gains `assignee`, persisted on the linked task
   (`sev_linked_tasks.assignee`, migration `000014`) so the list can show it
   without a live re-fetch.
-- `TasksPanel.tsx`: both create-issue forms gain an editable "Assignee"
-  input, pre-filled from the caller's own `WhoAmIResponse` (via `useAuth()`)
-  the first time that mode is opened, clearable, omitted from the request
-  when empty.
+- `TasksPanel.tsx`: both create-issue forms gain an "Assignee" field, backed
+  by a new `AssigneePicker.tsx` — a searchable dropdown of directory users
+  who have the relevant identity set (`ListUserDirectory`, filtered
+  client-side to non-empty `github_username`/`jira_account_id`), showing
+  each candidate's **name**, never the raw GitHub login or opaque Jira
+  account ID. Picking one submits their tracker-native identifier but
+  displays their name in its place; the field pre-fills the same way (the
+  caller's own name, from `WhoAmIResponse` via `useAuth()`) the first time
+  that mode is opened, clearable, omitted from the request when empty.
+  `DirectoryUser` gains `github_username`/`jira_account_id` to support this
+  (not sensitive — the same trust level as the `slack_user_id` it already
+  exposed for Phase 10d's Slack auto-invite).
 
 **10g. `AdminUsersPage.tsx`**
 
