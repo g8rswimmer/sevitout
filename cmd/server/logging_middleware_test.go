@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,6 +100,50 @@ func TestLoggingMiddleware_BindsRetrievableLoggerIntoContext(t *testing.T) {
 	}
 	if _, ok := handlerLine["request_id"]; !ok {
 		t.Error("handler's logger has no request_id bound — telemetry.LoggerFromContext isn't seeing loggingMiddleware's bound logger")
+	}
+}
+
+// fakeHijackableResponseWriter is a minimal http.ResponseWriter that also
+// implements http.Hijacker, standing in for the real *http.response a
+// production request carries. httptest.ResponseRecorder deliberately does
+// not implement http.Hijacker, so it can't be used to catch the regression
+// this test guards: statusWriter wrapping http.ResponseWriter (the
+// interface, not the underlying concrete type) silently drops Hijacker
+// support unless it explicitly forwards it, which broke every WebSocket
+// upgrade routed through loggingMiddleware (i.e. /ws) with a 500 ("response
+// does not implement http.Hijacker") regardless of how well-formed the
+// request otherwise was.
+type fakeHijackableResponseWriter struct {
+	http.ResponseWriter
+	hijacked bool
+}
+
+func (f *fakeHijackableResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	f.hijacked = true
+	return nil, nil, nil
+}
+
+func TestLoggingMiddleware_PreservesHijackerForWebSocketUpgrades(t *testing.T) {
+	log := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
+	var gotHijacker bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		gotHijacker = ok
+		if ok {
+			_, _, _ = hj.Hijack()
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	fake := &fakeHijackableResponseWriter{ResponseWriter: httptest.NewRecorder()}
+	req := httptest.NewRequest("GET", "/ws", nil)
+	loggingMiddleware(log, "ws", next).ServeHTTP(fake, req)
+
+	if !gotHijacker {
+		t.Fatal("statusWriter does not implement http.Hijacker — WebSocket upgrades through loggingMiddleware (e.g. gorilla/websocket's Upgrader.Upgrade on /ws) will fail with a 500")
+	}
+	if !fake.hijacked {
+		t.Error("statusWriter.Hijack did not delegate to the underlying ResponseWriter's Hijack")
 	}
 }
 

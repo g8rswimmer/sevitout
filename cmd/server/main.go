@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"fmt"
@@ -796,4 +797,23 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
+}
+
+// Hijack forwards to the underlying ResponseWriter's http.Hijacker, which
+// embedding the http.ResponseWriter *interface* above does not do on its
+// own — Hijack isn't part of that interface, so without this override
+// statusWriter would silently fail the type assertion gorilla/websocket's
+// Upgrade makes to take over the raw connection, breaking every WebSocket
+// upgrade that passes through loggingMiddleware (i.e. /ws) with a 500
+// ("response does not implement http.Hijacker") no matter how well-formed
+// the request otherwise is. httpL (cmux's HTTP/1.1 listener,
+// cmux.Any() below) always hands loggingMiddleware a connection whose real
+// ResponseWriter does support hijacking, so the type assertion here only
+// fails if something changes that.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("statusWriter: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }
