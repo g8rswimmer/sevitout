@@ -451,6 +451,108 @@ single-org tool.
 
 ---
 
+## Phase 9 — Schema-driven integration settings
+
+**Status**: 🔲 not started
+
+Today's `AdminIntegrationsPage.tsx` / `IntegrationConfig` blob has no schema: credentials
+and settings are both generic `map[string]string` rows edited through the same
+`TagRowsEditor`, so raw storage keys (`bot_token`, `cloud_id`) leak into the UI as field
+labels, credential inputs are plain text instead of password-masked, and an "Other…"
+option lets an admin create an `integration_type` that no client in the codebase will
+ever read. This phase adds a backend-owned field catalog — the single source of truth for
+field names, labels, types, and valid values — exposed via a new endpoint and enforced
+server-side on upsert, and rebuilds the admin page around a sidebar of the fixed
+integration set with a schema-driven detail form per integration. Monitoring (tool type +
+base URL, no credentials) is added as a 5th configurable integration, closing a
+requirements §18.4 gap that had no UI at all before.
+
+Step 0, before any code: a Claude Design canvas mockup of the sidebar + detail-form layout
+(credential fields password-masked, select fields shown as dropdowns), reviewed and
+iterated on before backend/frontend work starts.
+
+**9a. Backend: field catalog + upsert validation**
+
+New `internal/integrations/catalog` package — a dependency-free static registry, not a
+client for any one integration, so it sits outside `internal/integrations/{slack,pagerduty,...}`
+and is importable by `internal/api/grpc` without a cycle:
+
+- `catalog.Field{Key, Label, Kind (text|secret|select), Required, Help, Options}` and
+  `catalog.Integration{Type, Label, CredentialFields, SettingsFields}`.
+- `catalog.All` — the fixed, ordered set: PagerDuty (`api_key`), GitHub (`token`), Slack
+  (`bot_token`; settings `default_channel`, `channel_naming_convention` — carry forward
+  today's UI note that these reach the running `cmd/slackbot` process, but the credential
+  saved here only powers the connectivity check, since the bot reads its own token from
+  its environment at startup), Jira (`api_token`; settings `cloud_id` required, `site_url`
+  optional), Monitoring (settings only: `tool` as a select — datadog/prometheus/cloudwatch,
+  deliberately *without* an "other" option since there's no base-URL shape to assume for an
+  unnamed tool — and `base_url` as text). All storage keys reuse today's convention exactly,
+  so no data migration is needed.
+- New RPC `GetIntegrationCatalog` → `GET /v1/config/integrations/catalog` (Admin-only, for
+  consistency with the rest of `ConfigService`), a pure translation of `catalog.All` with no
+  store access.
+- `UpsertIntegrationConfig` (`internal/api/grpc/config_integration.go`) validates the
+  incoming `integration_type`/credential keys/settings keys/select values against the
+  catalog before touching the store or crypto — unknown `integration_type` or unknown key
+  rejects the whole request (`codes.InvalidArgument`), matching the file's existing
+  all-or-nothing semantics (it already rolls back on refresher rejection). `Required` is
+  intentionally *not* enforced at upsert time — since a request can supply just credentials
+  or just settings and the other side is left untouched, "required" would have to reason
+  about the merged existing+incoming state; the existing fallback-to-static-client
+  behavior in `cmd/server/*_resolver.go` already covers "this won't activate without X",
+  so `required` stays a UI-only affordance in this phase.
+
+**9b. Frontend: sidebar + schema-driven detail form**
+
+`AdminIntegrationsPage.tsx` is rebuilt around the new catalog endpoint instead of the
+hardcoded `KNOWN_INTEGRATIONS` array:
+
+- Left-hand list of the 5 catalog entries (fetched via a new
+  `api.config.integrations.catalog()`), each row showing its label, a configured/not-set
+  indicator, and its health badge — replacing today's separate "Configured integrations"
+  table; selecting a row is now the page's primary navigation, not just a table action.
+- Right-hand detail form rendered from the selected integration's schema: credential
+  fields as `<Input type="password">` (placeholder communicates "leave blank to keep the
+  current value" once something is already configured), settings fields as `<Input>` or,
+  for `select`-kind fields (Monitoring's `tool`), the existing `<Select>` component —
+  non-secret settings are always shown with their current value, satisfying "the user can
+  see current settings except creds."
+- `TagRowsEditor` stays for SEV tags elsewhere in the app; only this page's
+  credential/settings editing moves off it. The "Other…" branch, `customType` state, and
+  the generic key/value rows for known integrations are deleted.
+- `types/api.ts` / `lib/api.ts` gain the catalog response types and client method,
+  mirroring every other endpoint's existing pattern.
+
+**9c. Tests + demo doc**
+
+- `internal/integrations/catalog/catalog_test.go`: structural sanity checks over
+  `catalog.All` (unique types/keys, `select` fields have options, non-select fields don't).
+- Extend integration-config handler tests: `GetIntegrationCatalog` shape, and
+  `UpsertIntegrationConfig` rejecting an unknown `integration_type`, an unknown
+  credential/settings key, and an invalid `select` value, plus a valid Monitoring config
+  round-tripping through `List`/`Get`.
+- Rewrite `AdminIntegrationsPage.test.tsx` for the new layout: sidebar shows exactly 5
+  entries with no "Other…" anywhere; labels render as "Bot Token" not `bot_token`;
+  credential inputs are `type="password"`; Monitoring's `tool` renders as a 3-option
+  select; leaving a credential blank omits it from the save payload; a server validation
+  error surfaces through the existing error-alert path.
+- `demo/admin-integrations-settings.md` (What was built / Prerequisites / Walkthrough /
+  Known limitations, matching the existing per-phase template). Known limitations must
+  restate: GitHub/Jira default-project and PagerDuty default-escalation-policy settings
+  are still unsupported (no consumer exists yet); the catalog is static Go code, not
+  itself admin-editable, since every entry already has a real client in the codebase and a
+  6th integration is a one-file catalog change when it's actually needed; Monitoring has
+  no live health check by design (nothing to poll).
+
+**Estimate**: ~3-4 days (≈1.25 days backend catalog/API/validation/tests, ≈1.5-2 days
+frontend redesign, ≈0.5-0.75 day frontend tests + demo doc — comparable to Phase 6a and
+Phase 7's scopes combined, since this is genuinely both a backend schema/API addition and
+a full page redesign). **Depends on**: nothing — Monitoring needs no new backend client,
+and PagerDuty/GitHub/Slack/Jira's existing resolvers and health checkers are reused
+unchanged.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -465,6 +567,7 @@ single-org tool.
 | 6b | Structured monitoring-tool metadata | — | 1-2 days |
 | 7 | Linked Issues frontend (create-Jira UI + tracker badges) | 6a | 1.5-2.5 days |
 | 8 | Datastore-driven Slack bot credentials (REST client; Socket Mode reconnect deferred) | — | 2-3 days |
+| 9 | Schema-driven integration settings (catalog + sidebar admin UI + Monitoring) | — | 3-4 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -473,7 +576,10 @@ team size. Phase 7 is likewise independent of the observability core, but — un
 6a/6b — it specifically depends on Phase 6a's backend RPC. Phase 8 is independent
 of everything above it and, unlike the others, isn't scheduled — it's a scoped
 design for a known, currently-tolerated gap, to pick up if/when it becomes an
-operational pain point rather than on a fixed timeline.
+operational pain point rather than on a fixed timeline. Phase 9 is also independent
+of everything above it — it reuses PagerDuty/GitHub/Slack/Jira's existing resolvers
+and health checkers unchanged, and Monitoring needs no new backend client — so it
+can be sequenced whenever the sidebar-based UI redesign becomes a priority.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
