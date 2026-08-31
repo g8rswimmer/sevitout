@@ -10,11 +10,15 @@ startup, and saving a new bot token via the admin UI had no effect on the
 running bot process (see the interim mitigation this phase closes:
 `AdminIntegrationsPage.tsx`'s Slack `note`).
 
-This phase closes that gap for the bot's **REST client** — channel creation,
-posting messages, inviting users, fetching history, and looking up a user by
-email. Live-reconnecting **Socket Mode** (slash commands, `@mentions`) on a
-credential change is out of scope, exactly as the roadmap phase scoped it —
-see Known limitations.
+This phase closes that gap: `cmd/slackbot` now starts entirely from a
+datastore-configured "slack" integration credential, with no
+`SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` env vars required at all — both **Socket
+Mode** (slash commands, `@mentions`) and the **REST client** (channel
+creation, posting messages, inviting users, fetching history, looking up a
+user by email) prefer it over the static env vars at startup. Only *live*
+picking-up of a credential rotated after startup is REST-client-only: the
+REST client refreshes on a poll with no restart, Socket Mode does not — see
+Known limitations.
 
 - **New RPC `ConfigService.GetSlackBotCredential`** (`GET
   /v1/config/integrations/slack/bot-credential`) — the one deliberate
@@ -31,8 +35,20 @@ see Known limitations.
   well-known credential key — both are now stored (and editable) together,
   symmetric with how Jira's `cloud_id`/`site_url` already live together.
   `AdminIntegrationsPage.tsx` pre-fills both as their own rows and its note
-  now describes what actually happens: the REST client picks this up
-  periodically, Socket Mode still needs a restart.
+  now describes what actually happens: both halves of the bot start from
+  this pair, but only the REST client picks up a *later* change without a
+  restart.
+- **`cmd/slackbot`'s startup gate no longer hard-requires
+  `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN`.** Only `API_GRPC_ADDR`/
+  `SLACKBOT_SERVICE_EMAIL`/`SLACKBOT_SERVICE_PASSWORD` (needed just to reach
+  the API server at all) are still required env vars; the two Slack tokens
+  are read as an optional fallback via plain `os.Getenv`. `main()` resolves
+  the pair to actually use (datastore preferred, these two as fallback)
+  *before* deciding whether to disable — so a deployment that configures
+  Slack purely through the admin UI, with neither token set in the
+  container's environment, now starts and runs correctly. It still disables
+  itself gracefully (exit code 0, no restart loop) when *neither* source
+  has anything usable.
 - **`cmd/slackbot`'s REST client is now swappable.** A new
   `slackClientResolver` (`cmd/slackbot/slack_resolver.go`) wraps `bot.slack`,
   delegating to whichever concrete client is currently live and swapping it
@@ -40,17 +56,19 @@ see Known limitations.
   `*Resolver.apply` (e.g. `pagerdutyResolver`), just living in `cmd/slackbot`
   instead, since this REST client runs in a separate binary with no direct
   datastore/`ENCRYPTION_KEY` access.
-- **Startup and the existing settings poller both resolve it.**
+- **Startup and the existing settings poller both resolve the pair.**
   `loadSlackSettings` now also calls `GetSlackBotCredential` at startup,
   preferring a datastore-configured pair over the static
   `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` env vars (env as fallback, matching
-  every other integration). `runSettingsRefresher`'s existing periodic poll
-  (already re-fetching `default_channel`/`channel_naming_convention` every
+  every other integration) — and `main()` builds *both* Socket Mode and the
+  REST client from that one resolved pair, not from the raw env vars.
+  `runSettingsRefresher`'s existing periodic poll (already re-fetching
+  `default_channel`/`channel_naming_convention` every
   `slackSettingsRefreshInterval`) now also re-polls the credential and calls
-  `apply` — folded into the existing poller rather than a second one.
-  `apply` is a no-op when the token hasn't actually changed, so a routine
-  poll doesn't rebuild (and silently "reconnect") an identical client every
-  five minutes.
+  `apply` on the REST client's resolver — folded into the existing poller
+  rather than a second one. `apply` is a no-op when the token hasn't
+  actually changed, so a routine poll doesn't rebuild (and silently
+  "reconnect") an identical client every five minutes.
 
 ## Design notes
 
@@ -87,6 +105,22 @@ reconnection (the deferred follow-up) much harder to reason about later.
 startup for the same reason — so the very first periodic poll is a genuine
 no-op when the datastore hasn't changed, not an unconditional one-time
 rebuild.
+
+**An earlier version of this change still hard-required
+`SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` at startup, defeating the point of the
+phase — caught during review, not shipped.** The first pass moved credential
+*preference* to the REST client but left `main()`'s original all-five-vars-
+required gate in place, so a deployment relying purely on the datastore
+(no Slack env vars in the container at all) still logged `SLACK_APP_TOKEN is
+not set` / `SLACK_BOT_TOKEN is not set` / `slackbot disabled` and exited
+before ever calling `GetSlackBotCredential` — the datastore path was
+unreachable code for exactly the deployment shape it was built for. The fix:
+only `API_GRPC_ADDR`/`SLACKBOT_SERVICE_EMAIL`/`SLACKBOT_SERVICE_PASSWORD`
+remain a hard-required gate (nothing works without reaching the API at all);
+the two Slack tokens are read optionally and folded into the same
+datastore-preferred resolution `loadSlackSettings` already does, with the
+disable-gracefully check moved to *after* that resolution succeeds or fails.
+Verified live — see the Walkthrough.
 
 ## Prerequisites
 
@@ -156,14 +190,32 @@ service account is configured, `PermissionDenied` for a caller who is Admin
 but not *the* service account, and a clean plaintext hand-off for the one
 caller this exists for.
 
-`cmd/slackbot`'s side of the fix (startup preferring this over
-`SLACK_BOT_TOKEN`, and the periodic refresh swapping `bot.slack` live) is
-exercised by `TestLoadSlackSettings_Success`/
-`TestLoadSlackSettings_NoDatastoreCredential_FallsBackToStaticTokens` and
-`TestRunSettingsRefresher_AppliesDatastoreConfiguredSlackCredential` — a real
-Slack workspace isn't available in this environment to demo the end effect
-(a channel actually getting created through a rotated token), so those tests
-are the verification for that half.
+**Now the actual point of the phase — `cmd/slackbot` starting from *only*
+the datastore config, with no Slack env vars in its environment at all:**
+
+```bash
+env -i PATH="$PATH" \
+  API_GRPC_ADDR=localhost:8080 \
+  SLACKBOT_SERVICE_EMAIL=slackbot@example.com \
+  SLACKBOT_SERVICE_PASSWORD=another-secret-2 \
+  ./slackbot
+# {"level":"INFO","msg":"slackbot starting","api_addr":"localhost:8080"}
+# {"level":"INFO","msg":"connecting to slack"}
+# {"level":"INFO","msg":"connected to event stream","url":"ws://localhost:8080/ws?sev_id=%2A"}
+# {"level":"ERROR","msg":"socket mode run failed","err":"invalid_auth"}
+```
+
+No `SLACK_APP_TOKEN is not set` / `SLACK_BOT_TOKEN is not set` / `slackbot
+disabled` warnings — it resolved `xoxb-demo-token`/`xapp-demo-token` from
+the datastore and genuinely attempted a Socket Mode connection to Slack's
+real servers with them. `invalid_auth` is Slack's real API rejecting the
+fake demo token (there's no real Slack workspace in this environment) — the
+*expected* failure mode here, and proof the bot used the resolved
+credential rather than declining to start. Live-verified exactly like this
+against a real `cmd/server` process; not shown against a real Slack
+workspace, since none is available in this environment (see Known
+limitations for what that half of the picture still relies on unit tests
+for).
 
 ## Verify tests pass
 
@@ -204,20 +256,23 @@ gate step): **80.0%** (gate: 78.0%, see `demo/test-coverage-ci-gate.md`).
 ## Known limitations
 
 - **Socket Mode does not live-reconnect.** `smClient` (slash commands,
-  `@mentions`) is built once at startup from the static
-  `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` env vars and stays on them for the
-  process's lifetime — a credential rotated via the admin UI reaches
-  `bot.slack`'s REST calls (channel creation, messages, invites, history,
-  user lookup) within one refresh interval, but slash commands and mentions
-  still need a `slackbot` container restart to pick up a new token pair.
-  This is the explicitly-scoped-out "genuinely hard part" from the roadmap
-  phase, not an oversight — reconnecting a long-lived Socket Mode session
-  needs its own retry/backoff design.
-- **`app_token` is fetched but only used for the (deferred) Socket Mode
-  case.** `resolveSlackBotCredential`/`GetSlackBotCredentialResponse` return
-  both tokens, but only `bot_token` is ever applied (to the REST client) —
-  `app_token` is plumbed through now so the follow-up above doesn't need a
-  second RPC/schema change later, but it does nothing yet.
+  `@mentions`) is built once, at startup, from whichever bot/app token pair
+  `loadSlackSettings` resolved (datastore preferred, static env vars as
+  fallback) — so it *does* benefit from a purely datastore-configured
+  deployment at startup, same as the REST client. What it does *not* do is
+  pick up a credential rotated *after* startup: a token changed via the
+  admin UI reaches `bot.slack`'s REST calls (channel creation, messages,
+  invites, history, user lookup) within one refresh interval, but slash
+  commands and mentions still need a `slackbot` container restart to pick up
+  the new pair. This is the explicitly-scoped-out "genuinely hard part" from
+  the roadmap phase, not an oversight — reconnecting a long-lived Socket
+  Mode session needs its own retry/backoff design.
+- **`app_token` is only ever used for Socket Mode's one-time startup
+  construction, never refreshed.** `resolveSlackBotCredential`/
+  `GetSlackBotCredentialResponse` return both tokens; `runSettingsRefresher`
+  only re-applies `bot_token` to the REST client's `slackClientResolver` on
+  its periodic poll — `app_token` has no live-refresh path at all, matching
+  Socket Mode's own no-live-reconnect limitation above.
 - **The one-time initial rebuild race is theoretically possible but
   harmless.** If the datastore's `bot_token` differs from the static env var
   at startup, the *first* periodic poll (up to `slackSettingsRefreshInterval`

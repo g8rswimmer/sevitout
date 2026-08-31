@@ -33,22 +33,26 @@ var (
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	// Every other integration in this repo (PagerDuty, GitHub) is optional
-	// and disables itself gracefully when unconfigured. A Slack bot with no
-	// Slack credentials has nothing to fall back to, so it exits cleanly
-	// (code 0) rather than crash-looping — matching how `migrate` exits 0
-	// once schema migrations are already applied. This keeps `make up`
-	// quiet for every earlier milestone's demo, none of which configure
-	// Slack, since docker-compose's default restart policy is "no".
-	appToken, ok1 := optionalEnv(log, "SLACK_APP_TOKEN")
-	botToken, ok2 := optionalEnv(log, "SLACK_BOT_TOKEN")
-	apiAddr, ok3 := optionalEnv(log, "API_GRPC_ADDR")
-	serviceEmail, ok4 := optionalEnv(log, "SLACKBOT_SERVICE_EMAIL")
-	servicePassword, ok5 := optionalEnv(log, "SLACKBOT_SERVICE_PASSWORD")
-	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
+	// API_GRPC_ADDR/SLACKBOT_SERVICE_EMAIL/SLACKBOT_SERVICE_PASSWORD are
+	// always required — without them the bot can't even reach the API
+	// server to ask whether Slack is configured at all, datastore or not.
+	// SLACK_APP_TOKEN/SLACK_BOT_TOKEN are deliberately *not* gated on here
+	// (unlike before docs/roadmap.md Phase 8): a datastore-configured
+	// "slack" integration credential (see resolveSlackBotCredential below)
+	// can supply both instead, so requiring them up front would defeat the
+	// whole point of this phase for a deployment that configures Slack
+	// purely through the admin UI. They're read further down as a fallback,
+	// via plain os.Getenv, not optionalEnv — their absence alone is not
+	// something to warn about here.
+	apiAddr, ok1 := optionalEnv(log, "API_GRPC_ADDR")
+	serviceEmail, ok2 := optionalEnv(log, "SLACKBOT_SERVICE_EMAIL")
+	servicePassword, ok3 := optionalEnv(log, "SLACKBOT_SERVICE_PASSWORD")
+	if !ok1 || !ok2 || !ok3 {
 		log.Warn("slackbot disabled: one or more required environment variables are not set")
 		return
 	}
+	staticAppToken := os.Getenv("SLACK_APP_TOKEN")
+	staticBotToken := os.Getenv("SLACK_BOT_TOKEN")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -80,18 +84,30 @@ func main() {
 		config:        pb.NewConfigServiceClient(conn),
 	}
 
-	defaultChannel, namingConvention, restBotToken, _ := loadSlackSettings(ctx, log, api.config, botToken, appToken)
+	defaultChannel, namingConvention, botToken, appToken := loadSlackSettings(ctx, log, api.config, staticBotToken, staticAppToken)
 
-	// Socket Mode (slash commands, app-mention events) always uses the
-	// static env-var tokens — live-reconnecting it on a datastore-configured
-	// token change is an explicit follow-up (docs/roadmap.md Phase 8), not
-	// built here. Only the REST client behind bot.slack (CreateChannel/
-	// PostMessage/etc., wrapped in slackResolver below) prefers the
-	// datastore-configured pair when one's available.
+	// Both a bot token and an app token are required to establish Socket
+	// Mode at all. A deployment with neither a datastore-configured "slack"
+	// integration credential nor the static env vars has nothing to start
+	// with, so — matching every other optional integration in this repo —
+	// the bot exits cleanly (code 0) rather than crash-looping.
+	if botToken == "" || appToken == "" {
+		log.Warn(`slackbot disabled: no Slack bot credentials available (configure the "slack" integration via the admin API, or set SLACK_APP_TOKEN/SLACK_BOT_TOKEN)`)
+		return
+	}
+
+	// Socket Mode (slash commands, app-mention events) is built once, here,
+	// from whichever bot/app token pair loadSlackSettings resolved above —
+	// preferring a datastore-configured credential over the static env vars
+	// at startup, exactly like the REST client below. What's still out of
+	// scope (docs/roadmap.md Phase 8) is live-reconnecting *this* Socket
+	// Mode connection later if the datastore credential changes after
+	// startup — see slackClientResolver's doc comment for the REST client's
+	// equivalent, which does refresh live via runSettingsRefresher.
 	slackAPI := slack.New(botToken, slack.OptionAppLevelToken(appToken))
 	smClient := socketmode.New(slackAPI)
 
-	slackResolver := newSlackClientResolver(sevitoutslack.NewClient(restBotToken), restBotToken)
+	slackResolver := newSlackClientResolver(sevitoutslack.NewClient(botToken), botToken)
 
 	b := newBot(botParams{
 		Slack: slackResolver, API: api, Log: log,

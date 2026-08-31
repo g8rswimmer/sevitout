@@ -67,7 +67,7 @@ describe('AdminIntegrationsPage', () => {
     expect(screen.getByDisplayValue('api_key')).toBeInTheDocument()
     // PagerDuty has no gap between "credential saved here" and "credential
     // actually used" the way Slack does, so it must not show Slack's note.
-    expect(screen.queryByText(/periodically pulls bot_token\/app_token from here/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/prefers this bot_token\/app_token pair/)).not.toBeInTheDocument()
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('Tag value'), 'secret-key')
@@ -141,11 +141,12 @@ describe('AdminIntegrationsPage', () => {
     expect(screen.getByDisplayValue('channel_naming_convention')).toBeInTheDocument()
     expect(screen.getByText(/"default_channel" \(optional\)/)).toBeInTheDocument()
     expect(screen.getByText(/"channel_naming_convention" \(optional\)/)).toBeInTheDocument()
-    // Since Phase 8, this credential does reach the running bot's REST
-    // client periodically — the form must say so, and must still flag that
-    // Socket Mode (slash commands/@mentions) needs a restart.
-    expect(screen.getByText(/periodically pulls bot_token\/app_token from here/)).toBeInTheDocument()
-    expect(screen.getByText(/Socket Mode .* requires a restart/)).toBeInTheDocument()
+    // Since Phase 8, this credential is preferred (over the static env
+    // vars) by both Socket Mode and the REST client at startup, but only
+    // the REST client picks up a *later* change without a restart — the
+    // form must say both halves of that.
+    expect(screen.getByText(/prefers this bot_token\/app_token pair/)).toBeInTheDocument()
+    expect(screen.getByText(/Socket Mode still needs a restart/)).toBeInTheDocument()
 
     // Credentials section (2 rows: bot_token, app_token) + settings section
     // (2 rows: default_channel, channel_naming_convention) — the first two

@@ -22,10 +22,12 @@ import (
 // separate binary with no direct datastore/encryption-key access (see
 // docs/roadmap.md Phase 8's "why this isn't the same fix" section).
 //
-// Deliberately scoped to just this one REST client, not the Socket Mode
-// connection (smClient in main.go) — reconnecting Socket Mode on a token
-// change needs its own retry/backoff design and is an explicit follow-up,
-// not built here. Safe for concurrent use.
+// Deliberately scoped to *live* updates of just this one REST client, not
+// the Socket Mode connection (smClient in main.go) — that connection is
+// still built once at startup from the same preferred (datastore-over-env)
+// pair main.go resolves for this resolver's initial client, but
+// reconnecting it later on a token change needs its own retry/backoff design
+// and is an explicit follow-up, not built here. Safe for concurrent use.
 type slackClientResolver struct {
 	mu         sync.RWMutex
 	current    slackClient

@@ -32,15 +32,17 @@ import type { IntegrationHealthStatus } from '@/types/api'
  *
  * `note`, where present, calls out a real behavioral gap worth surfacing in
  * the form itself rather than leaving an admin to discover it by testing —
- * currently only Slack has one. Per docs/roadmap.md Phase 8, cmd/slackbot's
- * REST client (channel creation, messages, invites, history, user lookup)
- * now periodically pulls this bot_token/app_token pair from here via
- * ConfigService.GetSlackBotCredential — no restart needed for those calls.
- * Socket Mode (slash commands, @mentions) is a separate, longer-lived
- * connection that still only reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN from the
- * bot process's own environment at startup; live-reconnecting *that* on a
- * credential change is an explicit, not-yet-built follow-up (see the
- * roadmap phase's "genuinely hard part"). */
+ * currently only Slack has one. Per docs/roadmap.md Phase 8, this
+ * bot_token/app_token pair is preferred over SLACK_BOT_TOKEN/SLACK_APP_TOKEN
+ * (which remain a fallback) for *both* halves of the running bot at
+ * startup: Socket Mode (slash commands, @mentions) and the REST client
+ * (channel creation, messages, invites, history, user lookup). Only the
+ * REST client picks up a change made here *without* a restart — it
+ * periodically re-pulls this pair via ConfigService.GetSlackBotCredential.
+ * Socket Mode's connection is still established once at startup; live-
+ * reconnecting it on a credential change is an explicit, not-yet-built
+ * follow-up (see the roadmap phase's "genuinely hard part"), so a rotated
+ * credential still needs a restart to reach slash commands/@mentions. */
 const KNOWN_INTEGRATIONS: {
   value: string
   label: string
@@ -62,7 +64,7 @@ const KNOWN_INTEGRATIONS: {
       { key: 'default_channel', required: false },
       { key: 'channel_naming_convention', required: false },
     ],
-    note: 'The Slack bot’s REST client (channel creation, messages, invites, history, user lookup) periodically pulls bot_token/app_token from here — changes here reach it within a few minutes, no restart needed. Socket Mode (slash commands and @mentions) is a separate, longer-lived connection that still only reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN from the bot process’s own environment at startup, and requires a restart to pick up a change made here. default_channel and channel_naming_convention below reach the running bot the same periodic way.',
+    note: 'The Slack bot prefers this bot_token/app_token pair over SLACK_BOT_TOKEN/SLACK_APP_TOKEN (which remain a fallback) for both Socket Mode (slash commands, @mentions) and its REST client (channel creation, messages, invites, history, user lookup) at startup. Only the REST client picks up a change made here without a restart — it periodically re-pulls this pair. Socket Mode still needs a restart to pick up a rotated credential. default_channel and channel_naming_convention below reach the running bot the same periodic way.',
   },
   {
     value: 'jira',
