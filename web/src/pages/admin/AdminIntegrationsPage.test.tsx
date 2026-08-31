@@ -65,6 +65,9 @@ describe('AdminIntegrationsPage', () => {
     await screen.findByText('PagerDuty')
 
     expect(screen.getByDisplayValue('api_key')).toBeInTheDocument()
+    // PagerDuty has no gap between "credential saved here" and "credential
+    // actually used" the way Slack does, so it must not show Slack's note.
+    expect(screen.queryByText(/won.t pick up a value saved here/)).not.toBeInTheDocument()
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('Tag value'), 'secret-key')
@@ -135,6 +138,10 @@ describe('AdminIntegrationsPage', () => {
     expect(screen.getByDisplayValue('channel_naming_convention')).toBeInTheDocument()
     expect(screen.getByText(/"default_channel" \(optional\)/)).toBeInTheDocument()
     expect(screen.getByText(/"channel_naming_convention" \(optional\)/)).toBeInTheDocument()
+    // Slack's credential here doesn't reach the running bot process (a
+    // separate binary reading SLACK_BOT_TOKEN from its own environment) —
+    // the form must say so rather than implying it does.
+    expect(screen.getByText(/won.t pick up a value saved here/)).toBeInTheDocument()
 
     // Credentials section (1 row: bot_token) + settings section (2 rows:
     // default_channel, channel_naming_convention) — the first "Tag value"

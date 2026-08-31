@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
+import { Info, RefreshCw } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,12 +27,26 @@ import type { IntegrationHealthStatus } from '@/types/api'
  *    with a safe built-in fallback when unset; not read by
  *    slackHealthChecker, which only needs the bot_token credential).
  * "Other" covers any integration_type not in this fixed list (e.g. a future
- * Datadog/Prometheus integration), stored and displayed exactly as typed. */
+ * Datadog/Prometheus integration), stored and displayed exactly as typed.
+ *
+ * `note`, where present, calls out a real behavioral gap worth surfacing in
+ * the form itself rather than leaving an admin to discover it by testing —
+ * currently only Slack has one, because it's the only integration whose
+ * *live* credential is unreachable from here at all (see the credential
+ * field below and cmd/slackbot/main.go — the running bot process is a
+ * separate binary that reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN from its own
+ * environment at startup; unlike PagerDuty/GitHub/Jira, whose resolvers run
+ * in-process inside cmd/server with direct access to decrypt this same
+ * datastore config, the bot only ever talks to the API over gRPC, and
+ * IntegrationConfigResponse deliberately never returns decrypted
+ * credentials over that wire — by design, plaintext secrets never leave the
+ * process that decrypts them). */
 const KNOWN_INTEGRATIONS: {
   value: string
   label: string
   credentialKey: string
   settingsKeys?: { key: string; required: boolean }[]
+  note?: string
 }[] = [
   { value: 'pagerduty', label: 'PagerDuty', credentialKey: 'api_key' },
   { value: 'github', label: 'GitHub', credentialKey: 'token' },
@@ -44,6 +58,7 @@ const KNOWN_INTEGRATIONS: {
       { key: 'default_channel', required: false },
       { key: 'channel_naming_convention', required: false },
     ],
+    note: 'This credential only powers the connectivity check above — the running Slack bot reads SLACK_BOT_TOKEN from its own environment at startup and won’t pick up a value saved here without restarting the slackbot process. default_channel and channel_naming_convention below do reach the running bot (it polls them periodically).',
   },
   {
     value: 'jira',
@@ -221,6 +236,13 @@ export function AdminIntegrationsPage() {
               </div>
             )}
           </div>
+
+          {knownType?.note && (
+            <div className="flex items-start gap-2 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{knownType.note}</p>
+            </div>
+          )}
 
           <div>
             <Label>Credentials (write-only — leave a value blank to keep it unchanged)</Label>
