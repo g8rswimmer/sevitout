@@ -64,7 +64,7 @@ const KNOWN_INTEGRATIONS: {
       { key: 'default_channel', required: false },
       { key: 'channel_naming_convention', required: false },
     ],
-    note: 'The Slack bot prefers this bot_token/app_token pair over SLACK_BOT_TOKEN/SLACK_APP_TOKEN (which remain a fallback) for both Socket Mode (slash commands, @mentions) and its REST client (channel creation, messages, invites, history, user lookup) at startup. Only the REST client picks up a change made here without a restart — it periodically re-pulls this pair. Socket Mode still needs a restart to pick up a rotated credential. default_channel and channel_naming_convention below reach the running bot the same periodic way.',
+    note: 'The Slack bot prefers this bot_token/app_token pair over SLACK_BOT_TOKEN/SLACK_APP_TOKEN — set both here and no env vars are needed. Changes reach message/channel actions live; Socket Mode still needs a restart to pick up a rotated credential. Settings below update live too.',
   },
   {
     value: 'jira',
