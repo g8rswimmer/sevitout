@@ -1,46 +1,87 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AdminIntegrationsPage } from '@/pages/admin/AdminIntegrationsPage'
 import { renderWithProviders } from '@/test/utils'
-import type { IntegrationConfigResponse } from '@/types/api'
+import type { GetIntegrationCatalogResponse, IntegrationConfigResponse, IntegrationHealth } from '@/types/api'
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
-const PAGERDUTY: IntegrationConfigResponse = {
+// Mirrors internal/integrations/catalog.All exactly (Roadmap Phase 9).
+const CATALOG: GetIntegrationCatalogResponse = {
+  integrations: [
+    {
+      type: 'pagerduty',
+      label: 'PagerDuty',
+      credential_fields: [{ key: 'api_key', label: 'API Key', kind: 'secret', required: true }],
+    },
+    {
+      type: 'github',
+      label: 'GitHub',
+      credential_fields: [{ key: 'token', label: 'Token', kind: 'secret', required: true }],
+    },
+    {
+      type: 'slack',
+      label: 'Slack',
+      credential_fields: [
+        { key: 'bot_token', label: 'Bot Token', kind: 'secret', required: true },
+        { key: 'app_token', label: 'App Token', kind: 'secret', required: true },
+      ],
+      settings_fields: [
+        { key: 'default_channel', label: 'Default Channel', kind: 'text' },
+        { key: 'channel_naming_convention', label: 'Channel Naming Convention', kind: 'text' },
+      ],
+    },
+    {
+      type: 'jira',
+      label: 'Jira',
+      credential_fields: [{ key: 'api_token', label: 'API Token', kind: 'secret', required: true }],
+      settings_fields: [
+        { key: 'cloud_id', label: 'Cloud ID', kind: 'text', required: true },
+        { key: 'site_url', label: 'Site URL', kind: 'text' },
+      ],
+    },
+    {
+      type: 'monitoring',
+      label: 'Monitoring',
+      settings_fields: [
+        { key: 'tool', label: 'Tool', kind: 'select', required: true, options: ['datadog', 'prometheus', 'cloudwatch'] },
+        { key: 'base_url', label: 'Base URL', kind: 'text' },
+      ],
+    },
+  ],
+}
+
+const PAGERDUTY_CONFIG: IntegrationConfigResponse = {
   integration_type: 'pagerduty',
   credentials_configured: true,
   created_at: '2026-08-23T20:00:00Z',
   updated_at: '2026-08-23T20:00:00Z',
 }
 
-function mockFetch(configs: IntegrationConfigResponse[] = [PAGERDUTY]) {
+function mockFetch(opts?: {
+  configs?: IntegrationConfigResponse[]
+  health?: IntegrationHealth[]
+  upsertHandler?: (integrationType: string, body: unknown) => Response
+}) {
+  const configs = opts?.configs ?? [PAGERDUTY_CONFIG]
+  const health = opts?.health ?? [{ integration_type: 'pagerduty', status: 'connected' as const }]
   vi.mocked(fetch).mockImplementation((input, init) => {
     const url = String(input)
     const method = init?.method ?? 'GET'
+    if (url === '/v1/config/integration-catalog') return Promise.resolve(jsonResponse(CATALOG))
     if (url === '/v1/config/integrations') return Promise.resolve(jsonResponse({ configs }))
-    if (url === '/admin/integrations/health')
-      return Promise.resolve(jsonResponse({ integrations: [{ integration_type: 'pagerduty', status: 'connected' }] }))
-    if (url === '/v1/config/integrations/pagerduty' && method === 'PUT') {
-      return Promise.resolve(jsonResponse({ ...PAGERDUTY }))
-    }
-    if (url === '/v1/config/integrations/jira' && method === 'PUT') {
+    if (url === '/admin/integrations/health') return Promise.resolve(jsonResponse({ integrations: health }))
+    const match = /^\/v1\/config\/integrations\/([^/]+)$/.exec(url)
+    if (match && method === 'PUT') {
+      const integrationType = match[1]
       const body = JSON.parse(String(init?.body))
+      if (opts?.upsertHandler) return Promise.resolve(opts.upsertHandler(integrationType, body))
       return Promise.resolve(
-        jsonResponse({ integration_type: 'jira', credentials_configured: true, settings: body.settings }),
+        jsonResponse({ integration_type: integrationType, credentials_configured: true, settings: body.settings }),
       )
-    }
-    if (url === '/v1/config/integrations/slack' && method === 'PUT') {
-      const body = JSON.parse(String(init?.body))
-      return Promise.resolve(
-        jsonResponse({ integration_type: 'slack', credentials_configured: true, settings: body.settings }),
-      )
-    }
-    if (url === '/v1/config/integrations/datadog' && method === 'PUT') {
-      const body = JSON.parse(String(init?.body))
-      return Promise.resolve(jsonResponse({ integration_type: 'datadog', credentials_configured: true, settings: body.settings }))
     }
     return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
   })
@@ -50,142 +91,162 @@ describe('AdminIntegrationsPage', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()))
   afterEach(() => vi.unstubAllGlobals())
 
-  it('renders configured integrations with health status', async () => {
+  it('shows exactly 5 sidebar entries with no "Other…" anywhere', async () => {
     mockFetch()
     renderWithProviders(<AdminIntegrationsPage />)
 
-    expect(await screen.findByText('PagerDuty')).toBeInTheDocument()
-    expect(await screen.findByText('Connected')).toBeInTheDocument()
-    expect(screen.getByText('Configured')).toBeInTheDocument()
+    for (const label of ['PagerDuty', 'GitHub', 'Slack', 'Jira', 'Monitoring']) {
+      expect(await screen.findByRole('button', { name: new RegExp(label) })).toBeInTheDocument()
+    }
+    expect(screen.queryByText(/other/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: /type/i })).not.toBeInTheDocument()
   })
 
-  it('saves a known integration type with its well-known credential key pre-filled', async () => {
+  it('shows configured/not-set and health badges per sidebar row, with a green "Connected" badge', async () => {
     mockFetch()
     renderWithProviders(<AdminIntegrationsPage />)
-    await screen.findByText('PagerDuty')
 
-    expect(screen.getByDisplayValue('api_key')).toBeInTheDocument()
-    // PagerDuty has no gap between "credential saved here" and "credential
-    // actually used" the way Slack does, so it must not show Slack's note.
-    expect(screen.queryByText(/prefers this bot_token\/app_token pair/)).not.toBeInTheDocument()
+    const pagerdutyRow = await screen.findByRole('button', { name: /PagerDuty/ })
+    expect(within(pagerdutyRow).getByText('Configured')).toBeInTheDocument()
+    const connectedBadge = within(pagerdutyRow).getByText('Connected')
+    expect(connectedBadge.className).toContain('bg-success')
 
-    const user = userEvent.setup()
-    await user.type(screen.getByLabelText('Tag value'), 'secret-key')
-    await user.click(screen.getByRole('button', { name: /save integration/i }))
-
-    await waitFor(() => {
-      const call = vi
-        .mocked(fetch)
-        .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/pagerduty' && init?.method === 'PUT')
-      expect(call).toBeDefined()
-    })
-    const call = vi
-      .mocked(fetch)
-      .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/pagerduty' && init?.method === 'PUT')!
-    expect(JSON.parse(String(call[1]!.body))).toMatchObject({
-      integration_type: 'pagerduty',
-      credentials: { api_key: 'secret-key' },
-    })
+    const githubRow = screen.getByRole('button', { name: /GitHub/ })
+    expect(within(githubRow).getByText('Not set')).toBeInTheDocument()
+    expect(within(githubRow).getByText('No health check')).toBeInTheDocument()
   })
 
-  it('includes Jira in the type dropdown with its well-known credential and settings keys pre-filled', async () => {
-    mockFetch()
+  it('shows the raw error message and a troubleshooting hint for a failed health check', async () => {
+    mockFetch({
+      configs: [
+        { integration_type: 'jira', credentials_configured: true, created_at: '2026-08-23T20:00:00Z', updated_at: '2026-08-23T20:00:00Z' },
+      ],
+      health: [{ integration_type: 'jira', status: 'error', error: 'jira: status 401: Unauthorized' }],
+    })
     renderWithProviders(<AdminIntegrationsPage />)
-    await screen.findByText('PagerDuty')
+    await screen.findByText('PagerDuty', { selector: 'h2' })
+
+    const jiraRow = screen.getByRole('button', { name: /Jira/ })
+    expect(within(jiraRow).getByText('Error').className).toContain('bg-destructive')
 
     const user = userEvent.setup()
-    await user.selectOptions(screen.getByLabelText('Type'), 'Jira')
+    await user.click(jiraRow)
+    await screen.findByText('Jira', { selector: 'h2' })
 
-    expect(screen.getByDisplayValue('api_token')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('cloud_id')).toBeInTheDocument()
-    // site_url is optional (cosmetic browse-link generation only) but still
-    // shown as its own editable row, not just mentioned in the hint text.
-    expect(screen.getByText(/"site_url" \(optional\)/)).toBeInTheDocument()
-    expect(screen.getByDisplayValue('site_url')).toBeInTheDocument()
-
-    // The credentials section (1 row: api_token) and the settings section
-    // (2 rows: cloud_id, site_url) each render "Tag value" inputs once Jira
-    // is selected — the first belongs to the credentials row.
-    const [credentialValueInput] = screen.getAllByLabelText('Tag value')
-    await user.type(credentialValueInput, 'jira-secret-token')
-    await user.click(screen.getByRole('button', { name: /save integration/i }))
-
-    await waitFor(() => {
-      const call = vi
-        .mocked(fetch)
-        .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/jira' && init?.method === 'PUT')
-      expect(call).toBeDefined()
-    })
-    const call = vi
-      .mocked(fetch)
-      .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/jira' && init?.method === 'PUT')!
-    expect(JSON.parse(String(call[1]!.body))).toMatchObject({
-      integration_type: 'jira',
-      credentials: { api_token: 'jira-secret-token' },
-    })
+    expect(screen.getByText('Health check failed')).toBeInTheDocument()
+    expect(screen.getByText('jira: status 401: Unauthorized')).toBeInTheDocument()
+    expect(screen.getByText(/Cloud ID is under admin.atlassian.com/)).toBeInTheDocument()
   })
 
-  it("includes Slack's optional settings keys as editable rows, not just credentials", async () => {
+  it('renders credential fields with real labels as password inputs, pre-selecting the first row', async () => {
     mockFetch()
     renderWithProviders(<AdminIntegrationsPage />)
-    await screen.findByText('PagerDuty')
+
+    // PagerDuty is the first catalog entry, so its form shows without a click.
+    expect(await screen.findByText('PagerDuty', { selector: 'h2' })).toBeInTheDocument()
+    const apiKeyInput = screen.getByLabelText('API Key')
+    expect(apiKeyInput).toHaveAttribute('type', 'password')
+    // The raw storage key must never leak into the UI as a label.
+    expect(screen.queryByText('api_key')).not.toBeInTheDocument()
+  })
+
+  it("switches the detail form when a different sidebar row is clicked, showing Slack's two credential fields and settings", async () => {
+    mockFetch()
+    renderWithProviders(<AdminIntegrationsPage />)
+    await screen.findByText('PagerDuty', { selector: 'h2' })
 
     const user = userEvent.setup()
-    await user.selectOptions(screen.getByLabelText('Type'), 'Slack')
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
 
-    expect(screen.getByDisplayValue('bot_token')).toBeInTheDocument()
-    // app_token is Slack's second well-known credential key (Phase 8), also
-    // pre-filled as its own row, not just mentioned in the hint text.
-    expect(screen.getByDisplayValue('app_token')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('default_channel')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('channel_naming_convention')).toBeInTheDocument()
-    expect(screen.getByText(/"default_channel" \(optional\)/)).toBeInTheDocument()
-    expect(screen.getByText(/"channel_naming_convention" \(optional\)/)).toBeInTheDocument()
-    // Since Phase 8, this credential is preferred (over the static env
-    // vars) by both Socket Mode and the REST client at startup, but only
-    // the REST client picks up a *later* change without a restart — the
-    // form must say both halves of that.
+    expect(await screen.findByText('Slack', { selector: 'h2' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Bot Token')).toHaveAttribute('type', 'password')
+    expect(screen.getByLabelText('App Token')).toHaveAttribute('type', 'password')
+    expect(screen.getByLabelText(/Default Channel/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Channel Naming Convention/)).toBeInTheDocument()
     expect(screen.getByText(/prefers this bot_token\/app_token pair/)).toBeInTheDocument()
-    expect(screen.getByText(/Socket Mode still needs a restart/)).toBeInTheDocument()
-
-    // Credentials section (2 rows: bot_token, app_token) + settings section
-    // (2 rows: default_channel, channel_naming_convention) — the first two
-    // "Tag value" inputs belong to the credentials rows.
-    const [botTokenInput, appTokenInput] = screen.getAllByLabelText('Tag value')
-    await user.type(botTokenInput, 'xoxb-slack-secret')
-    await user.type(appTokenInput, 'xapp-slack-secret')
-    await user.click(screen.getByRole('button', { name: /save integration/i }))
-
-    await waitFor(() => {
-      const call = vi
-        .mocked(fetch)
-        .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/slack' && init?.method === 'PUT')
-      expect(call).toBeDefined()
-    })
-    const call = vi
-      .mocked(fetch)
-      .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/slack' && init?.method === 'PUT')!
-    expect(JSON.parse(String(call[1]!.body))).toMatchObject({
-      integration_type: 'slack',
-      credentials: { bot_token: 'xoxb-slack-secret', app_token: 'xapp-slack-secret' },
-    })
   })
 
-  it('supports a custom "Other" integration type', async () => {
+  it('renders Monitoring with no credential fields and a 3-option Tool select', async () => {
     mockFetch()
     renderWithProviders(<AdminIntegrationsPage />)
-    await screen.findByText('PagerDuty')
+    await screen.findByText('PagerDuty', { selector: 'h2' })
 
     const user = userEvent.setup()
-    await user.selectOptions(screen.getByLabelText('Type'), 'Other…')
-    await user.type(screen.getByLabelText('Custom type name'), 'datadog')
+    await user.click(screen.getByRole('button', { name: /Monitoring/ }))
+
+    expect(await screen.findByText('Monitoring', { selector: 'h2' })).toBeInTheDocument()
+    expect(screen.getByText('No credentials required.')).toBeInTheDocument()
+
+    const toolSelect = screen.getByLabelText(/Tool/) as HTMLSelectElement
+    const options = within(toolSelect).getAllByRole('option')
+    expect(options).toHaveLength(3)
+    expect(options.map((o) => o.textContent)).toEqual(['Datadog', 'Prometheus', 'Cloudwatch'])
+    expect(screen.getByLabelText(/Base URL/)).toBeInTheDocument()
+  })
+
+  it('omits a blank credential from the save payload while still sending settings', async () => {
+    mockFetch()
+    renderWithProviders(<AdminIntegrationsPage />)
+    await screen.findByText('PagerDuty', { selector: 'h2' })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
+    await screen.findByText('Slack', { selector: 'h2' })
+
+    // Only fill in the bot token; app_token and both settings are left blank.
+    await user.type(screen.getByLabelText('Bot Token'), 'xoxb-new-secret')
     await user.click(screen.getByRole('button', { name: /save integration/i }))
 
     await waitFor(() => {
-      const call = vi
-        .mocked(fetch)
-        .mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/datadog' && init?.method === 'PUT')
+      const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/slack' && init?.method === 'PUT')
       expect(call).toBeDefined()
     })
+    const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === '/v1/config/integrations/slack' && init?.method === 'PUT')!
+    const body = JSON.parse(String(call[1]!.body))
+    expect(body.credentials).toEqual({ bot_token: 'xoxb-new-secret' })
+    expect(body.credentials.app_token).toBeUndefined()
+    // Settings are always sent (schema-driven — every field is a visible,
+    // editable row), even when left at their default blank value.
+    expect(body.settings).toEqual({ default_channel: '', channel_naming_convention: '' })
+  })
+
+  it('pre-fills a settings field from the existing config and leaves credential fields blank', async () => {
+    mockFetch({
+      configs: [
+        {
+          integration_type: 'jira',
+          credentials_configured: true,
+          settings: { cloud_id: 'existing-cloud-id', site_url: 'https://acme.atlassian.net' },
+          created_at: '2026-08-23T20:00:00Z',
+          updated_at: '2026-08-23T20:00:00Z',
+        },
+      ],
+    })
+    renderWithProviders(<AdminIntegrationsPage />)
+    await screen.findByText('PagerDuty', { selector: 'h2' })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /Jira/ }))
+    await screen.findByText('Jira', { selector: 'h2' })
+
+    expect(screen.getByLabelText('API Token')).toHaveValue('')
+    expect(screen.getByLabelText(/Cloud ID/)).toHaveValue('existing-cloud-id')
+    expect(screen.getByLabelText(/Site URL/)).toHaveValue('https://acme.atlassian.net')
+    expect(screen.getByLabelText('API Token')).toHaveAttribute('placeholder', 'Leave blank to keep current value')
+  })
+
+  it('surfaces a server validation error through the existing error-alert path', async () => {
+    mockFetch({
+      upsertHandler: () => jsonResponse({ message: 'monitoring: tool must be one of [datadog prometheus cloudwatch]' }, 400),
+    })
+    renderWithProviders(<AdminIntegrationsPage />)
+    await screen.findByText('PagerDuty', { selector: 'h2' })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /Monitoring/ }))
+    await screen.findByText('Monitoring', { selector: 'h2' })
+    await user.click(screen.getByRole('button', { name: /save integration/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/tool must be one of/)
   })
 })

@@ -166,6 +166,29 @@
         ]
       }
     },
+    "/v1/config/integration-catalog": {
+      "get": {
+        "summary": "GetIntegrationCatalog returns the fixed, ordered field schema for every\nintegration_type this server recognizes (docs/roadmap.md Phase 9) — a\npure translation of internal/integrations/catalog.All with no store\naccess. It's the single source of truth the admin UI renders its\nsidebar + schema-driven detail form from, and UpsertIntegrationConfig\nvalidates incoming requests against the same catalog.",
+        "operationId": "ConfigService_GetIntegrationCatalog",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetIntegrationCatalogResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
     "/v1/config/integrations": {
       "get": {
         "operationId": "ConfigService_ListIntegrationConfigs",
@@ -241,7 +264,7 @@
         ]
       },
       "put": {
-        "summary": "UpsertIntegrationConfig creates or replaces the settings and credentials\nfor one integration type. Credentials are encrypted (AES-256-GCM) before\nbeing written to storage and are never returned by any RPC in this\nservice — only whether credentials are currently configured.",
+        "summary": "UpsertIntegrationConfig creates or replaces the settings and credentials\nfor one integration type. Credentials are encrypted (AES-256-GCM) before\nbeing written to storage and are never returned by any RPC in this\nservice — only whether credentials are currently configured. The\nintegration_type and every credential/settings key (and, for a select\nfield, its value) are validated against GetIntegrationCatalog's schema\nbefore anything is written — see this RPC's handler doc comment.",
         "operationId": "ConfigService_UpsertIntegrationConfig",
         "responses": {
           "200": {
@@ -260,7 +283,7 @@
         "parameters": [
           {
             "name": "integrationType",
-            "description": "integration_type: e.g. \"slack\", \"pagerduty\", \"github\", \"datadog\".",
+            "description": "integration_type: one of GetIntegrationCatalog's fixed set — e.g.\n\"slack\", \"pagerduty\", \"github\", \"jira\", \"monitoring\". Any other value is\nrejected.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -1067,6 +1090,37 @@
         }
       }
     },
+    "v1CatalogField": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "key is the storage key exactly as read/written by UpsertIntegrationConfig\n(e.g. \"bot_token\", \"cloud_id\") — never itself shown to an admin; see label."
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "kind: \"text\" | \"secret\" | \"select\". \"secret\" fields are write-only\ncredentials, rendered password-masked; \"select\" fields must be one of\noptions."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "required is a UI-only affordance — see UpsertIntegrationConfig's doc\ncomment for why it isn't enforced server-side at upsert time."
+        },
+        "help": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "options lists the valid values for a \"select\" field; empty otherwise."
+        }
+      },
+      "description": "CatalogField describes one credential or settings key an integration_type\naccepts — see internal/integrations/catalog.Field, which this mirrors\nfield-for-field."
+    },
     "v1CreateAIPluginRequest": {
       "type": "object",
       "properties": {
@@ -1172,6 +1226,19 @@
         }
       }
     },
+    "v1GetIntegrationCatalogResponse": {
+      "type": "object",
+      "properties": {
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IntegrationCatalogEntry"
+          },
+          "description": "integrations is fixed-order — the order the admin UI's sidebar renders\nin — matching internal/integrations/catalog.All exactly."
+        }
+      }
+    },
     "v1GetSlackBotCredentialResponse": {
       "type": "object",
       "properties": {
@@ -1183,6 +1250,33 @@
           "type": "string"
         }
       }
+    },
+    "v1IntegrationCatalogEntry": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "credentialFields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1CatalogField"
+          },
+          "description": "credential_fields is empty for a settings-only integration (Monitoring)."
+        },
+        "settingsFields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1CatalogField"
+          }
+        }
+      },
+      "description": "IntegrationCatalogEntry describes one integration_type's complete field\nschema — see internal/integrations/catalog.Integration."
     },
     "v1IntegrationConfigResponse": {
       "type": "object",

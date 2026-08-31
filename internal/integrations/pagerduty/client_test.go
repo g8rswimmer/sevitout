@@ -3,9 +3,11 @@ package pagerduty_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
@@ -147,6 +149,68 @@ func TestPing_ErrorOnNonOK(t *testing.T) {
 	c := pagerduty.NewClientWithBaseURL("bad-key", srv.URL)
 	if err := c.Ping(context.Background()); err == nil {
 		t.Error("Ping should error on a non-200 response")
+	}
+}
+
+// TestPing_ErrorIncludesPagerDutyMessage covers the fix for a real health
+// check gap: an admin viewing a PagerDuty connectivity error previously saw
+// only a bare "unexpected status 401" with no indication of what PagerDuty
+// itself said was wrong (docs/roadmap.md Phase 9's admin integrations page
+// surfaces this message directly). PagerDuty's real error envelope is
+// {"error":{"message":"...","code":...}} — this asserts that message reaches
+// both Error() and the exported APIError type's fields.
+func TestPing_ErrorIncludesPagerDutyMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "Not Authorized", "code": 2006},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	c := pagerduty.NewClientWithBaseURL("bad-key", srv.URL)
+	err := c.Ping(context.Background())
+	if err == nil {
+		t.Fatal("Ping should error on a non-200 response")
+	}
+	if !strings.Contains(err.Error(), "Not Authorized") {
+		t.Errorf("Error() = %q, want it to include PagerDuty's message", err.Error())
+	}
+
+	var apiErr *pagerduty.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %T, want *pagerduty.APIError", err)
+	}
+	if apiErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusUnauthorized)
+	}
+	if apiErr.Message != "Not Authorized" {
+		t.Errorf("Message = %q, want %q", apiErr.Message, "Not Authorized")
+	}
+	if apiErr.HTTPStatus() != http.StatusUnauthorized {
+		t.Errorf("HTTPStatus() = %d, want %d", apiErr.HTTPStatus(), http.StatusUnauthorized)
+	}
+}
+
+// TestPing_NonJSONErrorBodyFallsBackToBareStatus covers the forgiving path:
+// a response body that isn't PagerDuty's expected error shape (or isn't
+// JSON at all) must not make newAPIError panic or itself return a decode
+// error — Message just stays empty, same as github/jira's equivalent.
+func TestPing_NonJSONErrorBodyFallsBackToBareStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("<html>not json</html>"))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := pagerduty.NewClientWithBaseURL("bad-key", srv.URL)
+	err := c.Ping(context.Background())
+	if err == nil {
+		t.Fatal("Ping should error on a non-200 response")
+	}
+	if !strings.Contains(err.Error(), "unexpected status 503") {
+		t.Errorf("Error() = %q, want the bare-status fallback message", err.Error())
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -13,19 +14,96 @@ import (
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/auth"
+	"github.com/g8rswimmer/sevitout/internal/integrations/catalog"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
 // ── Integration configuration ────────────────────────────────────────────────
+
+// GetIntegrationCatalog returns the fixed, ordered field schema for every
+// integration_type this server recognizes — a pure translation of
+// catalog.All with no store access. See docs/roadmap.md Phase 9.
+func (s *ConfigServer) GetIntegrationCatalog(_ context.Context, _ *pb.GetIntegrationCatalogRequest) (*pb.GetIntegrationCatalogResponse, error) {
+	resp := &pb.GetIntegrationCatalogResponse{}
+	for _, i := range catalog.All {
+		resp.Integrations = append(resp.Integrations, &pb.IntegrationCatalogEntry{
+			Type:             i.Type,
+			Label:            i.Label,
+			CredentialFields: catalogFieldsToProto(i.CredentialFields),
+			SettingsFields:   catalogFieldsToProto(i.SettingsFields),
+		})
+	}
+	return resp, nil
+}
+
+func catalogFieldsToProto(fields []catalog.Field) []*pb.CatalogField {
+	out := make([]*pb.CatalogField, 0, len(fields))
+	for _, f := range fields {
+		out = append(out, &pb.CatalogField{
+			Key:      f.Key,
+			Label:    f.Label,
+			Kind:     string(f.Kind),
+			Required: f.Required,
+			Help:     f.Help,
+			Options:  f.Options,
+		})
+	}
+	return out
+}
+
+// validateAgainstCatalog checks req's integration_type and every
+// credential/settings key (and, for a select-kind settings field, its value)
+// against the catalog before UpsertIntegrationConfig touches the store or
+// crypto — an unknown integration_type or unknown key rejects the whole
+// request, matching that method's existing all-or-nothing semantics (it
+// already rolls back on refresher rejection). A select field's Required is
+// intentionally not checked here — see UpsertIntegrationConfig's doc comment.
+func validateAgainstCatalog(req *pb.UpsertIntegrationConfigRequest) error {
+	integration, ok := catalog.Find(req.GetIntegrationType())
+	if !ok {
+		return status.Errorf(codes.InvalidArgument, "unknown integration_type %q", req.GetIntegrationType())
+	}
+
+	credentialKeys := integration.CredentialKeys()
+	for key := range req.GetCredentials() {
+		if !credentialKeys[key] {
+			return status.Errorf(codes.InvalidArgument, "%s: unknown credential key %q", integration.Type, key)
+		}
+	}
+
+	for key, value := range req.GetSettings() {
+		field, ok := integration.SettingsField(key)
+		if !ok {
+			return status.Errorf(codes.InvalidArgument, "%s: unknown settings key %q", integration.Type, key)
+		}
+		if field.Kind == catalog.KindSelect && !slices.Contains(field.Options, value) {
+			return status.Errorf(codes.InvalidArgument, "%s: %s must be one of %v, got %q", integration.Type, key, field.Options, value)
+		}
+	}
+
+	return nil
+}
 
 // UpsertIntegrationConfig creates or updates the settings and credentials for
 // one integration type. When credentials are supplied they are JSON-encoded
 // and sealed with AES-256-GCM before being handed to the store — the store
 // (and the database behind it) never sees plaintext. Omitting credentials
 // leaves any previously stored credentials untouched.
+//
+// The integration_type and every credential/settings key are validated
+// against the catalog (validateAgainstCatalog) before anything is written.
+// Required is deliberately not enforced here: a request can supply just
+// credentials or just settings and leave the other side untouched, so
+// "required" would have to reason about the merged existing+incoming state —
+// the existing fallback-to-static-client behavior in cmd/server/*_resolver.go
+// already covers "this integration won't activate without X", so Required
+// stays a UI-only affordance in this phase.
 func (s *ConfigServer) UpsertIntegrationConfig(ctx context.Context, req *pb.UpsertIntegrationConfigRequest) (*pb.IntegrationConfigResponse, error) {
 	if req.GetIntegrationType() == "" {
 		return nil, status.Error(codes.InvalidArgument, "integration_type is required")
+	}
+	if err := validateAgainstCatalog(req); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()

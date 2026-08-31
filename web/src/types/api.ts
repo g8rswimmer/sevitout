@@ -806,6 +806,34 @@ export interface ListIntegrationConfigsResponse {
   configs?: IntegrationConfigResponse[]
 }
 
+/** One credential or settings key an integration_type accepts — mirrors
+ * internal/integrations/catalog.Field field-for-field (Roadmap Phase 9). */
+export interface CatalogField {
+  key: string
+  label: string
+  kind: 'text' | 'secret' | 'select'
+  required?: boolean
+  help?: string
+  // options lists the valid values for a "select" field; absent otherwise.
+  options?: string[]
+}
+
+/** One integration_type's complete field schema — mirrors
+ * internal/integrations/catalog.Integration. credential_fields is absent for
+ * a settings-only integration (Monitoring). */
+export interface IntegrationCatalogEntry {
+  type: string
+  label: string
+  credential_fields?: CatalogField[]
+  settings_fields?: CatalogField[]
+}
+
+export interface GetIntegrationCatalogResponse {
+  // integrations is fixed-order — the order the admin UI's sidebar renders
+  // in — matching the backend catalog exactly.
+  integrations?: IntegrationCatalogEntry[]
+}
+
 export interface UpsertIntegrationConfigRequest {
   integration_type: string
   // credentials is write-only. Omit (leave undefined) to keep the existing

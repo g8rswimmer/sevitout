@@ -421,9 +421,9 @@ func TestUpsertIntegrationConfig_EncryptsCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	resp, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
-		IntegrationType: "pagerduty",
-		Credentials:     map[string]string{"api_key": "pd_super_secret"},
-		Settings:        map[string]string{"default_escalation_policy": "P123"},
+		IntegrationType: "jira",
+		Credentials:     map[string]string{"api_token": "pd_super_secret"},
+		Settings:        map[string]string{"cloud_id": "P123"},
 	})
 	if err != nil {
 		t.Fatalf("UpsertIntegrationConfig: %v", err)
@@ -431,7 +431,7 @@ func TestUpsertIntegrationConfig_EncryptsCredentials(t *testing.T) {
 	if !resp.GetCredentialsConfigured() {
 		t.Error("credentials_configured should be true")
 	}
-	if resp.GetSettings()["default_escalation_policy"] != "P123" {
+	if resp.GetSettings()["cloud_id"] != "P123" {
 		t.Errorf("settings = %v", resp.GetSettings())
 	}
 
@@ -441,7 +441,7 @@ func TestUpsertIntegrationConfig_EncryptsCredentials(t *testing.T) {
 	}
 
 	// The store must hold ciphertext, not plaintext.
-	stored, err := ts.integrations.Get(ctx, "pagerduty")
+	stored, err := ts.integrations.Get(ctx, "jira")
 	if err != nil {
 		t.Fatalf("Get from store: %v", err)
 	}
@@ -454,8 +454,8 @@ func TestUpsertIntegrationConfig_EncryptsCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecryptIntegrationCredentials: %v", err)
 	}
-	if creds["api_key"] != "pd_super_secret" {
-		t.Errorf("decrypted api_key = %q, want pd_super_secret", creds["api_key"])
+	if creds["api_token"] != "pd_super_secret" {
+		t.Errorf("decrypted api_token = %q, want pd_super_secret", creds["api_token"])
 	}
 }
 
@@ -642,7 +642,7 @@ func TestUpsertIntegrationConfig_SettingsOnlyUpdate_ExistingCredentialsUndecrypt
 	readKeyEnc := testEncryptor(t) // different key: decryption will fail
 	integrations := memory.NewIntegrationConfigStore()
 
-	raw, err := json.Marshal(map[string]string{"api_key": "pd_live_key"})
+	raw, err := json.Marshal(map[string]string{"api_token": "pd_live_key"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -651,7 +651,7 @@ func TestUpsertIntegrationConfig_SettingsOnlyUpdate_ExistingCredentialsUndecrypt
 		t.Fatalf("encrypt: %v", err)
 	}
 	if err := integrations.Upsert(context.Background(), &store.IntegrationConfig{
-		IntegrationType:      "pagerduty",
+		IntegrationType:      "jira",
 		EncryptedCredentials: sealed,
 	}); err != nil {
 		t.Fatalf("seed Upsert: %v", err)
@@ -665,8 +665,8 @@ func TestUpsertIntegrationConfig_SettingsOnlyUpdate_ExistingCredentialsUndecrypt
 	})
 
 	_, err = server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
-		IntegrationType: "pagerduty",
-		Settings:        map[string]string{"default_escalation_policy": "P999"},
+		IntegrationType: "jira",
+		Settings:        map[string]string{"cloud_id": "P999"},
 	})
 	if grpcCode(err) != codes.FailedPrecondition {
 		t.Fatalf("UpsertIntegrationConfig err = %v, want FailedPrecondition when existing credentials can't be decrypted", err)
@@ -700,10 +700,178 @@ func TestUpsertIntegrationConfig_NoEncryptorConfigured(t *testing.T) {
 	}
 }
 
+// ── Integration catalog (Roadmap Phase 9) ────────────────────────────────────
+
+func TestGetIntegrationCatalog_Shape(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	resp, err := ts.server.GetIntegrationCatalog(context.Background(), &pb.GetIntegrationCatalogRequest{})
+	if err != nil {
+		t.Fatalf("GetIntegrationCatalog: %v", err)
+	}
+
+	wantTypes := []string{"pagerduty", "github", "slack", "jira", "monitoring"}
+	if len(resp.GetIntegrations()) != len(wantTypes) {
+		t.Fatalf("got %d integrations, want %d", len(resp.GetIntegrations()), len(wantTypes))
+	}
+	for idx, entry := range resp.GetIntegrations() {
+		if entry.GetType() != wantTypes[idx] {
+			t.Errorf("integrations[%d].type = %q, want %q (fixed order)", idx, entry.GetType(), wantTypes[idx])
+		}
+		if entry.GetLabel() == "" {
+			t.Errorf("%s: label must not be empty", entry.GetType())
+		}
+	}
+
+	// Spot-check the two schema shapes the admin form has to distinguish:
+	// a multi-credential integration with settings (Slack), and a
+	// credential-less, select-field integration (Monitoring).
+	var slack, monitoring *pb.IntegrationCatalogEntry
+	for _, entry := range resp.GetIntegrations() {
+		switch entry.GetType() {
+		case "slack":
+			slack = entry
+		case "monitoring":
+			monitoring = entry
+		}
+	}
+	if slack == nil || len(slack.GetCredentialFields()) != 2 {
+		t.Fatalf("slack should have exactly 2 credential fields, got %v", slack.GetCredentialFields())
+	}
+	for _, f := range slack.GetCredentialFields() {
+		if f.GetKind() != "secret" {
+			t.Errorf("slack credential field %q has kind %q, want secret", f.GetKey(), f.GetKind())
+		}
+	}
+	if monitoring == nil || len(monitoring.GetCredentialFields()) != 0 {
+		t.Fatalf("monitoring should have no credential fields, got %v", monitoring.GetCredentialFields())
+	}
+	var tool *pb.CatalogField
+	for _, f := range monitoring.GetSettingsFields() {
+		if f.GetKey() == "tool" {
+			tool = f
+		}
+	}
+	if tool == nil {
+		t.Fatal(`monitoring.settings_fields is missing "tool"`)
+	}
+	if tool.GetKind() != "select" || len(tool.GetOptions()) != 3 {
+		t.Errorf(`monitoring "tool" field = kind %q, options %v, want kind "select" with 3 options`, tool.GetKind(), tool.GetOptions())
+	}
+	for _, opt := range tool.GetOptions() {
+		if opt == "other" {
+			t.Error(`monitoring "tool" field must not offer an "other" option`)
+		}
+	}
+}
+
+func TestUpsertIntegrationConfig_UnknownIntegrationType_Rejected(t *testing.T) {
+	ts := newTestConfigServer(testEncryptor(t))
+	_, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "not-a-real-integration",
+		Settings:        map[string]string{"anything": "value"},
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("unknown integration_type: want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestUpsertIntegrationConfig_UnknownCredentialKey_Rejected(t *testing.T) {
+	ts := newTestConfigServer(testEncryptor(t))
+	_, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"not_a_real_key": "secret"},
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("unknown credential key: want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestUpsertIntegrationConfig_UnknownSettingsKey_Rejected(t *testing.T) {
+	ts := newTestConfigServer(testEncryptor(t))
+	_, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "jira",
+		Settings:        map[string]string{"not_a_real_key": "value"},
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("unknown settings key: want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestUpsertIntegrationConfig_InvalidSelectValue_Rejected(t *testing.T) {
+	ts := newTestConfigServer(testEncryptor(t))
+	_, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "monitoring",
+		Settings:        map[string]string{"tool": "new-relic"},
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("invalid select value: want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+// TestUpsertIntegrationConfig_CatalogRejection_TouchesNeitherStoreNorCrypto
+// covers the ordering guarantee: a catalog validation failure must reject
+// before UpsertIntegrationConfig ever calls the store or the encryptor —
+// exercised here with no Crypto configured at all, so an unknown key must
+// still fail with InvalidArgument (catalog rejection), never
+// FailedPrecondition (the "no encryptor" path, which only applies once
+// validation has passed and credentials are actually present).
+func TestUpsertIntegrationConfig_CatalogRejection_TouchesNeitherStoreNorCrypto(t *testing.T) {
+	ts := newTestConfigServer(nil) // no ENCRYPTION_KEY
+	_, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "pagerduty",
+		Credentials:     map[string]string{"not_a_real_key": "secret"},
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument (caught by catalog validation before the no-encryptor check), got %v", grpcCode(err))
+	}
+	if _, err := ts.integrations.Get(context.Background(), "pagerduty"); !errors.Is(err, store.ErrNotFound) {
+		t.Error("a catalog-rejected request must not have written anything to the store")
+	}
+}
+
+func TestUpsertIntegrationConfig_ValidMonitoringConfig_RoundTripsThroughListAndGet(t *testing.T) {
+	ts := newTestConfigServer(nil) // Monitoring has no credentials, so no encryptor is needed
+	ctx := context.Background()
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "monitoring",
+		Settings:        map[string]string{"tool": "prometheus", "base_url": "https://prometheus.example.com"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig: %v", err)
+	}
+
+	got, err := ts.server.GetIntegrationConfig(ctx, &pb.GetIntegrationConfigRequest{IntegrationType: "monitoring"})
+	if err != nil {
+		t.Fatalf("GetIntegrationConfig: %v", err)
+	}
+	if got.GetSettings()["tool"] != "prometheus" || got.GetSettings()["base_url"] != "https://prometheus.example.com" {
+		t.Errorf("GetIntegrationConfig settings = %v", got.GetSettings())
+	}
+	if got.GetCredentialsConfigured() {
+		t.Error("monitoring should never report credentials_configured=true")
+	}
+
+	list, err := ts.server.ListIntegrationConfigs(ctx, &pb.ListIntegrationConfigsRequest{})
+	if err != nil {
+		t.Fatalf("ListIntegrationConfigs: %v", err)
+	}
+	found := false
+	for _, cfg := range list.GetConfigs() {
+		if cfg.GetIntegrationType() == "monitoring" {
+			found = true
+			if cfg.GetSettings()["tool"] != "prometheus" {
+				t.Errorf("ListIntegrationConfigs monitoring settings = %v", cfg.GetSettings())
+			}
+		}
+	}
+	if !found {
+		t.Error("ListIntegrationConfigs did not include the monitoring row")
+	}
+}
+
 func TestUpsertIntegrationConfig_SettingsOnlyWithoutEncryptorIsAllowed(t *testing.T) {
 	ts := newTestConfigServer(nil) // no ENCRYPTION_KEY
 	_, err := ts.server.UpsertIntegrationConfig(context.Background(), &pb.UpsertIntegrationConfigRequest{
-		IntegrationType: "datadog",
+		IntegrationType: "monitoring",
 		Settings:        map[string]string{"base_url": "https://app.datadoghq.com"},
 	})
 	if err != nil {
@@ -717,16 +885,16 @@ func TestUpsertIntegrationConfig_OmittingCredentialsPreservesExisting(t *testing
 	ctx := context.Background()
 
 	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
-		IntegrationType: "github",
-		Credentials:     map[string]string{"token": "ghp_original"},
+		IntegrationType: "jira",
+		Credentials:     map[string]string{"api_token": "ghp_original"},
 	}); err != nil {
 		t.Fatalf("first UpsertIntegrationConfig: %v", err)
 	}
 
 	// Second call updates only settings, omitting credentials entirely.
 	resp, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
-		IntegrationType: "github",
-		Settings:        map[string]string{"default_repo": "acme/infra"},
+		IntegrationType: "jira",
+		Settings:        map[string]string{"cloud_id": "acme/infra"},
 	})
 	if err != nil {
 		t.Fatalf("second UpsertIntegrationConfig: %v", err)
@@ -735,13 +903,13 @@ func TestUpsertIntegrationConfig_OmittingCredentialsPreservesExisting(t *testing
 		t.Error("credentials should still be configured after a settings-only update")
 	}
 
-	stored, _ := ts.integrations.Get(ctx, "github")
+	stored, _ := ts.integrations.Get(ctx, "jira")
 	creds, err := grpchandler.DecryptIntegrationCredentials(enc, stored)
 	if err != nil {
 		t.Fatalf("DecryptIntegrationCredentials: %v", err)
 	}
-	if creds["token"] != "ghp_original" {
-		t.Errorf("original credentials should survive a settings-only update, got %q", creds["token"])
+	if creds["api_token"] != "ghp_original" {
+		t.Errorf("original credentials should survive a settings-only update, got %q", creds["api_token"])
 	}
 }
 
@@ -751,21 +919,21 @@ func TestUpsertIntegrationConfig_OmittingSettingsPreservesExisting(t *testing.T)
 	ctx := context.Background()
 
 	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
-		IntegrationType: "pagerduty",
-		Settings:        map[string]string{"default_escalation_policy": "P123"},
+		IntegrationType: "jira",
+		Settings:        map[string]string{"cloud_id": "P123"},
 	}); err != nil {
 		t.Fatalf("first UpsertIntegrationConfig: %v", err)
 	}
 
 	// Second call rotates the credential only, omitting settings entirely.
 	resp, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
-		IntegrationType: "pagerduty",
-		Credentials:     map[string]string{"api_key": "new_key"},
+		IntegrationType: "jira",
+		Credentials:     map[string]string{"api_token": "new_key"},
 	})
 	if err != nil {
 		t.Fatalf("second UpsertIntegrationConfig: %v", err)
 	}
-	if resp.GetSettings()["default_escalation_policy"] != "P123" {
+	if resp.GetSettings()["cloud_id"] != "P123" {
 		t.Errorf("settings should survive a credentials-only update, got %v", resp.GetSettings())
 	}
 }
@@ -870,7 +1038,7 @@ func TestListIntegrationConfigs(t *testing.T) {
 	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{IntegrationType: "slack", Credentials: map[string]string{"bot_token": "xoxb-1"}}); err != nil {
 		t.Fatalf("UpsertIntegrationConfig: %v", err)
 	}
-	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{IntegrationType: "github", Settings: map[string]string{"default_repo": "acme/infra"}}); err != nil {
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{IntegrationType: "monitoring", Settings: map[string]string{"base_url": "https://app.datadoghq.com"}}); err != nil {
 		t.Fatalf("UpsertIntegrationConfig: %v", err)
 	}
 
@@ -885,8 +1053,8 @@ func TestListIntegrationConfigs(t *testing.T) {
 		if cfg.GetIntegrationType() == "slack" && !cfg.GetCredentialsConfigured() {
 			t.Error("slack should report credentials_configured=true")
 		}
-		if cfg.GetIntegrationType() == "github" && cfg.GetCredentialsConfigured() {
-			t.Error("github should report credentials_configured=false (settings-only)")
+		if cfg.GetIntegrationType() == "monitoring" && cfg.GetCredentialsConfigured() {
+			t.Error("monitoring should report credentials_configured=false (settings-only)")
 		}
 	}
 }

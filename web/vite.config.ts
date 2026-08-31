@@ -21,6 +21,14 @@ export default defineConfig({
     proxy: {
       '/v1': 'http://localhost:8080',
       '/auth': 'http://localhost:8080',
+      // GET /admin/integrations/health (internal/api/grpc/integrations_health.go)
+      // — a plain net/http handler, not under /v1/ like everything else
+      // ConfigService-shaped. Without this, the request silently fell
+      // through to index.html (Vite's SPA fallback) instead of reaching the
+      // API, so AdminIntegrationsPage's health badges never showed a real
+      // status in dev regardless of what was actually configured — same gap
+      // web/nginx.conf's matching block fixes for production.
+      '/admin': 'http://localhost:8080',
       // Trailing slash matters: the public share view is GET /s/{token}, and
       // a bare '/s' prefix would also swallow the SPA's own /sevs/:id route
       // (Vite's proxy match is a plain string-prefix test, not path-segment
