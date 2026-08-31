@@ -57,7 +57,8 @@ var emailInAngleBrackets = regexp.MustCompile(`<([^>@\s]+@[^>]+)>`)
 
 // createIncidentChannel creates a dedicated Slack channel for every newly
 // opened SEV (docs/requirements.md §13.1), invites every assigned role's
-// holder (docs/roadmap.md Phase 10d — widened from on-call-only) and
+// holder (docs/roadmap.md Phase 10d — widened from on-call-only), the SEV's
+// creator (Phase 11d — resolved the same way as a role holder), and
 // whoever opened it via `/sev open` (if anyone — see takePendingOpener),
 // posts a link back to the SEV, records the mapping so future lifecycle
 // notifications for this SEV land in the new channel instead of the default
@@ -65,10 +66,18 @@ var emailInAngleBrackets = regexp.MustCompile(`<([^>@\s]+@[^>]+)>`)
 // cmd/server can act on it directly (e.g. RoleService.InviteRoleToSlack)
 // without depending on this bot's in-memory-only copy.
 //
+// createdBy is the SEV's CreatedBy (a Sevitout user ID, from the
+// sev.created WebSocket payload) — see resolveCreatorSlackUserID's doc
+// comment for why it isn't always the actual human who opened the SEV.
+//
+// All three invitee sources — role holders, the creator, and the pending
+// opener — are combined and deduplicated by resolved Slack user ID into one
+// InviteUsers call, rather than one call per source.
+//
 // Best-effort throughout: a failure at any step is logged, not returned,
 // since incident-channel creation must never be the reason a SEV-open
 // response fails or blocks.
-func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, severityLevel int32) {
+func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, severityLevel int32, createdBy string) {
 	name := incidentChannelName(b.namingConvention(), severityLevel, sevID, title)
 
 	channelID, err := b.slack.CreateChannel(ctx, name)
@@ -83,12 +92,21 @@ func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, se
 		b.log.ErrorContext(ctx, "write back slack_channel_id failed", "sev_id", sevID, "channel_id", channelID, "err", err)
 	}
 
-	b.inviteRoleHolders(ctx, sevID, channelID)
+	userIDs := b.resolveRoleHolderSlackIDs(ctx, sevID)
+
+	creatorID, err := b.resolveCreatorSlackUserID(ctx, createdBy)
+	if err != nil {
+		b.log.ErrorContext(ctx, "resolve sev creator Slack identity failed", "sev_id", sevID, "created_by", createdBy, "err", err)
+	} else if creatorID != "" {
+		userIDs = append(userIDs, creatorID)
+	}
 
 	if opener := b.takePendingOpener(sevID); opener != "" {
-		if err := b.slack.InviteUsers(ctx, channelID, []string{opener}); err != nil {
-			b.log.ErrorContext(ctx, "invite sev opener to new incident channel failed", "sev_id", sevID, "channel_id", channelID, "err", err)
-		}
+		userIDs = append(userIDs, opener)
+	}
+
+	if err := b.slack.InviteUsers(ctx, channelID, dedupeStrings(userIDs)); err != nil {
+		b.log.ErrorContext(ctx, "invite participants to new incident channel failed", "sev_id", sevID, "channel_id", channelID, "err", err)
 	}
 
 	if err := b.slack.PostMessage(ctx, channelID, fmt.Sprintf(":rotating_light: %s\n%s", title, sevID)); err != nil {
@@ -96,9 +114,9 @@ func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, se
 	}
 }
 
-// inviteRoleHolders looks up every role assigned to sevID (any role type —
-// generalized from on-call-only, docs/roadmap.md Phase 10d) and invites
-// each holder's Slack account into channelID, resolved in order:
+// resolveRoleHolderSlackIDs looks up every role assigned to sevID (any role
+// type — generalized from on-call-only, docs/roadmap.md Phase 10d) and
+// resolves each holder to a Slack user ID, in order:
 //
 //  1. SEVRole.UserID set → batch-resolved via one ListUserDirectory(ids)
 //     call for every role → a stored SlackUserID is used directly.
@@ -110,12 +128,12 @@ func (b *bot) createIncidentChannel(ctx context.Context, sevID, title string, se
 //
 // Not every role carries a resolvable identity and not every Sevitout user
 // has a Slack account — both are silently skipped rather than treated as
-// errors, and the whole batch is invited in one InviteUsers call.
-func (b *bot) inviteRoleHolders(ctx context.Context, sevID, channelID string) {
+// errors. Resolution only; callers decide when/how to invite the result.
+func (b *bot) resolveRoleHolderSlackIDs(ctx context.Context, sevID string) []string {
 	resp, err := b.api.roles.ListRoles(ctx, &pb.ListRolesRequest{SevId: sevID})
 	if err != nil {
 		b.log.ErrorContext(ctx, "list roles for incident channel invite failed", "sev_id", sevID, "err", err)
-		return
+		return nil
 	}
 	roles := resp.GetRoles()
 
@@ -150,14 +168,65 @@ func (b *bot) inviteRoleHolders(ctx context.Context, sevID, channelID string) {
 			userIDs = append(userIDs, userID)
 		}
 	}
+	return userIDs
+}
 
-	if err := b.slack.InviteUsers(ctx, channelID, userIDs); err != nil {
-		b.log.ErrorContext(ctx, "invite role holders to incident channel failed", "sev_id", sevID, "channel_id", channelID, "err", err)
+// resolveCreatorSlackUserID resolves createdBy (a SEV's CreatedBy — a
+// Sevitout user ID) to a Slack user ID: a single-ID ListUserDirectory
+// lookup, then a stored SlackUserID if present, else
+// LookupUserIDByEmail(the directory-returned email) — the same order
+// resolveRoleSlackUserID uses for a role's UserID. Returns ("", nil) — not
+// an error — when createdBy is empty or nothing resolves.
+//
+// createdBy is not always the actual human who opened the SEV: a SEV
+// created via `/sev open` authenticates as this bot's own service account
+// (the slash-command handler never sets created_by, so the server fills it
+// in from the caller's identity — see CreateSEV), so createdBy there
+// resolves to the bot's own directory entry, which typically has no Slack
+// identity — a harmless no-op, not a duplicate of the human, who is invited
+// separately via takePendingOpener/the pending-opener path instead.
+func (b *bot) resolveCreatorSlackUserID(ctx context.Context, createdBy string) (string, error) {
+	if createdBy == "" || b.api.directory == nil {
+		return "", nil
 	}
+	resp, err := b.api.directory.ListUserDirectory(ctx, &pb.ListUserDirectoryRequest{Ids: []string{createdBy}})
+	if err != nil {
+		return "", err
+	}
+	users := resp.GetUsers()
+	if len(users) == 0 {
+		return "", nil
+	}
+	du := users[0]
+	if du.GetSlackUserId() != "" {
+		return du.GetSlackUserId(), nil
+	}
+	if du.GetEmail() != "" {
+		return b.slack.LookupUserIDByEmail(ctx, du.GetEmail())
+	}
+	return "", nil
+}
+
+// dedupeStrings returns ids with empty strings and repeats removed,
+// preserving first-occurrence order — used to collapse createIncidentChannel's
+// combined role-holder/creator/opener invite list into one InviteUsers call
+// with no duplicate Slack API invites (e.g. a role holder who is also the
+// SEV's creator).
+func dedupeStrings(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
 
 // resolveRoleSlackUserID resolves one role assignment to a Slack user ID
-// per inviteRoleHolders' doc comment's four-step order. directory is the
+// per resolveRoleHolderSlackIDs' doc comment's four-step order. directory is the
 // batch ListUserDirectory result, keyed by user ID. Returns ("", nil) — not
 // an error — when nothing resolves.
 func (b *bot) resolveRoleSlackUserID(ctx context.Context, r *pb.SEVRoleResponse, directory map[string]*pb.DirectoryUser) (string, error) {

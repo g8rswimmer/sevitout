@@ -106,6 +106,41 @@ action, and default new tracker issues to the creating user.
   configured for themselves (`Slack`/`GitHub`/`Jira`), no edit control (each
   user manages their own via `/profile`).
 
+**10h. Slack: invite the SEV creator when the channel is created (pulled
+forward from Roadmap Phase 11d)**
+
+Reported after the rest of this phase shipped: a user with a Slack identity
+set on their profile, who opens a SEV from the web UI but isn't assigned any
+role on it, was never invited to its incident channel — `inviteRoleHolders`
+only ever looked at role assignments, and nothing invited the creator
+specifically. This is exactly the gap `docs/roadmap.md`'s Phase 11d already
+named ("invite the SEV creator when the channel is created"); it's pulled
+forward here as a scoped fix rather than left open, since it depends on
+nothing from the rest of Phase 11 (11a-c's UI-gating, 11e's self-service
+join) and directly extends 10d's just-shipped resolution logic.
+
+- `cmd/slackbot/notify.go`'s `sevPayload` gains `CreatedBy string
+  \`json:"created_by"\`` — previously silently dropped by `json.Unmarshal`
+  since the field wasn't declared, even though a real `sev.created` payload
+  always carries it (protojson from `SEVResponse.created_by`).
+- `cmd/slackbot/channel.go`: `inviteRoleHolders` is split into
+  `resolveRoleHolderSlackIDs` (resolution only, no invite call) and a new
+  `resolveCreatorSlackUserID` (the same stored-Slack-ID → email-lookup order,
+  for one `ListUserDirectory([createdBy])` call). `createIncidentChannel`
+  combines role-holder IDs + the creator + the pending `/sev open` opener
+  into **one** deduplicated `InviteUsers` call, instead of one call per
+  source — closing the loop so a role holder who's also the creator (or the
+  slash-command opener) is invited exactly once.
+- **Known limitation, not fixed here** (already named by Phase 11d): for a
+  SEV opened via `/sev open`, `created_by` is not the human's Sevitout
+  identity — the slash-command handler never sets it on `CreateSEVRequest`,
+  so the server fills it in from the caller's own auth context, which for
+  the bot's gRPC calls is the bot's *service account*. The creator-invite
+  resolves to that service account (typically no Slack identity → a
+  harmless no-op) rather than duplicating the human, who's already invited
+  via the separate pending-opener path. Threading the real identity through
+  `/sev open` remains a named follow-up.
+
 ## Setting up your own integration profile
 
 Each identity is something *you* find and enter yourself — there is no admin
@@ -160,6 +195,16 @@ curl -s -X PATCH http://localhost:8080/v1/auth/me \
 # auto-invite use, open to any authenticated Viewer.
 curl -s "http://localhost:8080/v1/auth/directory?query=ada" -H "Authorization: Bearer $TOKEN"
 # {"users":[{"id":"...", "name":"Ada Lovelace", "email":"ada@example.com", "slack_user_id":"U0..."}]}
+
+# Create a SEV as this user (no role assignment needed) — created_by is the
+# caller's own ID, exactly what cmd/slackbot's sev.created handler now reads
+# to invite the creator (10h), even though they hold no role on it.
+curl -s -X POST http://localhost:8080/v1/sevs -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"Creator invite test","severity_level":2}'
+# {"id":"SEV-2026-0001", "title":"Creator invite test", ..., "created_by":"<your user id>"}
+# With cmd/slackbot running and Slack configured, its incident channel gets
+# one InviteUsers call inviting your resolved Slack ID alongside any
+# assigned roles — not a separate call per source.
 ```
 
 **In the web app:**
@@ -178,6 +223,10 @@ curl -s "http://localhost:8080/v1/auth/directory?query=ada" -H "Authorization: B
 4. **Tasks** panel → **Create GitHub issue** (or **Create Jira issue**): the
    new "Assignee" field pre-fills from your own profile the first time you
    open that form; edit or clear it before submitting.
+5. With your Slack User ID set, create a new SEV from the web UI without
+   assigning yourself any role — once `cmd/slackbot` creates its incident
+   channel, you're invited to it as the creator (10h), not just role
+   holders.
 
 ## Known limitations
 
@@ -199,10 +248,16 @@ curl -s "http://localhost:8080/v1/auth/directory?query=ada" -H "Authorization: B
   own account; an incorrect value just resolves to the wrong person (Slack)
   or a rejected assignment (GitHub/Jira reject an unrecognized assignee at
   issue-creation time), not silently to nothing.
+- **SEVs opened via `/sev open` don't attribute `created_by` to the human
+  opener** (10h) — it resolves to the slackbot's own service account
+  instead, a harmless no-op for the creator-invite specifically (the human
+  is still invited separately via the existing pending-opener path for that
+  same command). Threading the real identity through `/sev open` is a named
+  follow-up.
 
 See [`docs/roadmap.md`](../docs/roadmap.md) (Phase 10) for the fuller
 sequencing rationale, and [`docs/architecture-evolution.md`](../docs/architecture-evolution.md)
 for the resulting architecture shape. Phase 11 (integration-aware SEV UI —
-hiding unconfigured tracker/Slack actions, self-service "Join Slack channel",
-auto-inviting the SEV creator) builds directly on this phase's
+hiding unconfigured tracker/Slack actions, self-service "Join Slack channel")
+builds directly on this phase's
 `User.SlackUserID`/etc., `ListUserDirectory`, and `SEV.SlackChannelID`.

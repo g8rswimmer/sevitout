@@ -735,7 +735,9 @@ already delivers the higher-value "auto-invite every role" outcome.
 
 ## Phase 11 — Integration-aware SEV UI
 
-**Status**: 🔲 not started
+**Status**: 🔲 not started (11d shipped early, folded into Phase 10 —
+see [`demo/integration-user-profiles.md`](../demo/integration-user-profiles.md)'s
+"10h" section; 11a-c, 11e remain unstarted)
 
 The SEV detail page shows every integration-tied action unconditionally today —
 `TasksPanel.tsx` always offers "Create GitHub issue" and "Create Jira issue" even
@@ -809,6 +811,11 @@ auto-inviting the SEV creator when the incident channel is created.
   they're visually adjacent), gated per 11b.
 
 **11d. Slack: invite the SEV creator when the channel is created**
+
+**Status**: ✅ shipped early (see `demo/integration-user-profiles.md`'s "10h"
+section) — reported as a bug immediately after Phase 10 shipped ("a user
+with a Slack identity isn't invited to a SEV's channel unless also assigned
+a role"), and pulled forward since it depended on nothing else in Phase 11.
 
 - `cmd/slackbot/notify.go`: add `CreatedBy string \`json:"created_by"\`` to
   `sevPayload` (currently silently dropped by `json.Unmarshal` since the field

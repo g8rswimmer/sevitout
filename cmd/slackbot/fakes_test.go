@@ -27,6 +27,7 @@ type fakeSlack struct {
 
 	invitedChannel string
 	invitedUsers   []string
+	inviteCalls    int // counts InviteUsers invocations, for asserting a single combined call
 	inviteErr      error
 
 	posted  []postedMessage
@@ -58,6 +59,7 @@ func (f *fakeSlack) InviteUsers(_ context.Context, channelID string, userIDs []s
 	defer f.mu.Unlock()
 	f.invitedChannel = channelID
 	f.invitedUsers = append(f.invitedUsers, userIDs...)
+	f.inviteCalls++
 	return f.inviteErr
 }
 
