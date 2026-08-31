@@ -561,7 +561,7 @@ unchanged.
 
 ## Phase 10 — Per-user integration profiles (Slack / GitHub / Jira identity)
 
-**Status**: 🔲 not started
+**Status**: ✅ shipped, see [`demo/integration-user-profiles.md`](../demo/integration-user-profiles.md)
 
 Today nothing links a Sevitout user to their Slack account, GitHub username, or Jira
 account beyond an email-address coincidence: `inviteOnCall` (`cmd/slackbot/channel.go`)
