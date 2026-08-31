@@ -8,6 +8,7 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { SevListPage } from '@/pages/SevListPage'
 import { SevCreatePage } from '@/pages/SevCreatePage'
 import { SevDetailPage } from '@/pages/SevDetailPage'
+import { ProfilePage } from '@/pages/ProfilePage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import { PublicSharePage } from '@/pages/PublicSharePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -45,6 +46,7 @@ export function App() {
       >
         <Route path="/" element={<DashboardPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/sevs" element={<SevListPage />} />
         <Route
           path="/sevs/new"

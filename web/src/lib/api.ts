@@ -37,6 +37,7 @@ import type {
   ListSEVsResponse,
   ListServicesResponse,
   ListTasksResponse,
+  ListUserDirectoryResponse,
   ListUsersResponse,
   OnCallRotationResponse,
   PostmortemResponse,
@@ -58,6 +59,7 @@ import type {
   UnlockSEVRequest,
   UnlockSEVResponse,
   UpdateAIPluginRequest,
+  UpdateMyIntegrationIdentitiesRequest,
   UpdateOnCallRotationRequest,
   UpdatePostmortemRequest,
   UpdateRetentionConfigRequest,
@@ -245,6 +247,13 @@ export const api = {
         body: JSON.stringify({ email, name, password }),
       }),
     whoAmI: () => request<WhoAmIResponse>('/v1/auth/me'),
+    updateMyIntegrationIdentities: (req: UpdateMyIntegrationIdentitiesRequest) =>
+      request<WhoAmIResponse>('/v1/auth/me', { method: 'PATCH', body: JSON.stringify(req) }),
+    // A minimal org-wide directory (Roadmap Phase 10a/10c) — used by the
+    // role-assignment user picker (query search) and by cmd/slackbot's
+    // Slack auto-invite (batch id lookup, not called from the browser).
+    directory: (params: { query?: string; ids?: string[] } = {}) =>
+      request<ListUserDirectoryResponse>(`/v1/auth/directory${buildQuery(params)}`),
   },
   sevs: {
     list: (params: ListSEVsParams = {}) =>
@@ -286,6 +295,10 @@ export const api = {
       request<SEVRoleResponse>(`/v1/sevs/${sevId}/roles`, { method: 'POST', body: JSON.stringify(req) }),
     remove: (sevId: string, id: string) =>
       request<void>(`/v1/sevs/${sevId}/roles/${id}`, { method: 'DELETE' }),
+    // Manual "add to chat" (Roadmap Phase 10e) — invites this role's holder
+    // into the SEV's already-created incident Slack channel.
+    inviteToSlack: (sevId: string, id: string) =>
+      request<void>(`/v1/sevs/${sevId}/roles/${id}/invite-to-slack`, { method: 'POST', body: '{}' }),
   },
   // Explicit per-user visibility grants for Sensitive SEVs (§14). Grant/revoke
   // require Incident Commander or Admin server-side; list is open to anyone

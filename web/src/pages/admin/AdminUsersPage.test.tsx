@@ -32,6 +32,24 @@ describe('AdminUsersPage', () => {
     expect(screen.getByText('Active')).toBeInTheDocument()
   })
 
+  it('shows a read-only badge per configured integration identity, and a dash when none are set', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        users: [
+          { ...ADA, slack_user_id: 'U123', github_username: 'ada-gh' },
+          { ...ADA, id: 'u2', name: 'Bob', email: 'bob@example.com' },
+        ],
+      }),
+    )
+    renderWithProviders(<AdminUsersPage />)
+
+    await screen.findByText('Ada Lovelace')
+    expect(screen.getByText('Slack')).toBeInTheDocument()
+    expect(screen.getByText('GitHub')).toBeInTheDocument()
+    expect(screen.queryByText('Jira')).not.toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+
   it('searches by query on submit', async () => {
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, ExternalLink, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
+import { useAuth } from '@/auth/useAuth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -38,6 +39,7 @@ export function TasksPanel({
 }) {
   const queryClient = useQueryClient()
   const tasks = useQuery({ queryKey: ['sevs', sevId, 'tasks'], queryFn: () => api.tasks.list(sevId) })
+  const { user } = useAuth()
 
   const [mode, setMode] = useState<Mode>('link')
   const [url, setUrl] = useState('')
@@ -49,6 +51,11 @@ export function TasksPanel({
   const [repo, setRepo] = useState('')
   const [projectKey, setProjectKey] = useState('')
   const [issueType, setIssueType] = useState('')
+  // Assignee inputs, pre-filled from the caller's own stored integration
+  // identity (Roadmap Phase 10f) — editable/clearable before submit, and
+  // omitted from the request payload when empty.
+  const [githubAssignee, setGithubAssignee] = useState('')
+  const [jiraAssignee, setJiraAssignee] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sevs', sevId, 'tasks'] })
@@ -83,12 +90,14 @@ export function TasksPanel({
         body: description || undefined,
         relationship_type: relationshipType,
         priority,
+        assignee: githubAssignee.trim() || undefined,
       }),
     onSuccess: () => {
       setOwner('')
       setRepo('')
       setTitle('')
       setDescription('')
+      setGithubAssignee('')
       setError(null)
       void invalidate()
     },
@@ -104,12 +113,14 @@ export function TasksPanel({
         description: description || undefined,
         relationship_type: relationshipType,
         priority,
+        assignee_account_id: jiraAssignee.trim() || undefined,
       }),
     onSuccess: () => {
       setProjectKey('')
       setIssueType('')
       setTitle('')
       setDescription('')
+      setJiraAssignee('')
       setError(null)
       void invalidate()
     },
@@ -156,6 +167,7 @@ export function TasksPanel({
                     </Badge>
                   )}
                   {t.due_date && <span>Due {formatDateTime(t.due_date)}</span>}
+                  {t.assignee && <span>Assigned to {t.assignee}</span>}
                 </div>
               </div>
               {canManage && (
@@ -193,11 +205,20 @@ export function TasksPanel({
                     setRepo(parsed.repo)
                   }
                 }
+                if (!githubAssignee && user?.github_username) setGithubAssignee(user.github_username)
               }}
             >
               Create GitHub issue
             </Button>
-            <Button type="button" size="sm" variant={mode === 'jira' ? 'default' : 'outline'} onClick={() => setMode('jira')}>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === 'jira' ? 'default' : 'outline'}
+              onClick={() => {
+                setMode('jira')
+                if (!jiraAssignee && user?.jira_account_id) setJiraAssignee(user.jira_account_id)
+              }}
+            >
               Create Jira issue
             </Button>
           </div>
@@ -215,28 +236,44 @@ export function TasksPanel({
               <Input aria-label="Task URL" placeholder="https://github.com/org/repo/issues/42" value={url} onChange={(e) => setUrl(e.target.value)} />
             )}
             {mode === 'github' && (
-              <div className="flex gap-2">
-                <Input aria-label="Owner" placeholder="owner" value={owner} onChange={(e) => setOwner(e.target.value)} className="w-1/2" />
-                <Input aria-label="Repo" placeholder="repo" value={repo} onChange={(e) => setRepo(e.target.value)} className="w-1/2" />
-              </div>
+              <>
+                <div className="flex gap-2">
+                  <Input aria-label="Owner" placeholder="owner" value={owner} onChange={(e) => setOwner(e.target.value)} className="w-1/2" />
+                  <Input aria-label="Repo" placeholder="repo" value={repo} onChange={(e) => setRepo(e.target.value)} className="w-1/2" />
+                </div>
+                <Input
+                  aria-label="Assignee"
+                  placeholder="Assignee (GitHub username, optional)"
+                  value={githubAssignee}
+                  onChange={(e) => setGithubAssignee(e.target.value)}
+                />
+              </>
             )}
             {mode === 'jira' && (
-              <div className="flex gap-2">
+              <>
+                <div className="flex gap-2">
+                  <Input
+                    aria-label="Project key"
+                    placeholder="e.g. OPS"
+                    value={projectKey}
+                    onChange={(e) => setProjectKey(e.target.value)}
+                    className="w-1/2"
+                  />
+                  <Input
+                    aria-label="Issue type"
+                    placeholder="e.g. Task, Bug"
+                    value={issueType}
+                    onChange={(e) => setIssueType(e.target.value)}
+                    className="w-1/2"
+                  />
+                </div>
                 <Input
-                  aria-label="Project key"
-                  placeholder="e.g. OPS"
-                  value={projectKey}
-                  onChange={(e) => setProjectKey(e.target.value)}
-                  className="w-1/2"
+                  aria-label="Assignee"
+                  placeholder="Assignee (Jira account ID, optional)"
+                  value={jiraAssignee}
+                  onChange={(e) => setJiraAssignee(e.target.value)}
                 />
-                <Input
-                  aria-label="Issue type"
-                  placeholder="e.g. Task, Bug"
-                  value={issueType}
-                  onChange={(e) => setIssueType(e.target.value)}
-                  className="w-1/2"
-                />
-              </div>
+              </>
             )}
             <Input
               aria-label={mode === 'jira' ? 'Summary' : 'Title'}

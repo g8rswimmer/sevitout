@@ -33,7 +33,10 @@ describe('TasksPanel', () => {
     // Response body before this component's own calls do.
     vi.stubGlobal('fetch', vi.fn())
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+  })
 
   it('labels each linked task with its tracker, falling back to the raw value for an unknown one', async () => {
     const list: ListTasksResponse = {
@@ -153,5 +156,45 @@ describe('TasksPanel', () => {
     await user.click(screen.getByRole('button', { name: /create issue/i }))
 
     expect(await screen.findByText(/jira integration is not configured/i)).toBeInTheDocument()
+  })
+
+  it('pre-fills the GitHub assignee from the caller stored identity, clearable and omitted when empty', async () => {
+    localStorage.setItem('sevitout.token', 'test-token')
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url === '/v1/auth/me') {
+        return Promise.resolve(
+          jsonResponse({ id: 'u1', email: 'alice@example.com', name: 'Alice', org_role: 'responder', github_username: 'alice-gh' }),
+        )
+      }
+      if (url === `/v1/sevs/${SEV_ID}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
+      if (url === `/v1/sevs/${SEV_ID}/github-issues` && method === 'POST') {
+        return Promise.resolve(jsonResponse(task({ id: '9', external_system: 'github', title: 'Checkout errors' })))
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+    renderWithProviders(<TasksPanel sevId={SEV_ID} canManage />)
+
+    await screen.findByText('No tasks linked yet.')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /create github issue/i }))
+
+    await waitFor(() => expect(screen.getByLabelText('Assignee')).toHaveValue('alice-gh'))
+
+    // Clearable: an empty assignee is omitted from the payload, not sent as "".
+    await user.clear(screen.getByLabelText('Assignee'))
+    await user.type(screen.getByLabelText('Owner'), 'acme')
+    await user.type(screen.getByLabelText('Repo'), 'api')
+    await user.type(screen.getByLabelText('Title'), 'Checkout errors')
+    await user.click(screen.getByRole('button', { name: /create issue/i }))
+
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/github-issues`)
+      expect(call).toBeDefined()
+    })
+    const [, init] = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/github-issues`)!
+    const body = JSON.parse(String(init!.body))
+    expect(body.assignee).toBeUndefined()
   })
 })
