@@ -1043,6 +1043,175 @@ tracking becomes a priority.
 
 ---
 
+## Phase 13 — Per-service SLA compliance reporting
+
+**Status**: 📋 planned, not yet implemented
+
+Phase 12 added per-service SLA targets and a live, per-SEV breach indicator
+(`internal/sev/sla.go`'s `MostStrictSLA`/`EvaluateSLA`, `SEVResponse.sla_status`)
+but explicitly deferred the aggregate view: *"SLA compliance
+reporting/analytics (e.g. '% of SEVs within SLA this quarter') — out of
+scope; this phase is per-SEV live status only, not an aggregate rollup"*
+(docs/roadmap.md Phase 12, "Also considered and explicitly deferred"). This
+phase closes that gap: for each service and severity level, over a
+selectable trailing window (30/60/90/180 days), show how many SEVs
+occurred, how many were within SLA, and the average MTTD/MTTM/MTTR — landing
+in `ReportService` (`internal/api/grpc/report.go`,
+`proto/sevitout/v1/report.proto`) alongside the existing dashboard/trends/
+export RPCs (docs/requirements.md §17), extending its existing
+`frequencyByServiceAndLevel`-style per-(service, severity) grouping rather
+than introducing a new aggregation pattern. The frontend table is built
+first against sample data (13a) and reviewed before the backend contract is
+written, so column/shape changes stay cheap while nothing downstream
+depends on them yet.
+
+**13a. UX demo: static mockup, reviewed before backend work starts**
+
+- Build `web/src/components/reports/ServiceSLAComplianceTable.tsx` (the
+  30/60/90/180-day button-group selector plus the table itself — see 13e for
+  its final column set) against a hardcoded fixture array shaped like the
+  planned `ServiceLevelMetrics[]`, covering a handful of services across
+  multiple severities with varied compliance percentages, at least one row
+  with no SLA configured (`not_applicable`), and the table's empty state —
+  no backend call, no proto/RPC yet, just a local `useState` fixture in
+  place of the eventual `useQuery`.
+- Wire it into `web/src/pages/ReportsPage.tsx` under the same `<Section
+  title="SLA Compliance by Service">` wrapper the final version will use, so
+  it's reviewable live in the running app (`npm run dev`) rather than as a
+  disconnected mock.
+- Walk through it for feedback — column set, severity/compliance formatting,
+  empty state, window-selector interaction — and iterate directly on the
+  fixture-driven component. Once the layout is approved, its exact shape
+  becomes the literal template for 13b's proto message and 13d's
+  `ServiceLevelMetrics` type, rather than the other way around.
+- No dependency on Phase 12 or any other 13-lettered step — it's pure
+  frontend against fixture data, so it can start immediately regardless of
+  where Phase 12 or the rest of this phase stands.
+
+**13b. Backend: proto + aggregation domain logic**
+
+- `proto/sevitout/v1/report.proto`: new `GetServiceMetricsRequest{ int32
+  window_days = 1; repeated string service_ids = 2; }` (`window_days` one of
+  30/60/90/180, default 30 — validated in the handler, not the proto);
+  `ServiceLevelMetrics{ service_id, severity_level, sev_count,
+  avg_mttd_seconds, avg_mttm_seconds, avg_mttr_seconds, sla_ok_count,
+  sla_at_risk_count, sla_breached_count, sla_not_applicable_count,
+  compliance_pct }`; `ServiceMetricsResponse{ repeated ServiceLevelMetrics
+  service_level_metrics = 1; int32 window_days = 2; }` (echoing back the
+  resolved window, same defensive pattern `MTTRTrend.window_days` uses so
+  the frontend never has to track what it asked for separately from what it
+  got). New RPC `GetServiceMetrics` on `ReportService`, `GET
+  /v1/reports/service-metrics`.
+- `internal/api/grpc/report.go`: `ReportServer` gains a `serviceSLAs
+  store.ServiceSLAStore` field (`NewReportServer` gets a fourth param),
+  mirroring `SEVServer`'s existing `serviceSLAs` dependency
+  (`internal/api/grpc/sev.go`).
+- New `serviceLevelMetrics(records []*store.SEV, slaLookup func(service
+  string, level int16) *store.ServiceSLA, now time.Time)
+  []*pb.ServiceLevelMetrics` next to `frequencyByServiceAndLevel`: groups by
+  `serviceLevelKey{service, level}` exactly like that function, but per
+  group accumulates SEV count, per-metric sums/sample-counts for
+  MTTD/MTTM/MTTR averages (nil-safe — only completed values contribute, same
+  discipline as `mttrTrends`), and calls `sev.EvaluateSLA(r,
+  sev.MostStrictSLA([]*store.ServiceSLA{slaLookup(service, level)}), now)`
+  per SEV (a nil row from `slaLookup` is handled by `MostStrictSLA`'s
+  existing empty/nil-tolerant reduction — no new nil-handling needed) to
+  bucket into `ok`/`at_risk`/`breached`/`not_applicable` via `.Overall`.
+  `compliance_pct` is `ok / (ok + at_risk + breached)`, `0` when that
+  denominator is `0`.
+- Handler builds `slaLookup` efficiently: collect the distinct severity
+  levels present in the filtered SEV set (≤4), call
+  `serviceSLAs.ListForServices(ctx, serviceIDsAtThatLevel, level)` once per
+  level, and index the results into a `map[serviceLevelKey]*store.ServiceSLA`
+  — at most 4 store round-trips regardless of how many SEVs are in the
+  window, an improvement on `sevToProtoWithSLA`'s already-accepted per-SEV
+  tradeoff (12c) rather than a repeat of it.
+- Window filtering reuses `store.SEVFilter{StartedAfter: now.AddDate(0, 0,
+  -windowDays), ServiceIDs: req.GetServiceIds(), ExcludeSensitive: true,
+  Limit: reportFanoutLimit}` — same shape `ExportSEVs` already builds, same
+  `reportFanoutLimit` guard as `fetchAllSEVs`.
+
+**13c. Backend: RBAC + wiring**
+
+- `internal/auth/rbac.go`: `GetServiceMetrics` → `store.OrgRoleViewer`, next
+  to `GetDashboardMetrics`/`GetSEVTrends`/`ExportSEVs`'s existing "all
+  read-only, same Viewer floor" comment block.
+- `cmd/server/main.go`: pass the already-constructed `store.ServiceSLAStore`
+  (already wired for `SEVServer` per Phase 12) into the `NewReportServer(...)`
+  call site.
+
+**13d. Frontend: types + API client**
+
+- `web/src/types/api.ts`: `ServiceLevelMetrics`, `ServiceMetricsResponse`,
+  matching the proto shape (field names as returned by grpc-gateway's default
+  JSON, snake_case, same convention every other type in this file already
+  follows).
+- `web/src/lib/api.ts`: `api.reports.serviceMetrics: (windowDays?: 30 | 60 |
+  90 | 180, serviceIds?: string[]) => request<ServiceMetricsResponse>(...)`,
+  next to `dashboardMetrics`/`trends`.
+
+**13e. Frontend: wire the reviewed mockup to the real API**
+
+- `ServiceSLAComplianceTable.tsx` (built in 13a) swaps its fixture
+  `useState` array for `useQuery({ queryKey: ['reports', 'service-metrics',
+  windowDays], queryFn: () => api.reports.serviceMetrics(windowDays) })` —
+  the JSX/columns themselves don't change unless the 13a review asked for
+  it. Table columns (as approved in 13a): Service | Severity | SEV Count |
+  Avg MTTD | Avg MTTM | Avg MTTR | Compliance — same `overflow-x-auto` +
+  `border-b border-border` table shell `ServiceHeatmap`/
+  `RecurringPatternsTable` already use in this file, durations formatted
+  with the existing `lib/format.ts` helper the rest of the app uses for
+  MTTD/MTTM/MTTR display. Compliance is a plain percentage cell; no new
+  badge component needed since this is an aggregate rate, not a live
+  per-SEV status (`SLABadge` stays scoped to individual SEVs, per Phase
+  12e).
+- Confirm the fixture's shape from 13a matches the real
+  `ServiceMetricsResponse` from 13d one-for-one; if the backend ended up
+  differing from what was mocked, reconcile here rather than carrying a
+  silent mismatch.
+
+**13f. Tests + demo doc**
+
+- Go: `internal/api/grpc/report_test.go` additions — `serviceLevelMetrics`
+  with multiple services/severities, partial-metric SEVs (nil MTTM etc. not
+  skewing other averages), no-SLA-configured rows landing in
+  `sla_not_applicable_count`, and the window cutoff boundary (a SEV just
+  outside `window_days` excluded); RBAC floor test for `GetServiceMetrics`.
+- Frontend: `ReportsPage.test.tsx` additions for the new section, including
+  a window-switch triggering a refetch with the new `window_days` param.
+- `demo/service-sla-compliance-reporting.md` (existing template: What was
+  built / Prerequisites / Walkthrough / Known limitations). Known
+  limitations to state: compliance is a point-in-time snapshot over the
+  selected window, not a historical trend (a compliance-over-time chart is
+  explicitly deferred, see below); an `AffectedServices` entry that doesn't
+  resolve to a real `Service.ID` is silently excluded, same accepted gap as
+  Phase 12.
+
+**Also considered and explicitly deferred**:
+- A time-series compliance trend (e.g. weekly compliance % over the last
+  quarter, mirroring `mttrTrends`'s rolling-window shape) — this phase is a
+  snapshot over one selected window, not a trend; a natural follow-up once
+  this snapshot view is validated.
+- CSV/JSON export of the aggregated per-service-per-severity rows —
+  `ExportSEVs` already covers raw per-SEV record export; a dedicated
+  aggregate export can be added later if requested, out of scope here.
+- Per-user or per-team breach leaderboards — out of scope; this phase
+  aggregates by (service, severity) only, matching
+  `frequencyByServiceAndLevel`'s existing grouping.
+- Automated alerts when compliance drops below a threshold — out of scope;
+  no notification layer exists yet, same reasoning Phase 12 gave for
+  deferring automated breach notifications.
+
+**Estimate**: ~3.5-5.25 days (13a ~0.75-1 day, 13b ~1-1.5 days, 13c ~0.25-0.5
+day, 13d ~0.25-0.5 day, 13e ~0.5-0.75 day, 13f ~0.75-1 day). **Depends on**:
+Phase 12 for 13b onward — reuses `service_slas`/`ServiceSLAStore` and
+`internal/sev/sla.go`'s `MostStrictSLA`/`EvaluateSLA` directly, so those
+steps cannot be built before Phase 12 ships. 13a is the exception: it's
+pure frontend against fixture data, so it has no dependency and can start
+immediately. Independent of Phases 8-11's integration work.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -1061,6 +1230,7 @@ tracking becomes a priority.
 | 10 | Per-user integration profiles (Slack/GitHub/Jira identity) | — | 6-8 days |
 | 11 | Integration-aware SEV UI (hide unconfigured actions, self-join Slack, creator invite) | 10 | 3.5-4.5 days |
 | 12 | Per-service SLA targets and breach indicators | — | 4.5-6 days |
+| 13 | Per-service SLA compliance reporting | 12 (except 13a's UX mockup) | 3.5-5.25 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -1082,7 +1252,15 @@ identities, `ListUserDirectory` RPC, and persisted `SEV.SlackChannelID`, so it m
 be sequenced strictly after Phase 10 rather than run independently like 8/9/10.
 Phase 12 is independent of every phase above it — it only needs the existing
 `Service` registry, not any integration work from Phases 6-11 — so it can be
-sequenced whenever SLA tracking becomes a priority.
+sequenced whenever SLA tracking becomes a priority. Phase 13 is the second
+phase in this document with a real hard dependency on another unshipped
+phase: from 13b onward it aggregates directly over Phase 12's
+`service_slas` table and `sla.go` evaluation logic, so those steps must
+ship strictly after Phase 12. 13a is a deliberate exception — a UX mockup
+built against fixture data, with no dependency on Phase 12 or any other
+step — so it can be done first, or even in parallel with Phase 12, to get
+the table/selector design reviewed before the backend contract is locked
+in.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
