@@ -57,6 +57,7 @@ type IntegrationCredentialsRefresher interface {
 type ConfigServer struct {
 	pb.UnimplementedConfigServiceServer
 	services             store.ServiceStore
+	serviceSLAs          store.ServiceSLAStore
 	users                store.UserStore
 	oncall               store.OnCallStore
 	integrations         store.IntegrationConfigStore
@@ -77,6 +78,7 @@ type ConfigServer struct {
 // method's doc comment.
 type ConfigServerParams struct {
 	Services             store.ServiceStore
+	ServiceSLAs          store.ServiceSLAStore
 	Users                store.UserStore
 	OnCall               store.OnCallStore
 	Integrations         store.IntegrationConfigStore
@@ -91,6 +93,7 @@ type ConfigServerParams struct {
 func NewConfigServer(p ConfigServerParams) *ConfigServer {
 	return &ConfigServer{
 		services:             p.Services,
+		serviceSLAs:          p.ServiceSLAs,
 		users:                p.Users,
 		oncall:               p.OnCall,
 		integrations:         p.Integrations,

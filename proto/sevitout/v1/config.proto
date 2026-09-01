@@ -49,6 +49,36 @@ service ConfigService {
     };
   }
 
+  // --- Per-service, per-severity-level SLA targets (docs/roadmap.md
+  // Phase 12) --- readable by any authenticated user (Viewer+), same floor
+  // as GetService/ListServices — the resolved numbers are already exposed to
+  // any Viewer via SEVResponse.sla_status, so gating the raw config any
+  // tighter would protect nothing. Mutations (Upsert/Delete) are Admin-only,
+  // matching UpdateService/DeleteService.
+  rpc GetServiceSLA(GetServiceSLARequest) returns (ServiceSLAResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/services/{service_id}/sla/{severity_level}"
+    };
+  }
+  rpc UpsertServiceSLA(UpsertServiceSLARequest) returns (ServiceSLAResponse) {
+    option (google.api.http) = {
+      put: "/v1/config/services/{service_id}/sla/{severity_level}"
+      body: "*"
+    };
+  }
+  rpc DeleteServiceSLA(DeleteServiceSLARequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/config/services/{service_id}/sla/{severity_level}"
+    };
+  }
+  // ListServiceSLAs returns every configured severity row (0-4) for one
+  // service — what the admin editor renders as its 4-row table.
+  rpc ListServiceSLAs(ListServiceSLAsRequest) returns (ListServiceSLAsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/services/{service_id}/sla"
+    };
+  }
+
   // --- User management (§18.2, §14) ---
 
   // ListUsers is Admin-only; the directory includes email addresses.
@@ -287,6 +317,48 @@ message ListServicesRequest {
 
 message ListServicesResponse {
   repeated ServiceResponse services = 1;
+}
+
+// ── Per-service SLA targets (docs/roadmap.md Phase 12) ──────────────────────
+
+message ServiceSLAResponse {
+  string service_id = 1;
+  int32 severity_level = 2;
+  // Target seconds per metric; 0 means unset (no SLA for that metric at this
+  // severity level).
+  int64 mttd_target_seconds = 3;
+  int64 mttm_target_seconds = 4;
+  int64 mttr_target_seconds = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message GetServiceSLARequest {
+  string service_id = 1;
+  int32 severity_level = 2;
+}
+
+message UpsertServiceSLARequest {
+  string service_id = 1;
+  int32 severity_level = 2;
+  // A field left at 0 clears that metric's target (full-replace, like
+  // UpdateRetentionConfigRequest — not a sparse patch).
+  int64 mttd_target_seconds = 3;
+  int64 mttm_target_seconds = 4;
+  int64 mttr_target_seconds = 5;
+}
+
+message DeleteServiceSLARequest {
+  string service_id = 1;
+  int32 severity_level = 2;
+}
+
+message ListServiceSLAsRequest {
+  string service_id = 1;
+}
+
+message ListServiceSLAsResponse {
+  repeated ServiceSLAResponse slas = 1;
 }
 
 // ── User management ──────────────────────────────────────────────────────────

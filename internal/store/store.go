@@ -113,6 +113,22 @@ type ServiceStore interface {
 	List(ctx context.Context, activeOnly bool) ([]*Service, error)
 }
 
+// ServiceSLAStore manages per-service, per-severity-level SLA targets
+// (docs/roadmap.md Phase 12).
+type ServiceSLAStore interface {
+	// Upsert creates or replaces the SLA row for (ServiceID, SeverityLevel).
+	Upsert(ctx context.Context, sla *ServiceSLA) error
+	Get(ctx context.Context, serviceID string, severityLevel int16) (*ServiceSLA, error)
+	Delete(ctx context.Context, serviceID string, severityLevel int16) error
+	// ListByService returns every configured severity row for one service
+	// (0-4 rows), ordered by severity level — used by the admin editor.
+	ListByService(ctx context.Context, serviceID string) ([]*ServiceSLA, error)
+	// ListForServices returns the configured SLA rows for a set of service
+	// IDs at one severity level — the batch lookup EvaluateSLA needs to
+	// compute a SEV's most-strict target across its AffectedServices.
+	ListForServices(ctx context.Context, serviceIDs []string, severityLevel int16) ([]*ServiceSLA, error)
+}
+
 // OnCallStore manages on-call rotation definitions and manual overrides.
 type OnCallStore interface {
 	Create(ctx context.Context, rotation *OnCallRotation) error

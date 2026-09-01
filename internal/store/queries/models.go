@@ -112,6 +112,17 @@ type Service struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ServiceSla struct {
+	ID                int64              `json:"id"`
+	ServiceID         string             `json:"service_id"`
+	SeverityLevel     int16              `json:"severity_level"`
+	MttdTargetSeconds *int64             `json:"mttd_target_seconds"`
+	MttmTargetSeconds *int64             `json:"mttm_target_seconds"`
+	MttrTargetSeconds *int64             `json:"mttr_target_seconds"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Sev struct {
 	ID                    string             `json:"id"`
 	Title                 string             `json:"title"`

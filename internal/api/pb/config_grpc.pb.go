@@ -34,6 +34,18 @@ type ConfigServiceClient interface {
 	// services are referenced throughout the system (e.g. picking affected
 	// services on a SEV).
 	ListServices(ctx context.Context, in *ListServicesRequest, opts ...grpc.CallOption) (*ListServicesResponse, error)
+	// --- Per-service, per-severity-level SLA targets (docs/roadmap.md
+	// Phase 12) --- readable by any authenticated user (Viewer+), same floor
+	// as GetService/ListServices — the resolved numbers are already exposed to
+	// any Viewer via SEVResponse.sla_status, so gating the raw config any
+	// tighter would protect nothing. Mutations (Upsert/Delete) are Admin-only,
+	// matching UpdateService/DeleteService.
+	GetServiceSLA(ctx context.Context, in *GetServiceSLARequest, opts ...grpc.CallOption) (*ServiceSLAResponse, error)
+	UpsertServiceSLA(ctx context.Context, in *UpsertServiceSLARequest, opts ...grpc.CallOption) (*ServiceSLAResponse, error)
+	DeleteServiceSLA(ctx context.Context, in *DeleteServiceSLARequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// ListServiceSLAs returns every configured severity row (0-4) for one
+	// service — what the admin editor renders as its 4-row table.
+	ListServiceSLAs(ctx context.Context, in *ListServiceSLAsRequest, opts ...grpc.CallOption) (*ListServiceSLAsResponse, error)
 	// ListUsers is Admin-only; the directory includes email addresses.
 	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
 	UpdateUserRole(ctx context.Context, in *UpdateUserRoleRequest, opts ...grpc.CallOption) (*UserResponse, error)
@@ -143,6 +155,42 @@ func (c *configServiceClient) DeleteService(ctx context.Context, in *DeleteServi
 func (c *configServiceClient) ListServices(ctx context.Context, in *ListServicesRequest, opts ...grpc.CallOption) (*ListServicesResponse, error) {
 	out := new(ListServicesResponse)
 	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListServices", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) GetServiceSLA(ctx context.Context, in *GetServiceSLARequest, opts ...grpc.CallOption) (*ServiceSLAResponse, error) {
+	out := new(ServiceSLAResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/GetServiceSLA", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpsertServiceSLA(ctx context.Context, in *UpsertServiceSLARequest, opts ...grpc.CallOption) (*ServiceSLAResponse, error) {
+	out := new(ServiceSLAResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/UpsertServiceSLA", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) DeleteServiceSLA(ctx context.Context, in *DeleteServiceSLARequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/DeleteServiceSLA", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ListServiceSLAs(ctx context.Context, in *ListServiceSLAsRequest, opts ...grpc.CallOption) (*ListServiceSLAsResponse, error) {
+	out := new(ListServiceSLAsResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListServiceSLAs", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +419,18 @@ type ConfigServiceServer interface {
 	// services are referenced throughout the system (e.g. picking affected
 	// services on a SEV).
 	ListServices(context.Context, *ListServicesRequest) (*ListServicesResponse, error)
+	// --- Per-service, per-severity-level SLA targets (docs/roadmap.md
+	// Phase 12) --- readable by any authenticated user (Viewer+), same floor
+	// as GetService/ListServices — the resolved numbers are already exposed to
+	// any Viewer via SEVResponse.sla_status, so gating the raw config any
+	// tighter would protect nothing. Mutations (Upsert/Delete) are Admin-only,
+	// matching UpdateService/DeleteService.
+	GetServiceSLA(context.Context, *GetServiceSLARequest) (*ServiceSLAResponse, error)
+	UpsertServiceSLA(context.Context, *UpsertServiceSLARequest) (*ServiceSLAResponse, error)
+	DeleteServiceSLA(context.Context, *DeleteServiceSLARequest) (*emptypb.Empty, error)
+	// ListServiceSLAs returns every configured severity row (0-4) for one
+	// service — what the admin editor renders as its 4-row table.
+	ListServiceSLAs(context.Context, *ListServiceSLAsRequest) (*ListServiceSLAsResponse, error)
 	// ListUsers is Admin-only; the directory includes email addresses.
 	ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error)
 	UpdateUserRole(context.Context, *UpdateUserRoleRequest) (*UserResponse, error)
@@ -452,6 +512,18 @@ func (UnimplementedConfigServiceServer) DeleteService(context.Context, *DeleteSe
 }
 func (UnimplementedConfigServiceServer) ListServices(context.Context, *ListServicesRequest) (*ListServicesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListServices not implemented")
+}
+func (UnimplementedConfigServiceServer) GetServiceSLA(context.Context, *GetServiceSLARequest) (*ServiceSLAResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetServiceSLA not implemented")
+}
+func (UnimplementedConfigServiceServer) UpsertServiceSLA(context.Context, *UpsertServiceSLARequest) (*ServiceSLAResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpsertServiceSLA not implemented")
+}
+func (UnimplementedConfigServiceServer) DeleteServiceSLA(context.Context, *DeleteServiceSLARequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteServiceSLA not implemented")
+}
+func (UnimplementedConfigServiceServer) ListServiceSLAs(context.Context, *ListServiceSLAsRequest) (*ListServiceSLAsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListServiceSLAs not implemented")
 }
 func (UnimplementedConfigServiceServer) ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListUsers not implemented")
@@ -621,6 +693,78 @@ func _ConfigService_ListServices_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConfigServiceServer).ListServices(ctx, req.(*ListServicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_GetServiceSLA_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetServiceSLARequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetServiceSLA(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/GetServiceSLA",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetServiceSLA(ctx, req.(*GetServiceSLARequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpsertServiceSLA_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertServiceSLARequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpsertServiceSLA(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/UpsertServiceSLA",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpsertServiceSLA(ctx, req.(*UpsertServiceSLARequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_DeleteServiceSLA_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteServiceSLARequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).DeleteServiceSLA(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/DeleteServiceSLA",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).DeleteServiceSLA(ctx, req.(*DeleteServiceSLARequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ListServiceSLAs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListServiceSLAsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListServiceSLAs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/ListServiceSLAs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListServiceSLAs(ctx, req.(*ListServiceSLAsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1065,6 +1209,22 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListServices",
 			Handler:    _ConfigService_ListServices_Handler,
+		},
+		{
+			MethodName: "GetServiceSLA",
+			Handler:    _ConfigService_GetServiceSLA_Handler,
+		},
+		{
+			MethodName: "UpsertServiceSLA",
+			Handler:    _ConfigService_UpsertServiceSLA_Handler,
+		},
+		{
+			MethodName: "DeleteServiceSLA",
+			Handler:    _ConfigService_DeleteServiceSLA_Handler,
+		},
+		{
+			MethodName: "ListServiceSLAs",
+			Handler:    _ConfigService_ListServiceSLAs_Handler,
 		},
 		{
 			MethodName: "ListUsers",

@@ -328,8 +328,45 @@
         "slackChannelId": {
           "type": "string",
           "description": "slack_channel_id is the incident channel cmd/slackbot auto-created for\nthis SEV (§13.1, docs/roadmap.md Phase 10e) — absent for SEVs created\nbefore this shipped, or whose channel-creation step never ran/failed.\nNot sensitive (raw IDs are already exposed elsewhere), so it's on the\nmain response rather than gated."
+        },
+        "slaStatus": {
+          "$ref": "#/definitions/v1SLAStatus",
+          "description": "sla_status is this SEV's live SLA breach status (docs/roadmap.md\nPhase 12), derived on every read against the most-strict SLA target\nacross its affected_services at severity_level — never trusted from\nstorage, the same discipline TaskResponse.overdue already applies to\ntask due dates. Absent (zero value) when no attached service has any\nSLA target configured at this SEV's severity level."
         }
       }
+    },
+    "v1SLAStatus": {
+      "type": "object",
+      "properties": {
+        "mttd": {
+          "type": "string",
+          "description": "Each status string is one of \"ok\", \"at_risk\", \"breached\",\n\"not_applicable\" (internal/sev.SLAMetricStatus)."
+        },
+        "mttm": {
+          "type": "string"
+        },
+        "mttr": {
+          "type": "string"
+        },
+        "overall": {
+          "type": "string",
+          "description": "overall is the worst of mttd/mttm/mttr — what a summary badge should show."
+        },
+        "mttdTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "The resolved target seconds per metric, 0 when not_applicable — so a UI\ncan show \"target: 5m\" alongside the status without a second lookup."
+        },
+        "mttmTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttrTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        }
+      },
+      "description": "SLAStatus is the live per-metric SLA breach status for one SEV, resolved\nfrom the most-strict target across its affected services (see\nConfigService's ServiceSLA RPCs below for how targets are set)."
     },
     "v1SearchSEVsResponse": {
       "type": "object",

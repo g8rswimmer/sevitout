@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/g8rswimmer/sevitout/internal/ai"
@@ -30,14 +31,16 @@ func adminCtx() context.Context {
 
 // testSEVServer groups a SEVServer with its backing in-memory stores.
 type testSEVServer struct {
-	server  *grpchandler.SEVServer
-	sevs    *memory.SEVStore
-	audit   *memory.AuditStore
-	history *memory.StatusHistoryStore
-	links   *memory.SEVLinkStore
-	access  *memory.SEVAccessStore
-	pub     *fakePublisher
-	ai      *fakeAIDispatcher
+	server      *grpchandler.SEVServer
+	sevs        *memory.SEVStore
+	audit       *memory.AuditStore
+	history     *memory.StatusHistoryStore
+	links       *memory.SEVLinkStore
+	access      *memory.SEVAccessStore
+	services    *memory.ServiceStore
+	serviceSLAs *memory.ServiceSLAStore
+	pub         *fakePublisher
+	ai          *fakeAIDispatcher
 }
 
 // newTestSEVServer returns a fresh SEVServer backed by empty in-memory stores.
@@ -47,21 +50,25 @@ func newTestSEVServer() *testSEVServer {
 	history := memory.NewStatusHistoryStore()
 	links := memory.NewSEVLinkStore()
 	access := memory.NewSEVAccessStore()
+	services := memory.NewServiceStore()
+	serviceSLAs := memory.NewServiceSLAStore()
 	pub := &fakePublisher{}
 	aiDispatch := &fakeAIDispatcher{}
 	return &testSEVServer{
 		server: grpchandler.NewSEVServer(grpchandler.SEVServerParams{
 			SEVs: sevs, Audit: audit, History: history, Roles: memory.NewRoleStore(),
-			Services: memory.NewServiceStore(), Postmortems: memory.NewPostmortemStore(),
+			Services: services, ServiceSLAs: serviceSLAs, Postmortems: memory.NewPostmortemStore(),
 			Links: links, Access: access, Publisher: pub, AIDispatch: aiDispatch,
 		}),
-		sevs:    sevs,
-		audit:   audit,
-		history: history,
-		links:   links,
-		access:  access,
-		pub:     pub,
-		ai:      aiDispatch,
+		sevs:        sevs,
+		audit:       audit,
+		history:     history,
+		links:       links,
+		access:      access,
+		services:    services,
+		serviceSLAs: serviceSLAs,
+		pub:         pub,
+		ai:          aiDispatch,
 	}
 }
 
@@ -1231,3 +1238,150 @@ func TestUpdateSEV_UnrelatedUpdateDoesNotReLink(t *testing.T) {
 		t.Errorf("want exactly 1 link after an unrelated update, got %+v", links)
 	}
 }
+
+// ── SLA status (docs/roadmap.md Phase 12) ────────────────────────────────────
+
+func TestGetSEV_SLAStatus_MostStrictAcrossMultipleServices(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	// checkout's MTTD target (300s) is stricter than payments' (600s); only
+	// payments configures an MTTR target, so it applies unopposed.
+	if err := ts.serviceSLAs.Upsert(ctx, &store.ServiceSLA{
+		ServiceID: "checkout", SeverityLevel: 1, MTTDTargetSeconds: int64Ptr(300),
+	}); err != nil {
+		t.Fatalf("seed checkout SLA: %v", err)
+	}
+	if err := ts.serviceSLAs.Upsert(ctx, &store.ServiceSLA{
+		ServiceID: "payments", SeverityLevel: 1, MTTDTargetSeconds: int64Ptr(600), MTTRTargetSeconds: int64Ptr(3600),
+	}); err != nil {
+		t.Fatalf("seed payments SLA: %v", err)
+	}
+
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Checkout errors", SeverityLevel: 1, AffectedServices: []string{"checkout", "payments"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	got, err := ts.server.GetSEV(ctx, &pb.GetSEVRequest{Id: created.GetId()})
+	if err != nil {
+		t.Fatalf("GetSEV: %v", err)
+	}
+	sla := got.GetSlaStatus()
+	if sla == nil {
+		t.Fatal("SlaStatus is nil, want it populated")
+	}
+	if sla.GetMttdTargetSeconds() != 300 {
+		t.Errorf("MttdTargetSeconds = %d, want 300 (strictest of checkout's 300 and payments' 600)", sla.GetMttdTargetSeconds())
+	}
+	if sla.GetMttrTargetSeconds() != 3600 {
+		t.Errorf("MttrTargetSeconds = %d, want 3600 (only payments configures it)", sla.GetMttrTargetSeconds())
+	}
+	// started_at isn't set on this newly-created SEV, so there's no baseline
+	// to measure elapsed time from yet — every metric is not_applicable
+	// rather than falsely "at risk".
+	if sla.GetMttd() != "not_applicable" {
+		t.Errorf("Mttd = %q, want not_applicable (no started_at yet)", sla.GetMttd())
+	}
+}
+
+func TestGetSEV_SLAStatus_AtRiskWhileStillOpen(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	if err := ts.serviceSLAs.Upsert(ctx, &store.ServiceSLA{
+		ServiceID: "checkout", SeverityLevel: 1, MTTDTargetSeconds: int64Ptr(60),
+	}); err != nil {
+		t.Fatalf("seed SLA: %v", err)
+	}
+
+	started := time.Now().Add(-10 * time.Minute) // 600s elapsed, well past a 60s target
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Slow checkout", SeverityLevel: 1, AffectedServices: []string{"checkout"},
+		StartedAt: timestamppb.New(started),
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	got, err := ts.server.GetSEV(ctx, &pb.GetSEVRequest{Id: created.GetId()})
+	if err != nil {
+		t.Fatalf("GetSEV: %v", err)
+	}
+	if got.GetSlaStatus().GetMttd() != "at_risk" {
+		t.Errorf("Mttd = %q, want at_risk (still open, elapsed 600s > 60s target)", got.GetSlaStatus().GetMttd())
+	}
+	if got.GetSlaStatus().GetOverall() != "at_risk" {
+		t.Errorf("Overall = %q, want at_risk", got.GetSlaStatus().GetOverall())
+	}
+}
+
+func TestGetSEV_SLAStatus_BreachedOnceDetectedLate(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	if err := ts.serviceSLAs.Upsert(ctx, &store.ServiceSLA{
+		ServiceID: "checkout", SeverityLevel: 1, MTTDTargetSeconds: int64Ptr(60),
+	}); err != nil {
+		t.Fatalf("seed SLA: %v", err)
+	}
+
+	started := time.Now().Add(-20 * time.Minute)
+	detected := started.Add(10 * time.Minute) // 600s to detect, over the 60s target
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Slow checkout", SeverityLevel: 1, AffectedServices: []string{"checkout"},
+		StartedAt: timestamppb.New(started), DetectedAt: timestamppb.New(detected),
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+	if created.GetSlaStatus().GetMttd() != "breached" {
+		t.Errorf("Mttd = %q, want breached (final MTTD 600s > 60s target)", created.GetSlaStatus().GetMttd())
+	}
+}
+
+func TestGetSEV_SLAStatus_NoAttachedServiceIsNotApplicable(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "No service attached", SeverityLevel: 1, StartedAt: timestamppb.New(time.Now().Add(-time.Hour)),
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+	if created.GetSlaStatus() != nil {
+		t.Errorf("SlaStatus = %+v, want nil with no affected_services", created.GetSlaStatus())
+	}
+}
+
+func TestListSEVs_SLAStatusPopulated(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	if err := ts.serviceSLAs.Upsert(ctx, &store.ServiceSLA{
+		ServiceID: "checkout", SeverityLevel: 1, MTTDTargetSeconds: int64Ptr(300),
+	}); err != nil {
+		t.Fatalf("seed SLA: %v", err)
+	}
+	if _, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Checkout errors", SeverityLevel: 1, AffectedServices: []string{"checkout"},
+	}); err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	resp, err := ts.server.ListSEVs(ctx, &pb.ListSEVsRequest{})
+	if err != nil {
+		t.Fatalf("ListSEVs: %v", err)
+	}
+	if len(resp.GetSevs()) != 1 {
+		t.Fatalf("want 1 SEV, got %d", len(resp.GetSevs()))
+	}
+	if resp.GetSevs()[0].GetSlaStatus().GetMttdTargetSeconds() != 300 {
+		t.Errorf("MttdTargetSeconds = %d, want 300", resp.GetSevs()[0].GetSlaStatus().GetMttdTargetSeconds())
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }

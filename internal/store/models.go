@@ -419,6 +419,22 @@ type Service struct {
 	UpdatedAt          time.Time
 }
 
+// ServiceSLA defines the target response times for one service at one
+// severity level (1-4) — docs/roadmap.md Phase 12. A nil target field means
+// that metric has no SLA configured for this service/severity; EvaluateSLA
+// (internal/sev/sla.go) treats it as not applicable rather than an instant
+// breach.
+type ServiceSLA struct {
+	ID                int64
+	ServiceID         string
+	SeverityLevel     int16
+	MTTDTargetSeconds *int64
+	MTTMTargetSeconds *int64
+	MTTRTargetSeconds *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 // User is a registered user who authenticates with email and password.
 type User struct {
 	ID           string

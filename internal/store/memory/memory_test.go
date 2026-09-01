@@ -29,9 +29,12 @@ var (
 	_ store.ShareStore             = (*memory.ShareStore)(nil)
 	_ store.RoleStore              = (*memory.RoleStore)(nil)
 	_ store.SEVAccessStore         = (*memory.SEVAccessStore)(nil)
+	_ store.ServiceSLAStore        = (*memory.ServiceSLAStore)(nil)
 )
 
 var ctx = context.Background()
+
+func int64p(v int64) *int64 { return &v }
 
 // ── SEVStore ──────────────────────────────────────────────────────────────────
 
@@ -1132,6 +1135,125 @@ func TestServiceStore(t *testing.T) {
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		if err := s.Delete(ctx, svc.ID); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound on second delete, got %v", err)
+		}
+	})
+}
+
+// ── ServiceSLAStore ───────────────────────────────────────────────────────────
+
+func TestServiceSLAStore(t *testing.T) {
+	s := memory.NewServiceSLAStore()
+
+	sla := &store.ServiceSLA{
+		ServiceID:         "checkout",
+		SeverityLevel:     1,
+		MTTDTargetSeconds: int64p(300),
+		MTTRTargetSeconds: int64p(3600),
+	}
+
+	t.Run("Upsert (insert)", func(t *testing.T) {
+		if err := s.Upsert(ctx, sla); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if sla.ID == 0 {
+			t.Fatal("ID should be set on insert")
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, "checkout", 1)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.MTTDTargetSeconds == nil || *got.MTTDTargetSeconds != 300 {
+			t.Errorf("MTTDTargetSeconds = %v, want 300", got.MTTDTargetSeconds)
+		}
+		if got.MTTMTargetSeconds != nil {
+			t.Errorf("MTTMTargetSeconds = %v, want nil (never set)", got.MTTMTargetSeconds)
+		}
+	})
+
+	t.Run("GetNotFound", func(t *testing.T) {
+		if _, err := s.Get(ctx, "checkout", 2); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound for a different severity level, got %v", err)
+		}
+	})
+
+	t.Run("Upsert (update existing preserves ID)", func(t *testing.T) {
+		existingID := sla.ID
+		updated := &store.ServiceSLA{
+			ServiceID:         "checkout",
+			SeverityLevel:     1,
+			MTTDTargetSeconds: int64p(180),
+		}
+		if err := s.Upsert(ctx, updated); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if updated.ID != existingID {
+			t.Errorf("Upsert should preserve the existing ID, got %d want %d", updated.ID, existingID)
+		}
+		got, _ := s.Get(ctx, "checkout", 1)
+		if got.MTTDTargetSeconds == nil || *got.MTTDTargetSeconds != 180 {
+			t.Errorf("MTTDTargetSeconds = %v, want 180 after update", got.MTTDTargetSeconds)
+		}
+		if got.MTTRTargetSeconds != nil {
+			t.Errorf("MTTRTargetSeconds = %v, want nil — Upsert replaces the row wholesale", got.MTTRTargetSeconds)
+		}
+	})
+
+	t.Run("ListByService", func(t *testing.T) {
+		other := &store.ServiceSLA{ServiceID: "checkout", SeverityLevel: 2, MTTMTargetSeconds: int64p(1800)}
+		if err := s.Upsert(ctx, other); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		items, err := s.ListByService(ctx, "checkout")
+		if err != nil {
+			t.Fatalf("ListByService: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2 rows, got %d", len(items))
+		}
+		if items[0].SeverityLevel != 1 || items[1].SeverityLevel != 2 {
+			t.Errorf("want ascending severity order, got %d, %d", items[0].SeverityLevel, items[1].SeverityLevel)
+		}
+	})
+
+	t.Run("ListByService_NoRows", func(t *testing.T) {
+		items, err := s.ListByService(ctx, "unregistered")
+		if err != nil {
+			t.Fatalf("ListByService: %v", err)
+		}
+		if len(items) != 0 {
+			t.Fatalf("want 0 rows, got %d", len(items))
+		}
+	})
+
+	t.Run("ListForServices", func(t *testing.T) {
+		payments := &store.ServiceSLA{ServiceID: "payments", SeverityLevel: 1, MTTDTargetSeconds: int64p(120)}
+		if err := s.Upsert(ctx, payments); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		items, err := s.ListForServices(ctx, []string{"checkout", "payments", "unregistered"}, 1)
+		if err != nil {
+			t.Fatalf("ListForServices: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2 rows (checkout + payments at severity 1; unregistered excluded), got %d", len(items))
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, "checkout", 1); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := s.Get(ctx, "checkout", 1); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound after delete, got %v", err)
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		if err := s.Delete(ctx, "checkout", 1); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound on second delete, got %v", err)
 		}
 	})
