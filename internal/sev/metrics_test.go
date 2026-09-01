@@ -10,23 +10,26 @@ import (
 
 // Fixed timestamps used by all metrics tests.
 //
-//	metricsStart    → T+0
-//	metricsDetected → T+5m  (MTTD = 300s)
-//	metricsMitigated → T+30m (MTTM = 1800s; DTTM = 1500s from detected)
-//	metricsResolved  → T+60m (MTTR = 3600s)
+//	metricsStart              → T+0
+//	metricsDetected           → T+5m  (MTTD = 300s)
+//	metricsMitigated          → T+30m (MTTM = 1800s; DTTM = 1500s from detected)
+//	metricsResolved           → T+60m (MTTR = 3600s)
+//	metricsPostmortemComplete → T+90m (MTTPC = 3600s from mitigated)
 var (
-	metricsStart     = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	metricsDetected  = metricsStart.Add(5 * time.Minute)
-	metricsMitigated = metricsStart.Add(30 * time.Minute)
-	metricsResolved  = metricsStart.Add(60 * time.Minute)
+	metricsStart              = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	metricsDetected           = metricsStart.Add(5 * time.Minute)
+	metricsMitigated          = metricsStart.Add(30 * time.Minute)
+	metricsResolved           = metricsStart.Add(60 * time.Minute)
+	metricsPostmortemComplete = metricsStart.Add(90 * time.Minute)
 )
 
 func TestComputeMetrics_AllTimestamps(t *testing.T) {
 	s := &store.SEV{
-		StartedAt:   &metricsStart,
-		DetectedAt:  &metricsDetected,
-		MitigatedAt: &metricsMitigated,
-		ResolvedAt:  &metricsResolved,
+		StartedAt:             &metricsStart,
+		DetectedAt:            &metricsDetected,
+		MitigatedAt:           &metricsMitigated,
+		ResolvedAt:            &metricsResolved,
+		PostmortemCompletedAt: &metricsPostmortemComplete,
 	}
 	sev.ComputeMetrics(s)
 
@@ -34,6 +37,7 @@ func TestComputeMetrics_AllTimestamps(t *testing.T) {
 	checkMetric(t, "MTTMSeconds", s.MTTMSeconds, 1800)
 	checkMetric(t, "MTTRSeconds", s.MTTRSeconds, 3600)
 	checkMetric(t, "DTTMSeconds", s.DTTMSeconds, 1500)
+	checkMetric(t, "MTTPCSeconds", s.MTTPCSeconds, 3600)
 }
 
 func TestComputeMetrics_MTTDOnly(t *testing.T) {
@@ -92,6 +96,21 @@ func TestComputeMetrics_DTTMOnly(t *testing.T) {
 	checkMetric(t, "DTTMSeconds", s.DTTMSeconds, 1500)
 }
 
+func TestComputeMetrics_MTTPCOnly(t *testing.T) {
+	s := &store.SEV{
+		MitigatedAt:           &metricsMitigated,
+		PostmortemCompletedAt: &metricsPostmortemComplete,
+		// StartedAt, DetectedAt, and ResolvedAt intentionally nil
+	}
+	sev.ComputeMetrics(s)
+
+	checkNilMetric(t, "MTTDSeconds", s.MTTDSeconds)
+	checkNilMetric(t, "MTTMSeconds", s.MTTMSeconds)
+	checkNilMetric(t, "MTTRSeconds", s.MTTRSeconds)
+	checkNilMetric(t, "DTTMSeconds", s.DTTMSeconds)
+	checkMetric(t, "MTTPCSeconds", s.MTTPCSeconds, 3600)
+}
+
 func TestComputeMetrics_NoTimestamps(t *testing.T) {
 	s := &store.SEV{}
 	sev.ComputeMetrics(s)
@@ -100,6 +119,7 @@ func TestComputeMetrics_NoTimestamps(t *testing.T) {
 	checkNilMetric(t, "MTTMSeconds", s.MTTMSeconds)
 	checkNilMetric(t, "MTTRSeconds", s.MTTRSeconds)
 	checkNilMetric(t, "DTTMSeconds", s.DTTMSeconds)
+	checkNilMetric(t, "MTTPCSeconds", s.MTTPCSeconds)
 }
 
 // TestComputeMetrics_PreexistingNotOverwrittenWhenInputNil verifies that a

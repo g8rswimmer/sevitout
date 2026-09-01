@@ -25,7 +25,7 @@ func (q *Queries) DeleteServiceSLA(ctx context.Context, arg DeleteServiceSLAPara
 }
 
 const getServiceSLA = `-- name: GetServiceSLA :one
-SELECT id, service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at
+SELECT id, service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at, mttpc_target_seconds
 FROM service_slas
 WHERE service_id = $1 AND severity_level = $2
 `
@@ -47,12 +47,13 @@ func (q *Queries) GetServiceSLA(ctx context.Context, arg GetServiceSLAParams) (S
 		&i.MttrTargetSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MttpcTargetSeconds,
 	)
 	return i, err
 }
 
 const listServiceSLAsByService = `-- name: ListServiceSLAsByService :many
-SELECT id, service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at
+SELECT id, service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at, mttpc_target_seconds
 FROM service_slas
 WHERE service_id = $1
 ORDER BY severity_level
@@ -76,6 +77,7 @@ func (q *Queries) ListServiceSLAsByService(ctx context.Context, serviceID string
 			&i.MttrTargetSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MttpcTargetSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -88,7 +90,7 @@ func (q *Queries) ListServiceSLAsByService(ctx context.Context, serviceID string
 }
 
 const listServiceSLAsForServices = `-- name: ListServiceSLAsForServices :many
-SELECT id, service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at
+SELECT id, service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at, mttpc_target_seconds
 FROM service_slas
 WHERE service_id = ANY($1::text[]) AND severity_level = $2
 `
@@ -116,6 +118,7 @@ func (q *Queries) ListServiceSLAsForServices(ctx context.Context, arg ListServic
 			&i.MttrTargetSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MttpcTargetSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -128,22 +131,24 @@ func (q *Queries) ListServiceSLAsForServices(ctx context.Context, arg ListServic
 }
 
 const upsertServiceSLA = `-- name: UpsertServiceSLA :one
-INSERT INTO service_slas (service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+INSERT INTO service_slas (service_id, severity_level, mttd_target_seconds, mttm_target_seconds, mttr_target_seconds, created_at, updated_at, mttpc_target_seconds)
+VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6)
 ON CONFLICT (service_id, severity_level) DO UPDATE SET
-    mttd_target_seconds = EXCLUDED.mttd_target_seconds,
-    mttm_target_seconds = EXCLUDED.mttm_target_seconds,
-    mttr_target_seconds = EXCLUDED.mttr_target_seconds,
-    updated_at           = NOW()
+    mttd_target_seconds  = EXCLUDED.mttd_target_seconds,
+    mttm_target_seconds  = EXCLUDED.mttm_target_seconds,
+    mttr_target_seconds  = EXCLUDED.mttr_target_seconds,
+    mttpc_target_seconds = EXCLUDED.mttpc_target_seconds,
+    updated_at            = NOW()
 RETURNING id
 `
 
 type UpsertServiceSLAParams struct {
-	ServiceID         string `json:"service_id"`
-	SeverityLevel     int16  `json:"severity_level"`
-	MttdTargetSeconds *int64 `json:"mttd_target_seconds"`
-	MttmTargetSeconds *int64 `json:"mttm_target_seconds"`
-	MttrTargetSeconds *int64 `json:"mttr_target_seconds"`
+	ServiceID          string `json:"service_id"`
+	SeverityLevel      int16  `json:"severity_level"`
+	MttdTargetSeconds  *int64 `json:"mttd_target_seconds"`
+	MttmTargetSeconds  *int64 `json:"mttm_target_seconds"`
+	MttrTargetSeconds  *int64 `json:"mttr_target_seconds"`
+	MttpcTargetSeconds *int64 `json:"mttpc_target_seconds"`
 }
 
 func (q *Queries) UpsertServiceSLA(ctx context.Context, arg UpsertServiceSLAParams) (int64, error) {
@@ -153,6 +158,7 @@ func (q *Queries) UpsertServiceSLA(ctx context.Context, arg UpsertServiceSLAPara
 		arg.MttdTargetSeconds,
 		arg.MttmTargetSeconds,
 		arg.MttrTargetSeconds,
+		arg.MttpcTargetSeconds,
 	)
 	var id int64
 	err := row.Scan(&id)

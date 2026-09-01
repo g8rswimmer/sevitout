@@ -1183,6 +1183,10 @@
         "mttrTargetSeconds": {
           "type": "string",
           "format": "int64"
+        },
+        "mttpcTargetSeconds": {
+          "type": "string",
+          "format": "int64"
         }
       }
     },
@@ -1722,6 +1726,11 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "mttpcTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "mttpc_target_seconds targets Mitigation to Postmortem Complete — see\nSEVResponse.mttpc_seconds."
         }
       }
     },

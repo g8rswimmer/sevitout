@@ -21,7 +21,7 @@ SELECT id, title, description, severity_level, status,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-       slack_channel_id
+       slack_channel_id, mttpc_seconds
 FROM sevs
 WHERE id = $1
 `
@@ -66,6 +66,7 @@ type GetSEVRow struct {
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
 	SlackChannelID        *string            `json:"slack_channel_id"`
+	MttpcSeconds          *int64             `json:"mttpc_seconds"`
 }
 
 func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
@@ -111,6 +112,7 @@ func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
 		&i.UpdatedAt,
 		&i.CreatedBy,
 		&i.SlackChannelID,
+		&i.MttpcSeconds,
 	)
 	return i, err
 }
@@ -126,7 +128,7 @@ INSERT INTO sevs (
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
     locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-    slack_channel_id
+    slack_channel_id, mttpc_seconds
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
@@ -137,7 +139,7 @@ INSERT INTO sevs (
     $24, $25, $26, $27, $28,
     $29, $30, $31, $32,
     $33, $34, $35, $36, $37, $38,
-    $39
+    $39, $40
 )
 `
 
@@ -181,6 +183,7 @@ type InsertSEVParams struct {
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
 	SlackChannelID        *string            `json:"slack_channel_id"`
+	MttpcSeconds          *int64             `json:"mttpc_seconds"`
 }
 
 func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
@@ -224,6 +227,7 @@ func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
 		arg.UpdatedAt,
 		arg.CreatedBy,
 		arg.SlackChannelID,
+		arg.MttpcSeconds,
 	)
 	return err
 }
@@ -238,7 +242,7 @@ SELECT id, title, description, severity_level, status,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-       slack_channel_id
+       slack_channel_id, mttpc_seconds
 FROM sevs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -289,6 +293,7 @@ type ListSEVsRow struct {
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
 	SlackChannelID        *string            `json:"slack_channel_id"`
+	MttpcSeconds          *int64             `json:"mttpc_seconds"`
 }
 
 func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsRow, error) {
@@ -340,6 +345,7 @@ func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsR
 			&i.UpdatedAt,
 			&i.CreatedBy,
 			&i.SlackChannelID,
+			&i.MttpcSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -399,7 +405,8 @@ UPDATE sevs SET
     sensitive              = $34,
     ai_disabled            = $35,
     updated_at             = $36,
-    slack_channel_id       = $37
+    slack_channel_id       = $37,
+    mttpc_seconds          = $38
 WHERE id = $1
 `
 
@@ -441,6 +448,7 @@ type UpdateSEVParams struct {
 	AiDisabled            bool               `json:"ai_disabled"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	SlackChannelID        *string            `json:"slack_channel_id"`
+	MttpcSeconds          *int64             `json:"mttpc_seconds"`
 }
 
 func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
@@ -482,6 +490,7 @@ func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
 		arg.AiDisabled,
 		arg.UpdatedAt,
 		arg.SlackChannelID,
+		arg.MttpcSeconds,
 	)
 	return err
 }

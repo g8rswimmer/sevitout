@@ -42,6 +42,53 @@ and UI.
   `LifecyclePanel.tsx`, and as an overall summary badge next to the severity/status
   badges on both the SEV detail page and the SEV list.
 
+## Follow-up, same phase: metric tooltips + an MTTPC (postmortem-tail) SLA
+
+Two gaps surfaced from user feedback right after the above shipped: the acronyms
+(MTTD/MTTM/MTTR) were unexplained wherever they appeared, and the SLA targets only
+covered incident *response* (detect/mitigate/resolve), not the postmortem tail teams
+also want held to a deadline.
+
+- **Metric definitions as hover/focus tooltips.** `METRIC_DEFINITIONS` (previously
+  private to `LifecyclePanel.tsx`) moved to a new shared
+  `web/src/lib/metricDefinitions.ts`, so both `LifecyclePanel.tsx` (per-SEV values)
+  and `ServiceSLAEditor.tsx` (per-service target column headers) render the exact
+  same plain-English text via the existing `InfoTooltip` component (hover *and*
+  keyboard-focus, per its own doc comment — not mouse-only). The admin SLA editor's
+  four target columns ("MTTD target (min)", etc.) each carry the icon next to their
+  header now, not just the per-SEV metric fields that already had one.
+- **New metric: MTTPC — Mitigation to Postmortem Complete**
+  (`postmortem_completed_at − mitigated_at`). This is the same point-A-to-point-B
+  shape as the existing `DTTMSeconds` (detection→mitigation), deliberately **not**
+  "from `started_at`" like MTTD/MTTM/MTTR — a SEV open for days before mitigation
+  shouldn't count against a fast postmortem turnaround. `ComputeMetrics` computes it
+  alongside the other three; `EvaluateSLA` evaluates it against `MitigatedAt` as its
+  baseline (not `StartedAt`); `MostStrictSLA` reduces it across services the same
+  way as the other three. A 4th target column (`mttpc_target_seconds`) was added to
+  `service_slas` (migration `000017`) and threaded through the same
+  store/proto/handler/UI surface as the original three — `ServiceSLAEditor.tsx`'s
+  table is now 4 target columns instead of 3, and `LifecyclePanel.tsx` shows a 5th
+  metric field (MTTPC, with its own `SLABadge`) alongside MTTD/MTTM/MTTR/DTTM.
+- **Live-verified**, continuing a real `cmd/server` session:
+
+  ```bash
+  # Configure a 24h MTTPC target alongside the existing 5-minute MTTD target.
+  curl -s -X PUT localhost:8080/v1/config/services/checkout/sla/1 -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' -d '{"severity_level":1,"mttd_target_seconds":300,"mttpc_target_seconds":86400}'
+
+  # Mitigate a SEV 10 minutes ago — well within the 24h target, even though
+  # started_at was never set (proving MTTPC's baseline really is mitigated_at).
+  curl -s -X POST localhost:8080/v1/sevs/SEV-2026-0001/transition -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' -d '{"to_status":"mitigated","mitigated_at":"<10 min ago>"}'
+  # {"sla_status": {"mttpc": "ok", "mttpc_target_seconds": "86400", "overall": "ok", ...}}
+
+  # Complete the postmortem ~26 hours after mitigation — over the 24h target.
+  curl -s -X POST localhost:8080/v1/sevs/SEV-2026-0001/transition -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d '{"to_status":"postmortem_complete","postmortem_completed_at":"<~26h after mitigated_at>"}'
+  # {"mttpc_seconds": "94209", "sla_status": {"mttpc": "breached", "overall": "breached", ...}}
+  ```
+
 ## Prerequisites
 
 - `go build ./... && go vet ./... && go test ./...` and `web`'s `tsc -b && vitest
@@ -131,28 +178,37 @@ cd web && npx tsc -b && npx vitest run && npx oxlint
 ```
 
 New/updated coverage:
+- `internal/sev/metrics_test.go`: `MTTPCSeconds` computed from
+  `mitigated_at`/`postmortem_completed_at` (added to the all-timestamps case, plus
+  a dedicated MTTPC-only case and the no-timestamps nil case).
 - `internal/sev/sla_test.go` (new): `MostStrictSLA`'s multi-service min-reduction
-  and no-rows case; `EvaluateSLA`'s four status outcomes per metric, the
-  at-risk→breached/ok transition once the final timestamp lands, and
-  overall-is-worst-of-three.
+  (now across all four metrics) and no-rows case; `EvaluateSLA`'s four status
+  outcomes per metric, the at-risk→breached/ok transition once the final timestamp
+  lands, overall-is-worst-of-four, and MTTPC specifically: measured from
+  `MitigatedAt` (not `StartedAt`) via a case where those two baselines would give
+  opposite answers, not-applicable before mitigation, and breached once finalized.
 - `internal/store/memory/memory_test.go`: `TestServiceSLAStore` — insert, get,
   not-found, update-preserves-ID, per-service listing in ascending severity order,
   batch `ListForServices` across multiple service IDs, delete/delete-not-found.
 - `internal/api/grpc/config_test.go`: `ServiceSLA` RPC tests — valid upsert +
-  round-trip, unknown service rejected, invalid severity level rejected, a
-  zero-valued field clears its target (full-replace semantics), not-found on
-  get/delete, list returns only configured severity levels in order, missing
-  `service_id` rejected.
+  round-trip (now asserting `mttpc_target_seconds` too), unknown service rejected,
+  invalid severity level rejected, a zero-valued field clears its target
+  (full-replace semantics), not-found on get/delete, list returns only configured
+  severity levels in order, missing `service_id` rejected.
 - `internal/api/grpc/sev_test.go`: `SLAStatus` tests on `GetSEV`/`ListSEVs` — the
   most-strict target resolves correctly across two attached services, a still-open
   SEV shows `at_risk` before any target is finalized, a late-detected SEV shows
   `breached` once `MTTDSeconds` is computed, a SEV with no attached service gets no
-  `sla_status` at all.
+  `sla_status` at all; plus MTTPC-specific: `MttpcSeconds` computed on the
+  `PostmortemComplete` transition, and `sla_status.mttpc` correctly using
+  `mitigated_at` as its baseline via `GetSEV`.
 - `web/src/components/sev/badges.test.tsx` (new): `SLABadge` renders nothing for
   `ok`/`not_applicable`/undefined, an "at risk" badge, a "breached" badge, and
   defaults its label to "SLA".
 - `web/src/pages/admin/AdminServicesPage.test.tsx`: opening the SLA editor and
-  saving a target converts minutes to seconds correctly in the request body.
+  saving a target converts minutes to seconds correctly in the request body; every
+  target column's info icon exposes the right metric definition via its `title`
+  attribute, and an MTTPC target saves correctly.
 
 ## Known limitations
 

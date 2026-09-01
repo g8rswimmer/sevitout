@@ -25,4 +25,8 @@ func ComputeMetrics(sev *store.SEV) {
 		v := int64(sev.MitigatedAt.Sub(*sev.DetectedAt) / time.Second)
 		sev.DTTMSeconds = &v
 	}
+	if sev.MitigatedAt != nil && sev.PostmortemCompletedAt != nil {
+		v := int64(sev.PostmortemCompletedAt.Sub(*sev.MitigatedAt) / time.Second)
+		sev.MTTPCSeconds = &v
+	}
 }

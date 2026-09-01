@@ -847,6 +847,7 @@ func slaEvaluationToProto(eval sev.SLAEvaluation, targets sev.SLATargets) *pb.SL
 		Mttd:    string(eval.MTTD),
 		Mttm:    string(eval.MTTM),
 		Mttr:    string(eval.MTTR),
+		Mttpc:   string(eval.MTTPC),
 		Overall: string(eval.Overall),
 	}
 	if targets.MTTDTargetSeconds != nil {
@@ -857,6 +858,9 @@ func slaEvaluationToProto(eval sev.SLAEvaluation, targets sev.SLATargets) *pb.SL
 	}
 	if targets.MTTRTargetSeconds != nil {
 		status.MttrTargetSeconds = *targets.MTTRTargetSeconds
+	}
+	if targets.MTTPCTargetSeconds != nil {
+		status.MttpcTargetSeconds = *targets.MTTPCTargetSeconds
 	}
 	return status
 }
@@ -952,6 +956,9 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 	}
 	if s.DTTMSeconds != nil {
 		resp.DttmSeconds = *s.DTTMSeconds
+	}
+	if s.MTTPCSeconds != nil {
+		resp.MttpcSeconds = *s.MTTPCSeconds
 	}
 	if s.SlackChannelID != nil {
 		resp.SlackChannelId = *s.SlackChannelID

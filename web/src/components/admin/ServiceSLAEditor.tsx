@@ -4,6 +4,8 @@ import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { InfoTooltip } from '@/components/ui/tooltip'
+import { METRIC_DEFINITIONS } from '@/lib/metricDefinitions'
 import type { ServiceSLAResponse } from '@/types/api'
 
 const SEVERITY_LEVELS = [1, 2, 3, 4]
@@ -12,6 +14,7 @@ interface RowForm {
   mttd: string // minutes, empty string = unset
   mttm: string
   mttr: string
+  mttpc: string
 }
 
 function toForm(sla?: ServiceSLAResponse): RowForm {
@@ -19,6 +22,7 @@ function toForm(sla?: ServiceSLAResponse): RowForm {
     mttd: sla?.mttd_target_seconds ? String(Math.round(Number(sla.mttd_target_seconds) / 60)) : '',
     mttm: sla?.mttm_target_seconds ? String(Math.round(Number(sla.mttm_target_seconds) / 60)) : '',
     mttr: sla?.mttr_target_seconds ? String(Math.round(Number(sla.mttr_target_seconds) / 60)) : '',
+    mttpc: sla?.mttpc_target_seconds ? String(Math.round(Number(sla.mttpc_target_seconds) / 60)) : '',
   }
 }
 
@@ -28,6 +32,21 @@ function toForm(sla?: ServiceSLAResponse): RowForm {
 function minutesToSeconds(v: string): number | undefined {
   const n = Number(v)
   return v.trim() !== '' && n > 0 ? Math.round(n * 60) : undefined
+}
+
+/** One target-minutes column header, an acronym plus an info icon whose
+ * hover/focus tooltip gives the plain-English definition — the same
+ * METRIC_DEFINITIONS text LifecyclePanel.tsx shows per-SEV, so an admin
+ * unfamiliar with "MTTD" isn't left guessing what they're configuring. */
+function ColumnHeader({ label, definition }: { label: string; definition: string }) {
+  return (
+    <th className="py-2 pr-3">
+      <span className="inline-flex items-center gap-1">
+        {label} target (min)
+        <InfoTooltip text={definition} />
+      </span>
+    </th>
+  )
 }
 
 /** Per-service, per-severity-level SLA target editor (Roadmap Phase 12) —
@@ -55,6 +74,7 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
         mttd_target_seconds: minutesToSeconds(form.mttd),
         mttm_target_seconds: minutesToSeconds(form.mttm),
         mttr_target_seconds: minutesToSeconds(form.mttr),
+        mttpc_target_seconds: minutesToSeconds(form.mttpc),
       }),
     onSuccess: (_data, { level }) => {
       invalidate()
@@ -68,7 +88,7 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
     mutationFn: (level: number) => api.config.serviceSLA.delete(serviceId, level),
     onSuccess: (_data, level) => {
       invalidate()
-      setForms((f) => ({ ...f, [level]: { mttd: '', mttm: '', mttr: '' } }))
+      setForms((f) => ({ ...f, [level]: { mttd: '', mttm: '', mttr: '', mttpc: '' } }))
     },
   })
 
@@ -96,9 +116,10 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
               <th className="py-2 pr-3">Severity</th>
-              <th className="py-2 pr-3">MTTD target (min)</th>
-              <th className="py-2 pr-3">MTTM target (min)</th>
-              <th className="py-2 pr-3">MTTR target (min)</th>
+              <ColumnHeader label="MTTD" definition={METRIC_DEFINITIONS.MTTD} />
+              <ColumnHeader label="MTTM" definition={METRIC_DEFINITIONS.MTTM} />
+              <ColumnHeader label="MTTR" definition={METRIC_DEFINITIONS.MTTR} />
+              <ColumnHeader label="MTTPC" definition={METRIC_DEFINITIONS.MTTPC} />
               <th className="py-2" />
             </tr>
           </thead>
@@ -136,6 +157,16 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
                       aria-label={`MTTR target minutes for SEV-${level}`}
                       value={form.mttr}
                       onChange={(e) => setFormFor(level, { ...form, mttr: e.target.value })}
+                      className="w-24"
+                    />
+                  </td>
+                  <td className="py-2 pr-3">
+                    <Input
+                      type="number"
+                      min={0}
+                      aria-label={`MTTPC target minutes for SEV-${level}`}
+                      value={form.mttpc}
+                      onChange={(e) => setFormFor(level, { ...form, mttpc: e.target.value })}
                       className="w-24"
                     />
                   </td>

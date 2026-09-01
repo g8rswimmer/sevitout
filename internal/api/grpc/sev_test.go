@@ -1385,3 +1385,82 @@ func TestListSEVs_SLAStatusPopulated(t *testing.T) {
 }
 
 func int64Ptr(v int64) *int64 { return &v }
+
+func TestTransitionStatus_MTTPCSecondsComputedOnPostmortemComplete(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{Title: "Outage", SeverityLevel: 2})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	mitigatedAt := time.Now().Add(-2 * time.Hour)
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+		Id: created.GetId(), ToStatus: string(store.SEVStatusMitigated), MitigatedAt: timestamppb.New(mitigatedAt),
+	}); err != nil {
+		t.Fatalf("TransitionStatus(Mitigated): %v", err)
+	}
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+		Id: created.GetId(), ToStatus: string(store.SEVStatusResolved),
+	}); err != nil {
+		t.Fatalf("TransitionStatus(Resolved): %v", err)
+	}
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+		Id: created.GetId(), ToStatus: string(store.SEVStatusPostmortemInProgress),
+	}); err != nil {
+		t.Fatalf("TransitionStatus(PostmortemInProgress): %v", err)
+	}
+	// PostmortemCompletedAt omitted — defaults to now, per
+	// applyTransitionTimestamps' doc comment.
+	resp, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+		Id: created.GetId(), ToStatus: string(store.SEVStatusPostmortemComplete),
+	})
+	if err != nil {
+		t.Fatalf("TransitionStatus(PostmortemComplete): %v", err)
+	}
+
+	if resp.GetMttpcSeconds() == 0 {
+		t.Fatal("MttpcSeconds = 0, want computed value (postmortem_completed_at - mitigated_at)")
+	}
+	// ~2 hours (7200s), allowing slack for test execution time.
+	if resp.GetMttpcSeconds() < 7195 || resp.GetMttpcSeconds() > 7210 {
+		t.Errorf("MttpcSeconds = %d, want ~7200 (2h since mitigated_at)", resp.GetMttpcSeconds())
+	}
+}
+
+func TestGetSEV_SLAStatus_MTTPCUsesMitigatedAtAsBaseline(t *testing.T) {
+	ts := newTestSEVServer()
+	ctx := context.Background()
+
+	if err := ts.serviceSLAs.Upsert(ctx, &store.ServiceSLA{
+		ServiceID: "checkout", SeverityLevel: 1, MTTPCTargetSeconds: int64Ptr(86400), // 24h
+	}); err != nil {
+		t.Fatalf("seed SLA: %v", err)
+	}
+
+	created, err := ts.server.CreateSEV(ctx, &pb.CreateSEVRequest{
+		Title: "Checkout errors", SeverityLevel: 1, AffectedServices: []string{"checkout"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	// Mitigated only 10 minutes ago — well within the 24h MTTPC target, even
+	// though the SEV started 2 days ago. If MTTPC were (incorrectly) measured
+	// from started_at like MTTD/MTTM/MTTR, this would show breached.
+	mitigatedAt := time.Now().Add(-10 * time.Minute)
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+		Id: created.GetId(), ToStatus: string(store.SEVStatusMitigated), MitigatedAt: timestamppb.New(mitigatedAt),
+	}); err != nil {
+		t.Fatalf("TransitionStatus(Mitigated): %v", err)
+	}
+
+	got, err := ts.server.GetSEV(ctx, &pb.GetSEVRequest{Id: created.GetId()})
+	if err != nil {
+		t.Fatalf("GetSEV: %v", err)
+	}
+	if got.GetSlaStatus().GetMttpc() != "ok" {
+		t.Errorf("Mttpc = %q, want ok (10m elapsed since mitigated_at < 24h target)", got.GetSlaStatus().GetMttpc())
+	}
+}

@@ -610,6 +610,11 @@
         "slaStatus": {
           "$ref": "#/definitions/v1SLAStatus",
           "description": "sla_status is this SEV's live SLA breach status (docs/roadmap.md\nPhase 12), derived on every read against the most-strict SLA target\nacross its affected_services at severity_level — never trusted from\nstorage, the same discipline TaskResponse.overdue already applies to\ntask due dates. Absent (zero value) when no attached service has any\nSLA target configured at this SEV's severity level."
+        },
+        "mttpcSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "mttpc_seconds is Mitigation to Postmortem Complete\n(postmortem_completed_at − mitigated_at) — the same point-A-to-point-B\nshape as dttm_seconds above, not \"from started_at\" like\nmttd/mttm/mttr_seconds. Added as a Phase 12 follow-up SLA target for the\npostmortem tail."
         }
       }
     },
@@ -628,7 +633,7 @@
         },
         "overall": {
           "type": "string",
-          "description": "overall is the worst of mttd/mttm/mttr — what a summary badge should show."
+          "description": "overall is the worst of mttd/mttm/mttr/mttpc — what a summary badge\nshould show."
         },
         "mttdTargetSeconds": {
           "type": "string",
@@ -640,6 +645,14 @@
           "format": "int64"
         },
         "mttrTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttpc": {
+          "type": "string",
+          "description": "mttpc is Mitigation to Postmortem Complete — measured from mitigated_at,\nnot started_at like mttd/mttm/mttr above (see SEVResponse.mttpc_seconds)."
+        },
+        "mttpcTargetSeconds": {
           "type": "string",
           "format": "int64"
         }
