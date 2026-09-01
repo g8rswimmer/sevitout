@@ -870,6 +870,179 @@ but doesn't hard-block on it.
 
 ---
 
+## Phase 12 — Per-service SLA targets and breach indicators
+
+**Status**: not started
+
+SEVs compute MTTD/MTTM/MTTR (`internal/sev/metrics.go`) but nothing defines what
+those numbers *should* be, and there's no way to tell at a glance whether a SEV is
+on track. This phase adds per-service, per-severity-level SLA targets for the three
+headline metrics, and a live breach indicator wired into the SEV response and UI —
+modeled directly on the existing Task "Overdue" badge, which already derives its
+status from `now` on every read rather than trusting a stored flag
+(`internal/api/grpc/task.go`'s `isOverdue`/`computeDueDate`, rendered via
+`TasksPanel.tsx:185-189`'s `<Badge variant="destructive"><AlertTriangle />Overdue</Badge>`).
+DTTM is excluded — it's a secondary derived metric (detect→mitigate), not one of
+the three targets a team sets an SLA against.
+
+**12a. Backend: schema + store**
+
+- New table `service_slas` (migration `000016_service_sla.{up,down}.sql`): `id
+  BIGSERIAL PK`, `service_id TEXT REFERENCES services(id) ON DELETE CASCADE`,
+  `severity_level SMALLINT CHECK (BETWEEN 1 AND 4)`, three nullable
+  `*_target_seconds BIGINT` columns (`mttd_target_seconds`, `mttm_target_seconds`,
+  `mttr_target_seconds`), `created_at`/`updated_at`, `UNIQUE (service_id,
+  severity_level)`. A nil target column means "no SLA set for this metric" — not
+  an instant breach.
+- New `store.ServiceSLA` struct in `internal/store/models.go`, alongside `Service`
+  (`internal/store/models.go:409-420`) and mirroring `RetentionConfig`'s doc-comment
+  style (`internal/store/models.go:470-481`).
+- New `store.ServiceSLAStore` interface in `internal/store/store.go`, next to
+  `ServiceStore` (`internal/store/store.go:107-114`):
+  `Upsert(ctx, *ServiceSLA) error`, `Get(ctx, serviceID string, severityLevel
+  int16) (*ServiceSLA, error)`, `Delete(ctx, serviceID string, severityLevel
+  int16) error`, `ListByService(ctx, serviceID string) ([]*ServiceSLA, error)`
+  (admin editor), `ListForServices(ctx, serviceIDs []string, severityLevel int16)
+  ([]*ServiceSLA, error)` (the batch lookup breach evaluation needs).
+- In-memory fake `internal/store/memory/service_sla.go`, following
+  `internal/store/memory/service.go`'s `sync.RWMutex` + defensive-copy shape;
+  Postgres implementation `internal/store/postgres/service_sla.go` + sqlc queries
+  in `internal/store/sql/service_slas.sql`, matching `services.sql`'s
+  `-- name: X :one/:many/:exec` convention.
+
+**12b. Backend: SLA evaluation domain logic**
+
+- New `internal/sev/sla.go`, alongside `metrics.go` and `statemachine.go`.
+- `SLATargets{MTTDTargetSeconds, MTTMTargetSeconds, MTTRTargetSeconds *int64}` and
+  `MostStrictSLA(rows []*store.ServiceSLA) SLATargets` — reduces every attached
+  service's SLA row at the SEV's severity level to one effective target per
+  metric by taking the minimum non-nil value per metric ("if a SEV has multiple
+  services, the most strict SLAs should be used"). A service with no row for that
+  severity level simply doesn't participate.
+- `SLAMetricStatus` string enum: `not_applicable` (no target configured, or no
+  baseline timestamp yet), `ok`, `at_risk` (still in progress, elapsed already
+  exceeds target), `breached` (final timestamp recorded and exceeded target).
+- `EvaluateSLA(s *store.SEV, targets SLATargets, now time.Time) SLAEvaluation`,
+  returning per-metric status plus `Overall` (worst of the three). Per metric,
+  same shape as MTTD/MTTM/MTTR's own nil-safety in `ComputeMetrics`: if the final
+  `*Seconds` value is already set, compare it to target (`breached` if over, else
+  `ok`); if not set but the baseline timestamp (`StartedAt`) is, compare
+  `now.Sub(StartedAt)` to target (`at_risk` if over, else `ok`); if no baseline
+  yet, `not_applicable`. This means an at-risk MTTD flips cleanly to
+  `breached`/`ok` the moment `DetectedAt` is finally recorded — no separate
+  transition logic needed.
+
+**12c. Backend: API surface**
+
+- `proto/sevitout/v1/sev.proto`: new `message SLAStatus` (`mttd`, `mttm`, `mttr`,
+  `overall` status strings + the three resolved `*_target_seconds`, 0 = not
+  applicable), added to `SEVResponse` at the next free field number (after
+  `slack_channel_id`, currently ending at 38 — confirm exact number at
+  implementation time).
+- `proto/sevitout/v1/config.proto`: `ServiceSLAResponse`,
+  `UpsertServiceSLARequest`, `GetServiceSLARequest`, `DeleteServiceSLARequest`,
+  `ListServiceSLAsRequest`/`Response` — same shape as the existing
+  `Service*`/`RetentionConfig*` messages (`config.proto:243-290`).
+- `ConfigServer` (`internal/api/grpc/config_service.go`) gets a new
+  `service_sla.go` file with `UpsertServiceSLA`, `GetServiceSLA`,
+  `DeleteServiceSLA`, `ListServiceSLAs`, following `CreateService`/`GetService`'s
+  exact error-mapping pattern (`store.ErrNotFound` → `codes.NotFound`, etc.).
+  RBAC additions in `internal/auth/rbac.go` (next to the `ConfigService/*Service`
+  block, `internal/auth/rbac.go:92-96`): `GetServiceSLA`/`ListServiceSLAs` →
+  `store.OrgRoleViewer` (matches `GetService`/`ListServices`, since the same
+  numbers are already implicitly exposed to any Viewer via `SEVResponse.sla_status`
+  below), `UpsertServiceSLA`/`DeleteServiceSLA` → `store.OrgRoleAdmin` (matches
+  `UpdateService`/`DeleteService`).
+- `SEVServer` (`internal/api/grpc/sev.go`) gets a new `serviceSLAs
+  store.ServiceSLAStore` dependency, wired in `cmd/server`. In every handler that
+  builds a `SEVResponse` (`GetSEV`, `ListSEVs`, `CreateSEV`, `UpdateSEV`,
+  `TransitionStatus` — the existing `sev.ComputeMetrics(record)` call sites at
+  `internal/api/grpc/sev.go:269,511,753` plus the plain-read path): look up
+  `serviceSLAs.ListForServices(ctx, record.AffectedServices,
+  record.SeverityLevel)`, reduce via `sev.MostStrictSLA`, evaluate via
+  `sev.EvaluateSLA(record, targets, time.Now())`, attach as `SLAStatus` alongside
+  the existing `sevToProto(record)` call (`internal/api/grpc/sev.go:818`) rather
+  than folding the store lookup into `sevToProto` itself, keeping that function
+  free of I/O.
+- **Accepted tradeoff, stated explicitly**: `ListSEVs` does one small indexed
+  `ListForServices` query per returned SEV rather than a single batched query —
+  matches this codebase's existing lack of batching elsewhere (e.g. Create's
+  single on-call lookup, `internal/api/grpc/sev.go:305-306`) and is bounded by
+  page size. A batched variant (one query per distinct severity level in the
+  page, filtered client-side per SEV) is a named follow-up if list-page latency
+  becomes a real problem.
+
+**12d. Frontend: admin SLA editor**
+
+- New `web/src/pages/admin/AdminServiceSLAPage.tsx` (or a per-service expandable
+  panel reached from `AdminServicesPage.tsx`), built directly on
+  `AdminRetentionPage.tsx`'s existing 4-row-per-severity-level table pattern
+  (`web/src/pages/admin/AdminRetentionPage.tsx:12,84-128`: one row per `SEV-{1..4}`,
+  numeric inputs, a per-row Save button, per-row inline error) — swapping
+  "retention days / hard delete" for three numeric target inputs
+  (MTTD/MTTM/MTTR, displayed in minutes, converted to/from seconds at the API
+  boundary).
+- `web/src/lib/api.ts`: add `api.config.serviceSLA.{list, upsert, delete}`,
+  mirroring the existing `api.config.retention.*` calls.
+- `web/src/types/api.ts`: add `ServiceSLAResponse`, `SLAMetricStatus = 'ok' |
+  'at_risk' | 'breached' | 'not_applicable'`, `SLAStatus`, and extend
+  `SEVResponse` (`web/src/types/api.ts:198-253`) with `sla_status?: SLAStatus`.
+
+**12e. Frontend: SEV breach indicators**
+
+- New `SLABadge({ status }: { status?: SLAMetricStatus })` in
+  `web/src/components/sev/badges.tsx`, alongside `SeverityBadge`/`StatusBadge`
+  (`web/src/components/sev/badges.tsx:12-18`): renders nothing for
+  `ok`/`not_applicable`/undefined, an amber "At risk" badge for `at_risk`, a
+  `variant="destructive"` "SLA breached" badge (with `AlertTriangle`, matching
+  `TasksPanel.tsx`'s Overdue badge) for `breached`.
+- `web/src/components/sev/LifecyclePanel.tsx`: render `<SLABadge
+  status={sev.sla_status?.mttd} />` etc. next to each of the existing
+  `MetricField`s (`LifecyclePanel.tsx:108-110`), so a breach is visible right on
+  the metric it belongs to.
+- `web/src/pages/SevDetailPage.tsx` and `web/src/pages/SevListPage.tsx`: an
+  overall `<SLABadge status={sev.sla_status?.overall} />` rendered next to the
+  existing `SeverityBadge`/`StatusBadge` pair, so a breach is visible without
+  opening the SEV.
+
+**12f. Tests + demo doc**
+
+- Go: `internal/sev/sla_test.go` for `MostStrictSLA` (multi-service min-reduction,
+  partial-configuration cases) and `EvaluateSLA` (all four status outcomes per
+  metric, the at-risk→breached/ok transition once the final timestamp lands);
+  `internal/store/memory/service_sla_test.go`; `config_service_test.go` additions
+  for the new RPCs' RBAC floors and not-found/conflict mapping; `sev_test.go`
+  additions asserting `SEVResponse.sla_status` reflects the most-strict target
+  across two attached services.
+- Frontend: `AdminServiceSLAPage.test.tsx` (new, mirrors
+  `AdminRetentionPage.test.tsx`); `badges.test.tsx` additions for `SLABadge`'s
+  three render states.
+- `demo/service-sla-breach-indicators.md` (existing template: What was built /
+  Prerequisites / Walkthrough / Known limitations). Known limitations to restate:
+  an `AffectedServices` entry that doesn't resolve to a real `Service.ID` (loose
+  free-text entry, `web/src/components/sev/ServiceChipEditor.tsx:9-12`) is
+  silently excluded from the most-strict computation, same as it's already
+  excluded from `ServiceStore.Get` lookups elsewhere; `ListSEVs`'s per-row SLA
+  lookup isn't batched (12c).
+
+**Also considered and explicitly deferred**:
+- An org-wide default/fallback SLA for SEVs with no attached service, or attached
+  services with no configured row — out of scope; no target means no indicator,
+  full stop, for this phase.
+- Automated breach notifications (e.g. a Slack ping when a SEV crosses `at_risk`)
+  — this phase is indicators-only; escalation/notification is a separate future
+  phase if wanted.
+- SLA compliance reporting/analytics (e.g. "% of SEVs within SLA this quarter") —
+  out of scope; this phase is per-SEV live status only, not an aggregate rollup.
+
+**Estimate**: ~4.5-6 days (12a ~0.75-1 day, 12b ~0.5 day, 12c ~1-1.5 days, 12d
+~0.75-1 day, 12e ~0.75-1 day, 12f ~0.5-0.75 day). **Depends on**: nothing — reuses
+the existing `Service` registry and `SEVServer`/`ConfigServer` wiring unchanged;
+independent of Phases 8-11's integration work, so it can be sequenced whenever SLA
+tracking becomes a priority.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -887,6 +1060,7 @@ but doesn't hard-block on it.
 | 9 | Schema-driven integration settings (catalog + sidebar admin UI + Monitoring) | — | 3-4 days |
 | 10 | Per-user integration profiles (Slack/GitHub/Jira identity) | — | 6-8 days |
 | 11 | Integration-aware SEV UI (hide unconfigured actions, self-join Slack, creator invite) | 10 | 3.5-4.5 days |
+| 12 | Per-service SLA targets and breach indicators | — | 4.5-6 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -906,6 +1080,9 @@ across multiple PRs/milestones. Phase 11 is the first phase in this document wit
 real hard dependency on another unshipped phase: it needs Phase 10's per-user Slack
 identities, `ListUserDirectory` RPC, and persisted `SEV.SlackChannelID`, so it must
 be sequenced strictly after Phase 10 rather than run independently like 8/9/10.
+Phase 12 is independent of every phase above it — it only needs the existing
+`Service` registry, not any integration work from Phases 6-11 — so it can be
+sequenced whenever SLA tracking becomes a priority.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
