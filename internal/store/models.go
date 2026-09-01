@@ -303,9 +303,17 @@ type LinkedTask struct {
 	// TaskServer.CreateGitHubIssue/CreateJiraIssue (docs/roadmap.md Phase
 	// 10f). Nil for tasks linked via plain LinkTask, or created before this
 	// field existed.
-	Assignee  *string
-	CreatedAt time.Time
-	CreatedBy string
+	Assignee *string
+	// AssigneeName is the Sevitout display name of the assignee, resolved
+	// server-side at creation time from the assignee_user_id the picker
+	// sends — a snapshot, not a live lookup (the same trade-off already
+	// accepted for SEVRole.DisplayName), so it's what the UI shows instead
+	// of Assignee's opaque tracker-native value. Nil when the assignee
+	// wasn't picked from Sevitout's own directory (e.g. a raw API call);
+	// callers should fall back to Assignee for display in that case.
+	AssigneeName *string
+	CreatedAt    time.Time
+	CreatedBy    string
 }
 
 // SEVLink is a typed directional relationship between two SEVs.

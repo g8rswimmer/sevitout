@@ -37,7 +37,7 @@ func (q *Queries) DeleteLinkedTask(ctx context.Context, id int64) error {
 const getLinkedTask = `-- name: GetLinkedTask :one
 SELECT id, sev_id, external_system, task_id, url, title, description,
        relationship_type, priority, due_date, overdue, created_at, created_by,
-       assignee
+       assignee, assignee_name
 FROM sev_linked_tasks
 WHERE id = $1
 `
@@ -60,6 +60,7 @@ func (q *Queries) GetLinkedTask(ctx context.Context, id int64) (SevLinkedTask, e
 		&i.CreatedAt,
 		&i.CreatedBy,
 		&i.Assignee,
+		&i.AssigneeName,
 	)
 	return i, err
 }
@@ -68,8 +69,8 @@ const insertLinkedTask = `-- name: InsertLinkedTask :one
 INSERT INTO sev_linked_tasks (
     sev_id, external_system, task_id, url, title, description,
     relationship_type, priority, due_date, overdue, created_at, created_by,
-    assignee
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    assignee, assignee_name
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING id
 `
 
@@ -87,6 +88,7 @@ type InsertLinkedTaskParams struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	CreatedBy        string             `json:"created_by"`
 	Assignee         *string            `json:"assignee"`
+	AssigneeName     *string            `json:"assignee_name"`
 }
 
 func (q *Queries) InsertLinkedTask(ctx context.Context, arg InsertLinkedTaskParams) (int64, error) {
@@ -104,6 +106,7 @@ func (q *Queries) InsertLinkedTask(ctx context.Context, arg InsertLinkedTaskPara
 		arg.CreatedAt,
 		arg.CreatedBy,
 		arg.Assignee,
+		arg.AssigneeName,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -113,7 +116,7 @@ func (q *Queries) InsertLinkedTask(ctx context.Context, arg InsertLinkedTaskPara
 const listLinkedTasksBySEVID = `-- name: ListLinkedTasksBySEVID :many
 SELECT id, sev_id, external_system, task_id, url, title, description,
        relationship_type, priority, due_date, overdue, created_at, created_by,
-       assignee
+       assignee, assignee_name
 FROM sev_linked_tasks
 WHERE sev_id = $1
 ORDER BY created_at
@@ -143,6 +146,7 @@ func (q *Queries) ListLinkedTasksBySEVID(ctx context.Context, sevID string) ([]S
 			&i.CreatedAt,
 			&i.CreatedBy,
 			&i.Assignee,
+			&i.AssigneeName,
 		); err != nil {
 			return nil, err
 		}

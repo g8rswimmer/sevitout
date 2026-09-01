@@ -43,6 +43,7 @@ func (s *TaskStore) Create(ctx context.Context, task *store.LinkedTask) error {
 		CreatedAt:        pgtype.Timestamptz{Time: task.CreatedAt.UTC(), Valid: true},
 		CreatedBy:        task.CreatedBy,
 		Assignee:         task.Assignee,
+		AssigneeName:     task.AssigneeName,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -174,6 +175,7 @@ func mapLinkedTaskRow(r queries.SevLinkedTask) *store.LinkedTask {
 		CreatedAt:        r.CreatedAt.Time,
 		CreatedBy:        r.CreatedBy,
 		Assignee:         r.Assignee,
+		AssigneeName:     r.AssigneeName,
 	}
 }
 

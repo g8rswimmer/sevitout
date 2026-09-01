@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -81,6 +82,7 @@ type TaskServer struct {
 	sevs      store.SEVStore
 	access    store.SEVAccessStore
 	audit     store.AuditStore
+	users     store.UserStore // resolves assignee_user_id -> a display name for AssigneeName; nil is tolerated (name resolution is skipped)
 	github    IssueClient     // nil when GITHUB_TOKEN is not set
 	jira      JiraIssueClient // nil when JIRA_CLOUD_ID/JIRA_API_TOKEN are not both set
 	publisher Publisher       // nil when WebSocket support is not wired up
@@ -88,13 +90,14 @@ type TaskServer struct {
 
 // TaskServerParams groups NewTaskServer's dependencies. GitHub and Jira may
 // each independently be nil (both are optional at deploy time); in that
-// case CreateGitHubIssue/CreateJiraIssue returns Unavailable. Publisher may
-// also be nil.
+// case CreateGitHubIssue/CreateJiraIssue returns Unavailable. Publisher and
+// Users may also be nil.
 type TaskServerParams struct {
 	Tasks     store.TaskStore
 	SEVs      store.SEVStore
 	Access    store.SEVAccessStore
 	Audit     store.AuditStore
+	Users     store.UserStore
 	GitHub    IssueClient
 	Jira      JiraIssueClient
 	Publisher Publisher
@@ -103,7 +106,7 @@ type TaskServerParams struct {
 // NewTaskServer returns a TaskServer backed by p.
 func NewTaskServer(p TaskServerParams) *TaskServer {
 	return &TaskServer{
-		tasks: p.Tasks, sevs: p.SEVs, access: p.Access, audit: p.Audit,
+		tasks: p.Tasks, sevs: p.SEVs, access: p.Access, audit: p.Audit, users: p.Users,
 		github: p.GitHub, jira: p.Jira, publisher: p.Publisher,
 	}
 }
@@ -424,6 +427,7 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 	if v := req.GetAssignee(); v != "" {
 		task.Assignee = &v
 	}
+	task.AssigneeName = s.resolveAssigneeName(ctx, req.GetAssigneeUserId())
 
 	if err := s.tasks.Create(ctx, task); err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -526,6 +530,7 @@ func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssu
 	if v := req.GetAssigneeAccountId(); v != "" {
 		task.Assignee = &v
 	}
+	task.AssigneeName = s.resolveAssigneeName(ctx, req.GetAssigneeUserId())
 
 	if err := s.tasks.Create(ctx, task); err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -667,7 +672,29 @@ func taskToProto(t *store.LinkedTask, now time.Time) *pb.TaskResponse {
 	if t.Assignee != nil {
 		resp.Assignee = *t.Assignee
 	}
+	if t.AssigneeName != nil {
+		resp.AssigneeName = *t.AssigneeName
+	}
 	return resp
+}
+
+// resolveAssigneeName resolves userID (a Sevitout user ID, from
+// CreateGitHubIssueRequest/CreateJiraIssueRequest's assignee_user_id) to
+// that user's current display name, for the LinkedTask.AssigneeName
+// snapshot. Returns nil — not an error — when userID is empty, s.users
+// isn't wired up, or the lookup fails: a display-name resolution failure
+// must never block issue creation, which by this point has already
+// succeeded against the real tracker (GitHub/Jira).
+func (s *TaskServer) resolveAssigneeName(ctx context.Context, userID string) *string {
+	if userID == "" || s.users == nil {
+		return nil
+	}
+	user, err := s.users.Get(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "resolve assignee name failed", "user_id", userID, "err", err)
+		return nil
+	}
+	return &user.Name
 }
 
 func validateRelationshipType(rt string) error {

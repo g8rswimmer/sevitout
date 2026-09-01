@@ -95,6 +95,22 @@ action, and default new tracker issues to the creating user.
   `TaskResponse` gains `assignee`, persisted on the linked task
   (`sev_linked_tasks.assignee`, migration `000014`) so the list can show it
   without a live re-fetch.
+- **`assignee_name` (follow-up fix)**: the *linked-tasks list* originally
+  showed `assignee`'s raw tracker-native value (a GitHub login or opaque
+  Jira account ID) even for a task assigned via the picker — reported
+  immediately after the picker shipped. `CreateGitHubIssueRequest` and
+  `CreateJiraIssueRequest` now also accept `assignee_user_id` (the picked
+  user's Sevitout ID, sent by `AssigneePicker.tsx` alongside the
+  tracker-native value it already sent); `TaskServer` resolves it
+  server-side to that user's current display name and stores it as
+  `sev_linked_tasks.assignee_name` (migration `000015`) — a snapshot, not a
+  live lookup, the same trade-off already accepted for
+  `SEVRoleResponse.display_name`. `TaskResponse.assignee_name` is preferred
+  over `assignee` everywhere it's displayed, falling back to the raw value
+  only for a task whose assignee wasn't picked from Sevitout's own
+  directory (e.g. a raw API call). A lookup failure at creation time is
+  non-fatal — the tracker issue has already been created for real by that
+  point, so a name-resolution problem never blocks the create.
 - `TasksPanel.tsx`: both create-issue forms gain an "Assignee" field, backed
   by a new `AssigneePicker.tsx` — a searchable dropdown of directory users
   who have the relevant identity set (`ListUserDirectory`, filtered

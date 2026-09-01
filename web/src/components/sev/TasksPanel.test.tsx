@@ -202,9 +202,10 @@ describe('TasksPanel', () => {
     const [, init] = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/github-issues`)!
     const body = JSON.parse(String(init!.body))
     expect(body.assignee).toBeUndefined()
+    expect(body.assignee_user_id).toBeUndefined()
   })
 
-  it('searching and picking a GitHub assignee submits their github_username and shows their name', async () => {
+  it('searching and picking a GitHub assignee submits their github_username and assignee_user_id, shown by name', async () => {
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
@@ -251,9 +252,10 @@ describe('TasksPanel', () => {
     const [, init] = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/github-issues`)!
     const body = JSON.parse(String(init!.body))
     expect(body.assignee).toBe('bob-gh')
+    expect(body.assignee_user_id).toBe('user-2')
   })
 
-  it('searching and picking a Jira assignee submits their jira_account_id', async () => {
+  it('searching and picking a Jira assignee submits their jira_account_id and assignee_user_id', async () => {
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
@@ -290,5 +292,28 @@ describe('TasksPanel', () => {
     const [, init] = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/jira-issues`)!
     const body = JSON.parse(String(init!.body))
     expect(body.assignee_account_id).toBe('acc-42')
+    expect(body.assignee_user_id).toBe('user-2')
+  })
+
+  it('prefers assignee_name over the raw assignee value in the linked-tasks list', async () => {
+    const list: ListTasksResponse = {
+      tasks: [
+        task({ id: '1', external_system: 'github', title: 'Has a name', assignee: 'alice-gh', assignee_name: 'Alice' }),
+        task({ id: '2', external_system: 'jira', title: 'No name on file', assignee: 'acc-99' }),
+      ],
+    }
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = String(input)
+      if (url === `/v1/sevs/${SEV_ID}/tasks`) return Promise.resolve(jsonResponse(list))
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+    renderWithProviders(<TasksPanel sevId={SEV_ID} canManage={false} />)
+
+    const namedItem = (await screen.findByText('Has a name')).closest('li')!
+    expect(within(namedItem).getByText('Assigned to Alice')).toBeInTheDocument()
+    expect(within(namedItem).queryByText(/alice-gh/)).not.toBeInTheDocument()
+
+    const fallbackItem = screen.getByText('No name on file').closest('li')!
+    expect(within(fallbackItem).getByText('Assigned to acc-99')).toBeInTheDocument()
   })
 })

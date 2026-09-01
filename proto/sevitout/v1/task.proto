@@ -85,6 +85,15 @@ message TaskResponse {
   // (docs/roadmap.md Phase 10f). Absent for tasks linked via LinkTask, or
   // created before this field existed.
   string assignee = 14;
+  // assignee_name is the Sevitout display name of the assignee, resolved
+  // server-side at creation time from CreateGitHubIssueRequest.assignee_user_id
+  // / CreateJiraIssueRequest.assignee_user_id — a snapshot, not a live
+  // lookup, the same trade-off already accepted for SEVRoleResponse's own
+  // display_name. Absent when the assignee wasn't picked from Sevitout's
+  // own directory (e.g. a raw API call supplying only the tracker-native
+  // `assignee`); clients should fall back to `assignee` for display in that
+  // case.
+  string assignee_name = 15;
 }
 
 message LinkTaskRequest {
@@ -140,6 +149,15 @@ message CreateGitHubIssueRequest {
   // GitHub's assignees: []string at the client layer). Optional — an empty
   // value creates the issue unassigned (docs/roadmap.md Phase 10f).
   string assignee = 8;
+  // assignee_user_id is the Sevitout user ID of the picked assignee, when
+  // picked via the frontend's directory-backed AssigneePicker (as opposed
+  // to a raw API call supplying only `assignee` directly) — the server
+  // resolves it to that user's current display name and stores it as
+  // TaskResponse.assignee_name, so the linked-tasks list can show a person's
+  // name instead of their opaque GitHub login. Optional; a lookup failure
+  // (e.g. an unrecognized ID) is non-fatal — issue creation still succeeds,
+  // just without assignee_name set.
+  string assignee_user_id = 9;
 }
 
 message CreateJiraIssueRequest {
@@ -165,4 +183,8 @@ message CreateJiraIssueRequest {
   // opaque ID a user typically can't see in Jira's own UI without an
   // email->accountId lookup (docs/roadmap.md Phase 10f's documented UX risk).
   string assignee_account_id = 8;
+  // assignee_user_id is the Sevitout user ID of the picked assignee — same
+  // meaning as CreateGitHubIssueRequest.assignee_user_id, resolved into
+  // TaskResponse.assignee_name the same way.
+  string assignee_user_id = 9;
 }

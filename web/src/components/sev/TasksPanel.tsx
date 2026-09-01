@@ -53,14 +53,18 @@ export function TasksPanel({
   const [projectKey, setProjectKey] = useState('')
   const [issueType, setIssueType] = useState('')
   // Assignee: the tracker-native value actually submitted (a GitHub login
-  // or Jira account ID) plus the display name shown in its place, set
-  // together by AssigneePicker.tsx's search-and-pick UI — pre-filled from
-  // the caller's own stored integration identity (Roadmap Phase 10f),
-  // clearable, and omitted from the request payload when empty.
+  // or Jira account ID), the display name shown in its place, and the
+  // Sevitout user ID sent alongside so the server can re-resolve that name
+  // into TaskResponse.assignee_name — set together by AssigneePicker.tsx's
+  // search-and-pick UI, pre-filled from the caller's own stored integration
+  // identity (Roadmap Phase 10f), clearable, and omitted from the request
+  // payload when empty.
   const [githubAssignee, setGithubAssignee] = useState('')
   const [githubAssigneeName, setGithubAssigneeName] = useState('')
+  const [githubAssigneeUserId, setGithubAssigneeUserId] = useState('')
   const [jiraAssignee, setJiraAssignee] = useState('')
   const [jiraAssigneeName, setJiraAssigneeName] = useState('')
+  const [jiraAssigneeUserId, setJiraAssigneeUserId] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sevs', sevId, 'tasks'] })
@@ -96,6 +100,7 @@ export function TasksPanel({
         relationship_type: relationshipType,
         priority,
         assignee: githubAssignee.trim() || undefined,
+        assignee_user_id: githubAssigneeUserId || undefined,
       }),
     onSuccess: () => {
       setOwner('')
@@ -104,6 +109,7 @@ export function TasksPanel({
       setDescription('')
       setGithubAssignee('')
       setGithubAssigneeName('')
+      setGithubAssigneeUserId('')
       setError(null)
       void invalidate()
     },
@@ -120,6 +126,7 @@ export function TasksPanel({
         relationship_type: relationshipType,
         priority,
         assignee_account_id: jiraAssignee.trim() || undefined,
+        assignee_user_id: jiraAssigneeUserId || undefined,
       }),
     onSuccess: () => {
       setProjectKey('')
@@ -128,6 +135,7 @@ export function TasksPanel({
       setDescription('')
       setJiraAssignee('')
       setJiraAssigneeName('')
+      setJiraAssigneeUserId('')
       setError(null)
       void invalidate()
     },
@@ -174,7 +182,12 @@ export function TasksPanel({
                     </Badge>
                   )}
                   {t.due_date && <span>Due {formatDateTime(t.due_date)}</span>}
-                  {t.assignee && <span>Assigned to {t.assignee}</span>}
+                  {/* assignee_name (a Sevitout user's display name, resolved
+                      server-side from assignee_user_id) is preferred over
+                      assignee itself — the raw GitHub login/Jira account ID
+                      is only shown as a fallback for a task whose assignee
+                      wasn't picked from Sevitout's own directory. */}
+                  {(t.assignee_name || t.assignee) && <span>Assigned to {t.assignee_name || t.assignee}</span>}
                 </div>
               </div>
               {canManage && (
@@ -215,6 +228,7 @@ export function TasksPanel({
                 if (!githubAssignee && user?.github_username) {
                   setGithubAssignee(user.github_username)
                   setGithubAssigneeName(user.name)
+                  setGithubAssigneeUserId(user.id)
                 }
               }}
             >
@@ -229,6 +243,7 @@ export function TasksPanel({
                 if (!jiraAssignee && user?.jira_account_id) {
                   setJiraAssignee(user.jira_account_id)
                   setJiraAssigneeName(user.name)
+                  setJiraAssigneeUserId(user.id)
                 }
               }}
             >
@@ -261,10 +276,12 @@ export function TasksPanel({
                   onSelect={(u) => {
                     setGithubAssignee(u.github_username!)
                     setGithubAssigneeName(u.name)
+                    setGithubAssigneeUserId(u.id)
                   }}
                   onClear={() => {
                     setGithubAssignee('')
                     setGithubAssigneeName('')
+                    setGithubAssigneeUserId('')
                   }}
                 />
               </>
@@ -294,10 +311,12 @@ export function TasksPanel({
                   onSelect={(u) => {
                     setJiraAssignee(u.jira_account_id!)
                     setJiraAssigneeName(u.name)
+                    setJiraAssigneeUserId(u.id)
                   }}
                   onClear={() => {
                     setJiraAssignee('')
                     setJiraAssigneeName('')
+                    setJiraAssigneeUserId('')
                   }}
                 />
               </>

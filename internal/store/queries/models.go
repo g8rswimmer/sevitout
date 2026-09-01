@@ -209,6 +209,7 @@ type SevLinkedTask struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	CreatedBy        string             `json:"created_by"`
 	Assignee         *string            `json:"assignee"`
+	AssigneeName     *string            `json:"assignee_name"`
 }
 
 type SevRole struct {

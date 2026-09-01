@@ -224,7 +224,7 @@ func main() {
 	chatServer := grpchandler.NewChatServer(stores.Chat, stores.SEV, stores.SEVAccess, wsHub)
 	sevLinkServer := grpchandler.NewSEVLinkServer(stores.SEVLink, stores.SEV, stores.SEVAccess, stores.Audit)
 	taskServer := grpchandler.NewTaskServer(grpchandler.TaskServerParams{
-		Tasks: stores.Task, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit,
+		Tasks: stores.Task, SEVs: stores.SEV, Access: stores.SEVAccess, Audit: stores.Audit, Users: stores.User,
 		GitHub: issueClient, Jira: jiraClient, Publisher: wsHub,
 	})
 	searchServer := grpchandler.NewSearchServer(stores.SEV, stores.Role, stores.Announcement)

@@ -555,6 +555,13 @@ export interface TaskResponse {
   // account ID) set at issue-creation time (Roadmap Phase 10f). Absent for
   // tasks linked via LinkTask, or created before this field existed.
   assignee?: string
+  // assignee_name is the Sevitout display name of the assignee, resolved
+  // server-side at creation time from CreateGitHubIssueRequest.assignee_user_id
+  // / CreateJiraIssueRequest.assignee_user_id — a snapshot, not a live
+  // lookup. Prefer this over `assignee` for display; fall back to `assignee`
+  // only when this is absent (e.g. a task created via a raw API call that
+  // never supplied assignee_user_id).
+  assignee_name?: string
 }
 
 export interface LinkTaskRequest {
@@ -577,6 +584,11 @@ export interface CreateGitHubIssueRequest {
   priority: TaskPriority
   /** A GitHub login to assign the new issue to; omitted creates it unassigned. */
   assignee?: string
+  /** The Sevitout user ID of the picked assignee (AssigneePicker.tsx) — the
+   * server resolves it to that user's display name and returns it as
+   * TaskResponse.assignee_name, so the linked-tasks list can show a name
+   * instead of the raw GitHub login above. */
+  assignee_user_id?: string
 }
 
 export interface CreateJiraIssueRequest {
@@ -595,6 +607,9 @@ export interface CreateJiraIssueRequest {
    * Jira's own UI without an email->accountId lookup — see the Profile
    * page's help text and demo/integration-user-profiles.md. */
   assignee_account_id?: string
+  /** The Sevitout user ID of the picked assignee — same meaning as
+   * CreateGitHubIssueRequest.assignee_user_id. */
+  assignee_user_id?: string
 }
 
 export interface ListTasksResponse {
