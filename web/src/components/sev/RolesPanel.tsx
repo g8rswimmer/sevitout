@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquarePlus, Trash2, X } from 'lucide-react'
+import { LogIn, MessageSquarePlus, Trash2, X } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Section } from '@/components/sev/Section'
+import { useEnabledIntegrations } from '@/lib/useEnabledIntegrations'
 import { SEV_ROLE_LABELS, type DirectoryUser, type SEVRoleType } from '@/types/api'
 
 const ROLE_TYPES = Object.keys(SEV_ROLE_LABELS) as SEVRoleType[]
@@ -26,6 +27,11 @@ export function RolesPanel({
 }) {
   const queryClient = useQueryClient()
   const roles = useQuery({ queryKey: ['sevs', sevId, 'roles'], queryFn: () => api.roles.list(sevId) })
+  // Roadmap Phase 11b/11c: Slack-tied actions (per-role "Add to chat" above,
+  // and this section's self-service "Join Slack channel") render only when
+  // the "slack" integration is configured — not just when a channel exists.
+  const { isEnabled: isIntegrationEnabled } = useEnabledIntegrations()
+  const slackEnabled = isIntegrationEnabled('slack')
 
   const [roleType, setRoleType] = useState<SEVRoleType>('responder')
   const [displayName, setDisplayName] = useState('')
@@ -33,6 +39,7 @@ export function RolesPanel({
   const [pickerQuery, setPickerQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [inviteError, setInviteError] = useState<{ id: string; message: string } | null>(null)
+  const [joinError, setJoinError] = useState<string | null>(null)
 
   // Only searches once at least 2 characters are typed, so every keystroke
   // on a short/empty query doesn't fire a request.
@@ -68,6 +75,15 @@ export function RolesPanel({
       setInviteError({ id, message: err instanceof ApiError ? err.message : 'Failed to invite to Slack' }),
   })
 
+  // Self-service "Join Slack channel" (Roadmap Phase 11c) — invites the
+  // caller themselves, gated by slackEnabled && slackChannelId below, not by
+  // canManage: any Viewer with real access to the SEV may join.
+  const joinSlackChannel = useMutation({
+    mutationFn: () => api.roles.joinSlackChannel(sevId),
+    onSuccess: () => setJoinError(null),
+    onError: (err) => setJoinError(err instanceof ApiError ? err.message : 'Failed to join Slack channel'),
+  })
+
   function pickUser(u: DirectoryUser) {
     setPickedUser(u)
     setPickerQuery('')
@@ -77,7 +93,23 @@ export function RolesPanel({
   const directoryMatches = pickerQuery.trim().length >= 2 ? (directory.data?.users ?? []) : []
 
   return (
-    <Section title="Roles">
+    <Section
+      title="Roles"
+      action={
+        slackEnabled &&
+        slackChannelId && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => joinSlackChannel.mutate()}
+            disabled={joinSlackChannel.isPending}
+          >
+            <LogIn className="h-3.5 w-3.5" /> {joinSlackChannel.isPending ? 'Joining…' : 'Join Slack channel'}
+          </Button>
+        )
+      }
+    >
       {roles.isLoading && <Skeleton className="h-8 w-full" />}
       {roles.isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -96,7 +128,7 @@ export function RolesPanel({
                 <span>{r.display_name || r.user_id || '—'}</span>
               </div>
               <div className="flex items-center gap-1">
-                {canManage && (
+                {canManage && slackEnabled && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -127,6 +159,11 @@ export function RolesPanel({
       {inviteError && (
         <p role="alert" className="text-sm text-destructive">
           {inviteError.message}
+        </p>
+      )}
+      {joinError && (
+        <p role="alert" className="text-sm text-destructive">
+          {joinError}
         </p>
       )}
 

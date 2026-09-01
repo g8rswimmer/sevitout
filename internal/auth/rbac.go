@@ -36,6 +36,12 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.RoleService/RemoveRole":        store.OrgRoleIncidentCommander,
 	"/sevitout.v1.RoleService/ListRoles":         store.OrgRoleViewer,
 	"/sevitout.v1.RoleService/InviteRoleToSlack": store.OrgRoleResponder,
+	// JoinSlackChannel is a self-service "add me" action, not role
+	// management or even an auxiliary invite of someone else — any
+	// authenticated Viewer with real (non visibility-restricted) access to
+	// the SEV may call it; the handler itself enforces that finer-grained
+	// access check (docs/roadmap.md Phase 11c).
+	"/sevitout.v1.RoleService/JoinSlackChannel": store.OrgRoleViewer,
 	// SEV access service — granting/revoking a user's visibility into a
 	// Sensitive SEV (§14) is scoped the same as unlocking a completed SEV
 	// and creating/revoking a share link: IC or Admin. ListAccess itself
@@ -109,14 +115,21 @@ var rpcMinRole = map[string]store.OrgRole{
 	// service user) — see that method's doc comment.
 	"/sevitout.v1.ConfigService/GetSlackBotCredential":  store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/ListIntegrationConfigs": store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetRetentionConfig":     store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/UpdateRetentionConfig":  store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListRetentionConfig":    store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/CreateAIPlugin":         store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetAIPlugin":            store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/UpdateAIPlugin":         store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteAIPlugin":         store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListAIPlugins":          store.OrgRoleAdmin,
+	// ListEnabledIntegrations is deliberately at the Viewer floor, not the
+	// Admin floor every other integration-config RPC above sits at — it
+	// returns only a list of type strings, no settings/credentials state,
+	// safe for any authenticated user the same way ChatService.ListChatEntries
+	// sits at Viewer alongside ChatService's higher-gated AddChatEntry (RBAC
+	// is per-RPC, not per-service). See docs/roadmap.md Phase 11a.
+	"/sevitout.v1.ConfigService/ListEnabledIntegrations": store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/GetRetentionConfig":      store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateRetentionConfig":   store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListRetentionConfig":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateAIPlugin":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetAIPlugin":             store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateAIPlugin":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteAIPlugin":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListAIPlugins":           store.OrgRoleAdmin,
 	// AI service — running/streaming an action needs at least Responder
 	// (same floor as most SEV-mutating actions); listing outputs and
 	// available plugins is read-only and open to any authenticated user.

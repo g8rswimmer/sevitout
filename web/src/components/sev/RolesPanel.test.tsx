@@ -9,6 +9,13 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+/** Matches useEnabledIntegrations' request (Roadmap Phase 11b) — every test
+ * below must handle this URL, since the hook fires unconditionally on
+ * mount regardless of canManage. */
+function enabledIntegrationsHandler(types: string[]) {
+  return (url: string) => (url === '/v1/config/enabled-integrations' ? jsonResponse({ enabled_types: types }) : null)
+}
+
 const SEV_ID = 'SEV-2026-0001'
 
 function role(overrides: Partial<SEVRoleResponse>): SEVRoleResponse {
@@ -29,8 +36,11 @@ describe('RolesPanel', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('hides management controls when canManage is false', async () => {
+    const enabled = enabledIntegrationsHandler(['slack'])
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/roles`) return Promise.resolve(jsonResponse({ roles: [role({})] }))
       return Promise.reject(new Error(`unexpected fetch: ${url}`))
     })
@@ -40,11 +50,33 @@ describe('RolesPanel', () => {
     expect(screen.queryByRole('button', { name: /assign/i })).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/remove/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/add .* to slack channel/i)).not.toBeInTheDocument()
+    // No slack_channel_id on this SEV, so the self-service Join button is
+    // absent too, even though canManage is irrelevant to it.
+    expect(screen.queryByRole('button', { name: /join slack channel/i })).not.toBeInTheDocument()
+  })
+
+  it('hides Slack-tied actions entirely when the slack integration is not enabled, even with a channel recorded', async () => {
+    const enabled = enabledIntegrationsHandler([])
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = String(input)
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
+      if (url === `/v1/sevs/${SEV_ID}/roles`) return Promise.resolve(jsonResponse({ roles: [role({})] }))
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+    renderWithProviders(<RolesPanel sevId={SEV_ID} canManage slackChannelId="C123" />)
+
+    await screen.findByText('Carol')
+    expect(screen.queryByLabelText(/add .* to slack channel/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /join slack channel/i })).not.toBeInTheDocument()
   })
 
   it('disables "Add to chat" when the SEV has no Slack channel, enables it when it does', async () => {
+    const enabled = enabledIntegrationsHandler(['slack'])
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/roles`) return Promise.resolve(jsonResponse({ roles: [role({})] }))
       return Promise.reject(new Error(`unexpected fetch: ${url}`))
     })
@@ -58,9 +90,12 @@ describe('RolesPanel', () => {
   })
 
   it('calls the invite-to-slack endpoint for the clicked role', async () => {
+    const enabled = enabledIntegrationsHandler(['slack'])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/roles` && method === 'GET') return Promise.resolve(jsonResponse({ roles: [role({ id: '7' })] }))
       if (url === `/v1/sevs/${SEV_ID}/roles/7/invite-to-slack` && method === 'POST') return Promise.resolve(jsonResponse({}))
       return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
@@ -78,9 +113,12 @@ describe('RolesPanel', () => {
   })
 
   it('shows the server error message when invite-to-slack fails', async () => {
+    const enabled = enabledIntegrationsHandler(['slack'])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/roles` && method === 'GET') return Promise.resolve(jsonResponse({ roles: [role({ id: '7' })] }))
       if (url === `/v1/sevs/${SEV_ID}/roles/7/invite-to-slack` && method === 'POST') {
         return Promise.resolve(jsonResponse({ message: 'this role holder has no resolvable Slack identity' }, 400))
@@ -97,9 +135,12 @@ describe('RolesPanel', () => {
   })
 
   it('picking a directory user sets user_id on the assign request and pre-fills the name', async () => {
+    const enabled = enabledIntegrationsHandler([])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/roles` && method === 'GET') return Promise.resolve(jsonResponse({ roles: [] }))
       if (url.startsWith('/v1/auth/directory') && method === 'GET') {
         return Promise.resolve(jsonResponse({ users: [{ id: 'user-9', name: 'Dave', email: 'dave@example.com' }] }))
@@ -137,9 +178,12 @@ describe('RolesPanel', () => {
   })
 
   it('free-text assignment still works without picking a directory user', async () => {
+    const enabled = enabledIntegrationsHandler([])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/roles` && method === 'GET') return Promise.resolve(jsonResponse({ roles: [] }))
       if (url === `/v1/sevs/${SEV_ID}/roles` && method === 'POST') {
         return Promise.resolve(jsonResponse(role({ id: '3', display_name: 'Free Text Name' })))
@@ -165,5 +209,79 @@ describe('RolesPanel', () => {
     const body = JSON.parse(String(init!.body))
     expect(body.user_id).toBeUndefined()
     expect(body.display_name).toBe('Free Text Name')
+  })
+
+  // ── Join Slack channel (Roadmap Phase 11c) ─────────────────────────────────
+
+  it('shows "Join Slack channel" only when slack is enabled and the SEV has a channel, regardless of canManage', async () => {
+    const cases: { canManage: boolean; slackEnabled: boolean; slackChannelId?: string; expectVisible: boolean }[] = [
+      { canManage: false, slackEnabled: true, slackChannelId: 'C123', expectVisible: true },
+      { canManage: true, slackEnabled: false, slackChannelId: 'C123', expectVisible: false },
+      { canManage: true, slackEnabled: true, slackChannelId: undefined, expectVisible: false },
+    ]
+    for (const { canManage, slackEnabled, slackChannelId, expectVisible } of cases) {
+      const enabled = enabledIntegrationsHandler(slackEnabled ? ['slack'] : [])
+      vi.mocked(fetch).mockImplementation((input) => {
+        const url = String(input)
+        const enabledResp = enabled(url)
+        if (enabledResp) return Promise.resolve(enabledResp)
+        if (url === `/v1/sevs/${SEV_ID}/roles`) return Promise.resolve(jsonResponse({ roles: [] }))
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+      const { unmount } = renderWithProviders(
+        <RolesPanel sevId={SEV_ID} canManage={canManage} slackChannelId={slackChannelId} />,
+      )
+
+      await screen.findByText('No roles assigned yet.')
+      expect(!!screen.queryByRole('button', { name: /join slack channel/i })).toBe(expectVisible)
+
+      unmount()
+    }
+  })
+
+  it('calls the join-slack-channel endpoint and reports success', async () => {
+    const enabled = enabledIntegrationsHandler(['slack'])
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
+      if (url === `/v1/sevs/${SEV_ID}/roles` && method === 'GET') return Promise.resolve(jsonResponse({ roles: [] }))
+      if (url === `/v1/sevs/${SEV_ID}/join-slack-channel` && method === 'POST') return Promise.resolve(jsonResponse({}))
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+    renderWithProviders(<RolesPanel sevId={SEV_ID} canManage={false} slackChannelId="C123" />)
+
+    await screen.findByText('No roles assigned yet.')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /join slack channel/i }))
+
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url) === `/v1/sevs/${SEV_ID}/join-slack-channel`)
+      expect(call).toBeDefined()
+    })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows the server error message when joining the Slack channel fails', async () => {
+    const enabled = enabledIntegrationsHandler(['slack'])
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
+      if (url === `/v1/sevs/${SEV_ID}/roles` && method === 'GET') return Promise.resolve(jsonResponse({ roles: [] }))
+      if (url === `/v1/sevs/${SEV_ID}/join-slack-channel` && method === 'POST') {
+        return Promise.resolve(jsonResponse({ message: 'no Slack identity on file — set one in your profile' }, 400))
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+    renderWithProviders(<RolesPanel sevId={SEV_ID} canManage={false} slackChannelId="C123" />)
+
+    await screen.findByText('No roles assigned yet.')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /join slack channel/i }))
+
+    expect(await screen.findByText(/no slack identity on file/i)).toBeInTheDocument()
   })
 })

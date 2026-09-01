@@ -10,6 +10,7 @@ import (
 
 	grpchandler "github.com/g8rswimmer/sevitout/internal/api/grpc"
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
@@ -718,5 +719,171 @@ func TestInviteRoleToSlack_RoleNotFound(t *testing.T) {
 	_, err := ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: 9999})
 	if grpcCode(err) != codes.NotFound {
 		t.Errorf("code = %v, want %v", grpcCode(err), codes.NotFound)
+	}
+}
+
+// ── JoinSlackChannel ──────────────────────────────────────────────────────────
+
+func TestJoinSlackChannel_ResolvesViaStoredSlackUserID(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	now := time.Now()
+	if err := ts.users.Create(context.Background(), &store.User{
+		ID: "user-1", Email: "carol@example.com", Name: "Carol",
+		OrgRole: store.OrgRoleViewer, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	slackID := "U-STORED"
+	if _, err := ts.users.UpdateIntegrationIdentities(context.Background(), "user-1", &slackID, nil, nil); err != nil {
+		t.Fatalf("set slack id: %v", err)
+	}
+
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-1", Email: "carol@example.com", OrgRole: store.OrgRoleViewer})
+	if _, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID}); err != nil {
+		t.Fatalf("JoinSlackChannel: %v", err)
+	}
+	if slack.invitedTo != "C123" || len(slack.invitedUsers) != 1 || slack.invitedUsers[0] != "U-STORED" {
+		t.Errorf("invited (%q, %v), want (C123, [U-STORED])", slack.invitedTo, slack.invitedUsers)
+	}
+}
+
+func TestJoinSlackChannel_FallsBackToLookupByEmail(t *testing.T) {
+	slack := &fakeSlackInviteClient{emailToUserID: map[string]string{"dave@example.com": "U-EMAIL"}}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	// No stored user record at all — falls back to the caller's own
+	// UserContext.Email straight away.
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-2", Email: "dave@example.com", OrgRole: store.OrgRoleViewer})
+	if _, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID}); err != nil {
+		t.Fatalf("JoinSlackChannel: %v", err)
+	}
+	if len(slack.invitedUsers) != 1 || slack.invitedUsers[0] != "U-EMAIL" {
+		t.Errorf("invited users = %v, want [U-EMAIL]", slack.invitedUsers)
+	}
+}
+
+func TestJoinSlackChannel_NoResolvableIdentity_FailedPrecondition(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-3", Email: "", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID})
+	if grpcCode(err) != codes.FailedPrecondition {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.FailedPrecondition)
+	}
+}
+
+func TestJoinSlackChannel_NoChannel_FailedPrecondition(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-1", Email: "carol@example.com", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID})
+	if grpcCode(err) != codes.FailedPrecondition {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.FailedPrecondition)
+	}
+}
+
+func TestJoinSlackChannel_NotConfigured_Unavailable(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-1", Email: "carol@example.com", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID})
+	if grpcCode(err) != codes.Unavailable {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.Unavailable)
+	}
+}
+
+func TestJoinSlackChannel_SevNotFound(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-1", Email: "carol@example.com", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: "SEV-9999-0001"})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.NotFound)
+	}
+}
+
+func TestJoinSlackChannel_Unauthenticated(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	_, err := ts.server.JoinSlackChannel(context.Background(), &pb.JoinSlackChannelRequest{SevId: sevID})
+	if grpcCode(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.Unauthenticated)
+	}
+}
+
+func TestJoinSlackChannel_SensitiveSEVWithoutAccess_PermissionDenied(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSensitiveSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-outsider", Email: "outsider@example.com", OrgRole: store.OrgRoleViewer})
+	_, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID})
+	if grpcCode(err) != codes.PermissionDenied {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.PermissionDenied)
+	}
+}
+
+func TestJoinSlackChannel_SensitiveSEVWithGrantedAccess_Succeeds(t *testing.T) {
+	slack := &fakeSlackInviteClient{emailToUserID: map[string]string{"granted@example.com": "U-GRANTED"}}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSensitiveSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	if err := ts.access.Grant(context.Background(), &store.SEVAccess{
+		SEVID: sevID, UserID: "user-granted", CreatedAt: time.Now(), CreatedBy: "user-1",
+	}); err != nil {
+		t.Fatalf("grant access: %v", err)
+	}
+
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-granted", Email: "granted@example.com", OrgRole: store.OrgRoleViewer})
+	if _, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID}); err != nil {
+		t.Fatalf("JoinSlackChannel: %v", err)
+	}
+	if len(slack.invitedUsers) != 1 || slack.invitedUsers[0] != "U-GRANTED" {
+		t.Errorf("invited users = %v, want [U-GRANTED]", slack.invitedUsers)
+	}
+}
+
+func TestJoinSlackChannel_SensitiveSEVIncidentCommanderBypass(t *testing.T) {
+	slack := &fakeSlackInviteClient{emailToUserID: map[string]string{"ic@example.com": "U-IC"}}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSensitiveSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	// No explicit grant — an Incident Commander can see any Sensitive SEV.
+	ctx := auth.WithUser(context.Background(), &auth.UserContext{UserID: "user-ic", Email: "ic@example.com", OrgRole: store.OrgRoleIncidentCommander})
+	if _, err := ts.server.JoinSlackChannel(ctx, &pb.JoinSlackChannelRequest{SevId: sevID}); err != nil {
+		t.Fatalf("JoinSlackChannel: %v", err)
+	}
+	if len(slack.invitedUsers) != 1 || slack.invitedUsers[0] != "U-IC" {
+		t.Errorf("invited users = %v, want [U-IC]", slack.invitedUsers)
 	}
 }

@@ -76,6 +76,16 @@ type ConfigServiceClient interface {
 	// their own static tokens.
 	GetSlackBotCredential(ctx context.Context, in *GetSlackBotCredentialRequest, opts ...grpc.CallOption) (*GetSlackBotCredentialResponse, error)
 	ListIntegrationConfigs(ctx context.Context, in *ListIntegrationConfigsRequest, opts ...grpc.CallOption) (*ListIntegrationConfigsResponse, error)
+	// ListEnabledIntegrations is a viewer-safe signal of which integration_types
+	// currently have meaningful store-configured settings or credentials
+	// (docs/roadmap.md Phase 11a) — used by the SEV detail page to hide an
+	// integration-tied action (e.g. "Create Jira issue") when that integration
+	// isn't configured, without exposing anything an Admin-only endpoint
+	// wouldn't already consider safe to hand to any Viewer: no settings
+	// values, no credentials_configured per type, just the list of enabled
+	// types. Reflects store-configured integrations only — see this RPC's
+	// response doc comment for the static-env-var-fallback limitation.
+	ListEnabledIntegrations(ctx context.Context, in *ListEnabledIntegrationsRequest, opts ...grpc.CallOption) (*ListEnabledIntegrationsResponse, error)
 	GetRetentionConfig(ctx context.Context, in *GetRetentionConfigRequest, opts ...grpc.CallOption) (*RetentionConfigResponse, error)
 	UpdateRetentionConfig(ctx context.Context, in *UpdateRetentionConfigRequest, opts ...grpc.CallOption) (*RetentionConfigResponse, error)
 	ListRetentionConfig(ctx context.Context, in *ListRetentionConfigRequest, opts ...grpc.CallOption) (*ListRetentionConfigResponse, error)
@@ -265,6 +275,15 @@ func (c *configServiceClient) ListIntegrationConfigs(ctx context.Context, in *Li
 	return out, nil
 }
 
+func (c *configServiceClient) ListEnabledIntegrations(ctx context.Context, in *ListEnabledIntegrationsRequest, opts ...grpc.CallOption) (*ListEnabledIntegrationsResponse, error) {
+	out := new(ListEnabledIntegrationsResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListEnabledIntegrations", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *configServiceClient) GetRetentionConfig(ctx context.Context, in *GetRetentionConfigRequest, opts ...grpc.CallOption) (*RetentionConfigResponse, error) {
 	out := new(RetentionConfigResponse)
 	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/GetRetentionConfig", in, out, opts...)
@@ -394,6 +413,16 @@ type ConfigServiceServer interface {
 	// their own static tokens.
 	GetSlackBotCredential(context.Context, *GetSlackBotCredentialRequest) (*GetSlackBotCredentialResponse, error)
 	ListIntegrationConfigs(context.Context, *ListIntegrationConfigsRequest) (*ListIntegrationConfigsResponse, error)
+	// ListEnabledIntegrations is a viewer-safe signal of which integration_types
+	// currently have meaningful store-configured settings or credentials
+	// (docs/roadmap.md Phase 11a) — used by the SEV detail page to hide an
+	// integration-tied action (e.g. "Create Jira issue") when that integration
+	// isn't configured, without exposing anything an Admin-only endpoint
+	// wouldn't already consider safe to hand to any Viewer: no settings
+	// values, no credentials_configured per type, just the list of enabled
+	// types. Reflects store-configured integrations only — see this RPC's
+	// response doc comment for the static-env-var-fallback limitation.
+	ListEnabledIntegrations(context.Context, *ListEnabledIntegrationsRequest) (*ListEnabledIntegrationsResponse, error)
 	GetRetentionConfig(context.Context, *GetRetentionConfigRequest) (*RetentionConfigResponse, error)
 	UpdateRetentionConfig(context.Context, *UpdateRetentionConfigRequest) (*RetentionConfigResponse, error)
 	ListRetentionConfig(context.Context, *ListRetentionConfigRequest) (*ListRetentionConfigResponse, error)
@@ -465,6 +494,9 @@ func (UnimplementedConfigServiceServer) GetSlackBotCredential(context.Context, *
 }
 func (UnimplementedConfigServiceServer) ListIntegrationConfigs(context.Context, *ListIntegrationConfigsRequest) (*ListIntegrationConfigsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListIntegrationConfigs not implemented")
+}
+func (UnimplementedConfigServiceServer) ListEnabledIntegrations(context.Context, *ListEnabledIntegrationsRequest) (*ListEnabledIntegrationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListEnabledIntegrations not implemented")
 }
 func (UnimplementedConfigServiceServer) GetRetentionConfig(context.Context, *GetRetentionConfigRequest) (*RetentionConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRetentionConfig not implemented")
@@ -845,6 +877,24 @@ func _ConfigService_ListIntegrationConfigs_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConfigService_ListEnabledIntegrations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEnabledIntegrationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListEnabledIntegrations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/ListEnabledIntegrations",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListEnabledIntegrations(ctx, req.(*ListEnabledIntegrationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConfigService_GetRetentionConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRetentionConfigRequest)
 	if err := dec(in); err != nil {
@@ -1071,6 +1121,10 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListIntegrationConfigs",
 			Handler:    _ConfigService_ListIntegrationConfigs_Handler,
+		},
+		{
+			MethodName: "ListEnabledIntegrations",
+			Handler:    _ConfigService_ListEnabledIntegrations_Handler,
 		},
 		{
 			MethodName: "GetRetentionConfig",

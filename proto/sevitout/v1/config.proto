@@ -167,6 +167,20 @@ service ConfigService {
       get: "/v1/config/integrations"
     };
   }
+  // ListEnabledIntegrations is a viewer-safe signal of which integration_types
+  // currently have meaningful store-configured settings or credentials
+  // (docs/roadmap.md Phase 11a) — used by the SEV detail page to hide an
+  // integration-tied action (e.g. "Create Jira issue") when that integration
+  // isn't configured, without exposing anything an Admin-only endpoint
+  // wouldn't already consider safe to hand to any Viewer: no settings
+  // values, no credentials_configured per type, just the list of enabled
+  // types. Reflects store-configured integrations only — see this RPC's
+  // response doc comment for the static-env-var-fallback limitation.
+  rpc ListEnabledIntegrations(ListEnabledIntegrationsRequest) returns (ListEnabledIntegrationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/enabled-integrations"
+    };
+  }
 
   // --- Data retention (§18.7) ---
 
@@ -452,6 +466,21 @@ message ListIntegrationConfigsRequest {}
 
 message ListIntegrationConfigsResponse {
   repeated IntegrationConfigResponse configs = 1;
+}
+
+message ListEnabledIntegrationsRequest {}
+
+message ListEnabledIntegrationsResponse {
+  // enabled_types lists the integration_types (e.g. "slack", "jira") that
+  // currently have a meaningful store-configured credentials or settings
+  // blob — the same "configured" concept the admin UI already uses (see
+  // GetIntegrationCatalog). Known limitation: an integration activated only
+  // via its static env-var fallback (PagerDuty/GitHub/Jira, with zero store
+  // rows — see cmd/server's *Resolver types) is not reflected here, so it
+  // shows as "not enabled" even though the backend would actually serve the
+  // request. See docs/roadmap.md Phase 11a for why a fully accurate signal
+  // is out of scope for this phase.
+  repeated string enabled_types = 1;
 }
 
 // ── Data retention ────────────────────────────────────────────────────────────

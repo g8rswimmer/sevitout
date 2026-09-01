@@ -295,6 +295,38 @@ func (s *ConfigServer) ListIntegrationConfigs(ctx context.Context, _ *pb.ListInt
 	return resp, nil
 }
 
+// ListEnabledIntegrations returns the integration_types that currently have
+// meaningful store-configured settings or credentials — see this RPC's proto
+// doc comment for the viewer-safety and static-env-var-fallback caveats.
+func (s *ConfigServer) ListEnabledIntegrations(ctx context.Context, _ *pb.ListEnabledIntegrationsRequest) (*pb.ListEnabledIntegrationsResponse, error) {
+	cfgs, err := s.integrations.List(ctx)
+	if err != nil {
+		return nil, internalError(ctx, "failed to list integration configs", err)
+	}
+	resp := &pb.ListEnabledIntegrationsResponse{}
+	for _, cfg := range cfgs {
+		if integrationConfigured(cfg) {
+			resp.EnabledTypes = append(resp.EnabledTypes, cfg.IntegrationType)
+		}
+	}
+	return resp, nil
+}
+
+// integrationConfigured reports whether cfg represents a "configured"
+// integration by the same concept the admin UI already uses: a non-empty
+// encrypted-credentials blob, or — for a settings-only integration_type like
+// Monitoring, which has no credential fields at all — a non-empty settings
+// map.
+func integrationConfigured(cfg *store.IntegrationConfig) bool {
+	if len(cfg.EncryptedCredentials) > 0 {
+		return true
+	}
+	if integration, ok := catalog.Find(cfg.IntegrationType); ok && len(integration.CredentialFields) == 0 {
+		return len(cfg.Settings) > 0
+	}
+	return false
+}
+
 // integrationConfigToProto never includes the decrypted credentials — only
 // whether credentials are currently configured.
 func integrationConfigToProto(cfg *store.IntegrationConfig) *pb.IntegrationConfigResponse {

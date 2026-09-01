@@ -44,6 +44,10 @@ function mockFetchFor(sev: SEVResponse, whoAmI: WhoAmIResponse) {
       const url = String(input)
       const method = init?.method ?? 'GET'
       if (url === '/v1/auth/me') return Promise.resolve(jsonResponse(whoAmI))
+      // useEnabledIntegrations (Roadmap Phase 11b) fires unconditionally on
+      // mount — enabling github/jira here matches this suite's SEV, which
+      // has a github_repo set and exercises the GitHub create-issue form.
+      if (url === '/v1/config/enabled-integrations') return Promise.resolve(jsonResponse({ enabled_types: ['github', 'jira'] }))
       if (url === `/v1/sevs/${sev.id}` && method === 'GET') return Promise.resolve(jsonResponse(sev))
       if (url === `/v1/sevs/${sev.id}` && method === 'PATCH') {
         const body = JSON.parse(String(init?.body))
@@ -172,7 +176,9 @@ describe('SevDetailPage', () => {
     const tasksSection = screen.getByText('Linked tasks').closest('div')!.parentElement!
 
     const user = userEvent.setup()
-    await user.click(within(tasksSection).getByRole('button', { name: /create github issue/i }))
+    // findByRole, not getByRole: the button only renders once
+    // useEnabledIntegrations' async fetch resolves (Roadmap Phase 11b).
+    await user.click(await within(tasksSection).findByRole('button', { name: /create github issue/i }))
 
     expect(within(tasksSection).getByLabelText('Owner')).toHaveValue('acme-corp')
     expect(within(tasksSection).getByLabelText('Repo')).toHaveValue('checkout-service')

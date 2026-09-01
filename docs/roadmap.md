@@ -735,9 +735,10 @@ already delivers the higher-value "auto-invite every role" outcome.
 
 ## Phase 11 — Integration-aware SEV UI
 
-**Status**: 🔲 not started (11d shipped early, folded into Phase 10 —
-see [`demo/integration-user-profiles.md`](../demo/integration-user-profiles.md)'s
-"10h" section; 11a-c, 11e remain unstarted)
+**Status**: ✅ shipped, see [`demo/integration-aware-sev-ui.md`](../demo/integration-aware-sev-ui.md)
+(11d shipped early, folded into Phase 10 — see
+[`demo/integration-user-profiles.md`](../demo/integration-user-profiles.md)'s
+"10h" section)
 
 The SEV detail page shows every integration-tied action unconditionally today —
 `TasksPanel.tsx` always offers "Create GitHub issue" and "Create Jira issue" even

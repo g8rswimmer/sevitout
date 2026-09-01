@@ -39,6 +39,23 @@ service RoleService {
       post: "/v1/sevs/{sev_id}/roles/{id}/invite-to-slack"
     };
   }
+
+  // JoinSlackChannel is a self-service "add me" action (docs/roadmap.md
+  // Phase 11c) — unlike InviteRoleToSlack, it invites the *caller*, not a
+  // named role holder, so it needs no role_id and no IC/Responder floor:
+  // any Viewer with real (non visibility-restricted) access to the SEV may
+  // call it. Resolution order is the caller's own identity: stored
+  // SlackUserID, then LookupUserIDByEmail against the caller's own email.
+  // FailedPrecondition when the SEV has no Slack channel recorded or the
+  // caller has no resolvable Slack identity; PermissionDenied when the
+  // caller lacks full access to a Sensitive SEV — see the handler's doc
+  // comment for why that check is explicit here and wasn't part of Phase
+  // 10e's InviteRoleToSlack.
+  rpc JoinSlackChannel(JoinSlackChannelRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/join-slack-channel"
+    };
+  }
 }
 
 message SEVRoleResponse {
@@ -75,4 +92,8 @@ message ListRolesResponse {
 message InviteRoleToSlackRequest {
   string sev_id = 1;
   int64 id = 2;
+}
+
+message JoinSlackChannelRequest {
+  string sev_id = 1;
 }
