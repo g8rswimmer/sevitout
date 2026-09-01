@@ -18,6 +18,7 @@ import { ChatLogPanel } from '@/components/sev/ChatLogPanel'
 import { TasksPanel } from '@/components/sev/TasksPanel'
 import { LinkedSevsPanel } from '@/components/sev/LinkedSevsPanel'
 import { ShareLinkControl } from '@/components/sev/ShareLinkControl'
+import { JoinSlackChannelButton } from '@/components/sev/JoinSlackChannelButton'
 import { hasRole } from '@/types/api'
 
 export function SevDetailPage() {
@@ -79,7 +80,8 @@ export function SevDetailPage() {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="text-2xl font-semibold">{record.title}</h1>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-start gap-2">
+            <JoinSlackChannelButton sevId={sevId} slackChannelId={record.slack_channel_id} />
             <ShareLinkControl sevId={sevId} canShare={canCommand && !record.sensitive} />
             <Link to={`/sevs/${sevId}/postmortem`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               <FileText className="h-3.5 w-3.5" /> Postmortem

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { LogIn, MessageSquarePlus, Trash2, X } from 'lucide-react'
+import { MessageSquarePlus, Trash2, X } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,9 +27,10 @@ export function RolesPanel({
 }) {
   const queryClient = useQueryClient()
   const roles = useQuery({ queryKey: ['sevs', sevId, 'roles'], queryFn: () => api.roles.list(sevId) })
-  // Roadmap Phase 11b/11c: Slack-tied actions (per-role "Add to chat" above,
-  // and this section's self-service "Join Slack channel") render only when
+  // Roadmap Phase 11b: the per-role "Add to chat" button renders only when
   // the "slack" integration is configured — not just when a channel exists.
+  // (Self-service "Join Slack channel" lives at the top of the SEV detail
+  // page — see JoinSlackChannelButton.tsx — not in this section.)
   const { isEnabled: isIntegrationEnabled } = useEnabledIntegrations()
   const slackEnabled = isIntegrationEnabled('slack')
 
@@ -39,7 +40,6 @@ export function RolesPanel({
   const [pickerQuery, setPickerQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [inviteError, setInviteError] = useState<{ id: string; message: string } | null>(null)
-  const [joinError, setJoinError] = useState<string | null>(null)
 
   // Only searches once at least 2 characters are typed, so every keystroke
   // on a short/empty query doesn't fire a request.
@@ -75,15 +75,6 @@ export function RolesPanel({
       setInviteError({ id, message: err instanceof ApiError ? err.message : 'Failed to invite to Slack' }),
   })
 
-  // Self-service "Join Slack channel" (Roadmap Phase 11c) — invites the
-  // caller themselves, gated by slackEnabled && slackChannelId below, not by
-  // canManage: any Viewer with real access to the SEV may join.
-  const joinSlackChannel = useMutation({
-    mutationFn: () => api.roles.joinSlackChannel(sevId),
-    onSuccess: () => setJoinError(null),
-    onError: (err) => setJoinError(err instanceof ApiError ? err.message : 'Failed to join Slack channel'),
-  })
-
   function pickUser(u: DirectoryUser) {
     setPickedUser(u)
     setPickerQuery('')
@@ -93,27 +84,7 @@ export function RolesPanel({
   const directoryMatches = pickerQuery.trim().length >= 2 ? (directory.data?.users ?? []) : []
 
   return (
-    <Section
-      title="Roles"
-      action={
-        // Rendered whenever the "slack" integration is enabled at all —
-        // including on an older SEV with no recorded channel yet, so the
-        // action stays discoverable rather than silently absent. Disabled
-        // (not hidden), mirroring the per-role "Add to chat" button below.
-        slackEnabled && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            title={slackChannelId ? undefined : 'This SEV has no Slack channel'}
-            onClick={() => joinSlackChannel.mutate()}
-            disabled={!slackChannelId || joinSlackChannel.isPending}
-          >
-            <LogIn className="h-3.5 w-3.5" /> {joinSlackChannel.isPending ? 'Joining…' : 'Join Slack channel'}
-          </Button>
-        )
-      }
-    >
+    <Section title="Roles">
       {roles.isLoading && <Skeleton className="h-8 w-full" />}
       {roles.isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -163,11 +134,6 @@ export function RolesPanel({
       {inviteError && (
         <p role="alert" className="text-sm text-destructive">
           {inviteError.message}
-        </p>
-      )}
-      {joinError && (
-        <p role="alert" className="text-sm text-destructive">
-          {joinError}
         </p>
       )}
 

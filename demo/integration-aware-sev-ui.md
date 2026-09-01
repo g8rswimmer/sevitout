@@ -59,9 +59,10 @@ corrected visibility rule.
   "Link existing" (which needs no integration) remains.
 - `RolesPanel.tsx`: the per-role "Add to chat" button (Phase 10e) renders
   only when `slack` is enabled **and** `SEV.slack_channel_id` is set
-  (previously it only checked the channel). The section-level "Join Slack
-  channel" button (11c) instead renders whenever `slack` is enabled, **full
-  stop** — see 11c below for why it doesn't also require a recorded channel.
+  (previously it only checked the channel). The self-service "Join Slack
+  channel" button (11c, a separate component — see below) instead renders
+  whenever `slack` is enabled, **full stop** — see 11c for why it doesn't
+  also require a recorded channel.
 
 **11c. Backend + frontend: self-service "Join Slack channel"**
 
@@ -86,19 +87,24 @@ corrected visibility rule.
   Self-service Slack join must not become a side-channel around
   sensitive-SEV restrictions, since Slack channel membership itself isn't
   gated by Sevitout RBAC once granted.
-- `RolesPanel.tsx` gained a "Join Slack channel" button in the Roles
-  section's header (next to the section title, visually adjacent to the
-  per-role "Add to chat" buttons below it), independent of `canManage` — any
-  Viewer with real access to the SEV may click it.
+- New `web/src/components/sev/JoinSlackChannelButton.tsx`, rendered on
+  `SevDetailPage.tsx` at the **top of the page**, in the header row next to
+  **Share** and **Postmortem** — not tucked inside the Roles section.
+  Corrected placement from this phase's first pass, which put it in
+  `RolesPanel.tsx`'s section header: that made it easy to miss (a small
+  button competing with the Roles section's own content) and, worse, its
+  gated-and-disabled styling in that spot read as inert rather than as a
+  real, clickable action. It's independent of `canManage` — any Viewer with
+  real access to the SEV may click it.
 - **Visible whenever `slack` is enabled, disabled (not hidden) when the SEV
-  has no recorded channel** — a corrected design from this phase's first
-  pass, which hid the button entirely without a channel. That made it
-  disappear for every SEV predating Phase 10e's `slack_channel_id`
-  write-back, i.e. most existing SEVs at rollout time. Mirrors the per-role
-  "Add to chat" button's own long-standing disabled-not-hidden precedent
-  (10e): the action stays discoverable, with a tooltip explaining why it's
-  inactive, rather than looking like it was never built. Clicking it on such
-  a SEV isn't offered at all — there's still no channel to resolve into.
+  has no recorded channel** — a second correction from the first pass, which
+  hid the button entirely without a channel. That made it disappear for
+  every SEV predating Phase 10e's `slack_channel_id` write-back, i.e. most
+  existing SEVs at rollout time. Mirrors the per-role "Add to chat" button's
+  own long-standing disabled-not-hidden precedent (10e): the action stays
+  discoverable, with a tooltip explaining why it's inactive, rather than
+  looking like it was never built. Clicking it on such a SEV isn't offered
+  at all — there's still no channel to resolve into.
 
 **Follow-up: automatic invite on role assignment**
 
@@ -172,20 +178,21 @@ curl -s http://localhost:8080/v1/config/enabled-integrations -H "Authorization: 
    panel: **Create Jira issue** is offered, **Create GitHub issue** is not.
 2. Configure Slack too (`demo/datastore-slack-bot-credentials.md`) and create
    a new SEV from the web UI — `cmd/slackbot` creates its incident channel as
-   usual. Open the SEV's **Roles** section: a **Join Slack channel** button
-   appears in the section header, enabled.
+   usual. At the top of the SEV detail page, next to **Share** and
+   **Postmortem**, a **Join Slack channel** button appears, enabled.
 3. Log in as a *different* user who holds no role on that SEV, with a Slack
    identity set on their own profile, and open the same SEV — **Join Slack
    channel** is visible and enabled for them too (it's self-service, not
-   gated by `canManage`). Clicking it invites them into the channel directly.
+   gated by `canManage`). Clicking it invites them into the channel directly
+   and the button relabels to "Joined".
 4. Assign a new role on that SEV (e.g. Responder) to a user with a Slack
    identity set — no button click needed: they're invited to the channel as
-   part of the assignment itself. The per-role "Add to chat" button is still
-   there if you need to retry.
+   part of the assignment itself. The per-role "Add to chat" button (in the
+   Roles section) is still there if you need to retry.
 5. Open an *older* SEV — one predating this feature, with no
    `slack_channel_id` — and confirm **Join Slack channel** is still visible
-   in the Roles section header, just disabled (hover it to see why); the
-   per-role "Add to chat" buttons are absent for the same reason.
+   at the top of the page, just disabled (hover it to see why); the Roles
+   section's per-role "Add to chat" buttons are absent for the same reason.
 6. Unconfigure Slack entirely (remove the "slack" integration config) — now
    **Join Slack channel** disappears too, since the integration itself isn't
    enabled, not just this particular SEV's channel.
@@ -215,10 +222,12 @@ New coverage:
   a Slack-side error).
 - `web/src/components/sev/TasksPanel.test.tsx`: create-issue button gating
   across Jira-only, GitHub-only, neither, and both-enabled combinations.
-- `web/src/components/sev/RolesPanel.test.tsx`: "Join Slack channel"
-  visibility and enabled/disabled state across `canManage`/`slackEnabled`/
-  `slackChannelId` combinations (including the older-SEV
-  visible-but-disabled case), plus its success and server-error states.
+- `web/src/components/sev/JoinSlackChannelButton.test.tsx` (new file):
+  hidden when `slack` isn't enabled, disabled-not-hidden with no recorded
+  channel (the older-SEV case), enabled and calling the endpoint with a
+  channel recorded, and its server-error state.
+- `web/src/components/sev/RolesPanel.test.tsx`: the per-role "Add to chat"
+  button's `slackEnabled`/`slackChannelId`-gated visibility.
 
 ## Known limitations
 
