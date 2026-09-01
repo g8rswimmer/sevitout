@@ -1,0 +1,11 @@
+-- Follow-up to Phase 10f: the assignee stored on a linked task is a
+-- tracker-native identifier (a GitHub login, or an opaque Jira Cloud
+-- account ID) — not something a person recognizes. When the assignee was
+-- picked via the frontend's directory-backed AssigneePicker (rather than
+-- set through a raw API call), the server resolves the picked Sevitout
+-- user's current display name at creation time and stores it here, so the
+-- linked-tasks list can show "Assigned to Alice" instead of an opaque ID.
+-- A snapshot, not a live lookup — the same trade-off already accepted for
+-- sev_roles.display_name — so a later name change on the user's account
+-- does not retroactively update it here.
+ALTER TABLE sev_linked_tasks ADD COLUMN IF NOT EXISTS assignee_name TEXT;

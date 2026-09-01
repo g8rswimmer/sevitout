@@ -469,6 +469,9 @@ func applySEVUpdate(record *store.SEV, req *pb.UpdateSEVRequest) (rootCauseCateg
 	if req.GetAiDisabled() != nil {
 		record.AIDisabled = req.GetAiDisabled().GetValue()
 	}
+	if v := req.GetSlackChannelId(); v != "" {
+		record.SlackChannelID = &v
+	}
 
 	return rootCauseCategoryChanged, sensitiveFlipped, nil
 }
@@ -903,6 +906,9 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 	}
 	if s.DTTMSeconds != nil {
 		resp.DttmSeconds = *s.DTTMSeconds
+	}
+	if s.SlackChannelID != nil {
+		resp.SlackChannelId = *s.SlackChannelID
 	}
 
 	return resp

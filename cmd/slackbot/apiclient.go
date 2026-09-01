@@ -20,12 +20,26 @@ type sevAPI interface {
 	CreateSEV(ctx context.Context, in *pb.CreateSEVRequest, opts ...grpc.CallOption) (*pb.SEVResponse, error)
 	GetSEV(ctx context.Context, in *pb.GetSEVRequest, opts ...grpc.CallOption) (*pb.SEVResponse, error)
 	TransitionStatus(ctx context.Context, in *pb.TransitionStatusRequest, opts ...grpc.CallOption) (*pb.SEVResponse, error)
+	// UpdateSEV is used only to write back SlackChannelID right after
+	// createIncidentChannel creates a new incident channel (docs/roadmap.md
+	// Phase 10e), so cmd/server can act on the mapping directly instead of
+	// relying on this bot's in-memory-only copy.
+	UpdateSEV(ctx context.Context, in *pb.UpdateSEVRequest, opts ...grpc.CallOption) (*pb.SEVResponse, error)
 }
 
 // roleAPI is the subset of pb.RoleServiceClient the bot uses to find who to
 // invite into an auto-created incident channel.
 type roleAPI interface {
 	ListRoles(ctx context.Context, in *pb.ListRolesRequest, opts ...grpc.CallOption) (*pb.ListRolesResponse, error)
+}
+
+// directoryAPI is the subset of pb.AuthServiceClient the bot uses to batch-
+// resolve assigned-role user IDs to their stored Slack user IDs (§10d) — a
+// narrow interface per this file's consumer-owned-interface convention,
+// separate from sevAPI/roleAPI since it's a different generated client type
+// (pb.AuthServiceClient).
+type directoryAPI interface {
+	ListUserDirectory(ctx context.Context, in *pb.ListUserDirectoryRequest, opts ...grpc.CallOption) (*pb.ListUserDirectoryResponse, error)
 }
 
 // announcementAPI is the subset of pb.AnnouncementServiceClient the bot uses
@@ -58,11 +72,12 @@ type configAPI interface {
 }
 
 // apiClients groups every backend dependency the bot calls, so bot
-// construction takes one argument instead of five.
+// construction takes one argument instead of six.
 type apiClients struct {
 	sevs          sevAPI
 	roles         roleAPI
 	announcements announcementAPI
 	chats         chatAPI
 	config        configAPI
+	directory     directoryAPI
 }

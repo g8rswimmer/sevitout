@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -36,9 +37,11 @@ type CreatedIssue struct {
 }
 
 // IssueClient creates issues in an external task tracker (e.g. GitHub
-// Issues). Implementations must be safe for concurrent use.
+// Issues). assignee is a GitHub login to assign the new issue to, or "" for
+// unassigned (docs/roadmap.md Phase 10f). Implementations must be safe for
+// concurrent use.
 type IssueClient interface {
-	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*CreatedIssue, error)
+	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, assignee string) (*CreatedIssue, error)
 }
 
 // JiraIssueClient creates issues in Jira. A second, Jira-shaped interface
@@ -49,8 +52,10 @@ type IssueClient interface {
 // signature would mean one side or the other passing parameters that don't
 // mean what their names say. Implementations must be safe for concurrent
 // use.
+// assigneeAccountID is a Jira Cloud account ID to assign the new issue to,
+// or "" for unassigned (docs/roadmap.md Phase 10f).
 type JiraIssueClient interface {
-	CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string) (*CreatedIssue, error)
+	CreateIssue(ctx context.Context, projectKey, issueType, summary, description string, labels []string, assigneeAccountID string) (*CreatedIssue, error)
 }
 
 // httpStatusError is implemented by integration errors that carry an
@@ -77,6 +82,7 @@ type TaskServer struct {
 	sevs      store.SEVStore
 	access    store.SEVAccessStore
 	audit     store.AuditStore
+	users     store.UserStore // resolves assignee_user_id -> a display name for AssigneeName; nil is tolerated (name resolution is skipped)
 	github    IssueClient     // nil when GITHUB_TOKEN is not set
 	jira      JiraIssueClient // nil when JIRA_CLOUD_ID/JIRA_API_TOKEN are not both set
 	publisher Publisher       // nil when WebSocket support is not wired up
@@ -84,13 +90,14 @@ type TaskServer struct {
 
 // TaskServerParams groups NewTaskServer's dependencies. GitHub and Jira may
 // each independently be nil (both are optional at deploy time); in that
-// case CreateGitHubIssue/CreateJiraIssue returns Unavailable. Publisher may
-// also be nil.
+// case CreateGitHubIssue/CreateJiraIssue returns Unavailable. Publisher and
+// Users may also be nil.
 type TaskServerParams struct {
 	Tasks     store.TaskStore
 	SEVs      store.SEVStore
 	Access    store.SEVAccessStore
 	Audit     store.AuditStore
+	Users     store.UserStore
 	GitHub    IssueClient
 	Jira      JiraIssueClient
 	Publisher Publisher
@@ -99,7 +106,7 @@ type TaskServerParams struct {
 // NewTaskServer returns a TaskServer backed by p.
 func NewTaskServer(p TaskServerParams) *TaskServer {
 	return &TaskServer{
-		tasks: p.Tasks, sevs: p.SEVs, access: p.Access, audit: p.Audit,
+		tasks: p.Tasks, sevs: p.SEVs, access: p.Access, audit: p.Audit, users: p.Users,
 		github: p.GitHub, jira: p.Jira, publisher: p.Publisher,
 	}
 }
@@ -381,12 +388,12 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 	priority := store.TaskPriority(req.GetPriority())
 	labels := []string{req.GetSevId(), string(priority)}
 
-	issue, err := s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), labels)
+	issue, err := s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), labels, req.GetAssignee())
 	if err != nil && isUnprocessable(err) {
 		// A 422 here is most often caused by a label that doesn't already
 		// exist and the org restricting who can create new labels. Don't
 		// let a cosmetic labeling failure block issue creation.
-		issue, err = s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), nil)
+		issue, err = s.github.CreateIssue(ctx, req.GetOwner(), req.GetRepo(), req.GetTitle(), req.GetBody(), nil, req.GetAssignee())
 	}
 	if errors.Is(err, ErrIntegrationNotConfigured) {
 		return nil, status.Error(codes.Unavailable, "GitHub integration is not configured (set GITHUB_TOKEN, or add credentials via the Integration Config API)")
@@ -417,6 +424,10 @@ func (s *TaskServer) CreateGitHubIssue(ctx context.Context, req *pb.CreateGitHub
 		CreatedAt:        now,
 		CreatedBy:        callerID,
 	}
+	if v := req.GetAssignee(); v != "" {
+		task.Assignee = &v
+	}
+	task.AssigneeName = s.resolveAssigneeName(ctx, req.GetAssigneeUserId())
 
 	if err := s.tasks.Create(ctx, task); err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -487,7 +498,7 @@ func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssu
 	// create new ones; Jira Cloud auto-creates unrecognized labels on the
 	// issue instead of rejecting the request, so that failure mode doesn't
 	// apply here.
-	issue, err := s.jira.CreateIssue(ctx, req.GetProjectKey(), req.GetIssueType(), req.GetSummary(), req.GetDescription(), labels)
+	issue, err := s.jira.CreateIssue(ctx, req.GetProjectKey(), req.GetIssueType(), req.GetSummary(), req.GetDescription(), labels, req.GetAssigneeAccountId())
 	if errors.Is(err, ErrIntegrationNotConfigured) {
 		return nil, status.Error(codes.Unavailable, "Jira integration is not configured (set JIRA_CLOUD_ID/JIRA_API_TOKEN, or add credentials via the Integration Config API)")
 	}
@@ -516,6 +527,10 @@ func (s *TaskServer) CreateJiraIssue(ctx context.Context, req *pb.CreateJiraIssu
 		CreatedAt:        now,
 		CreatedBy:        callerID,
 	}
+	if v := req.GetAssigneeAccountId(); v != "" {
+		task.Assignee = &v
+	}
+	task.AssigneeName = s.resolveAssigneeName(ctx, req.GetAssigneeUserId())
 
 	if err := s.tasks.Create(ctx, task); err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -654,7 +669,32 @@ func taskToProto(t *store.LinkedTask, now time.Time) *pb.TaskResponse {
 	if t.DueDate != nil {
 		resp.DueDate = timestamppb.New(*t.DueDate)
 	}
+	if t.Assignee != nil {
+		resp.Assignee = *t.Assignee
+	}
+	if t.AssigneeName != nil {
+		resp.AssigneeName = *t.AssigneeName
+	}
 	return resp
+}
+
+// resolveAssigneeName resolves userID (a Sevitout user ID, from
+// CreateGitHubIssueRequest/CreateJiraIssueRequest's assignee_user_id) to
+// that user's current display name, for the LinkedTask.AssigneeName
+// snapshot. Returns nil — not an error — when userID is empty, s.users
+// isn't wired up, or the lookup fails: a display-name resolution failure
+// must never block issue creation, which by this point has already
+// succeeded against the real tracker (GitHub/Jira).
+func (s *TaskServer) resolveAssigneeName(ctx context.Context, userID string) *string {
+	if userID == "" || s.users == nil {
+		return nil
+	}
+	user, err := s.users.Get(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "resolve assignee name failed", "user_id", userID, "err", err)
+		return nil
+	}
+	return &user.Name
 }
 
 func validateRelationshipType(rt string) error {

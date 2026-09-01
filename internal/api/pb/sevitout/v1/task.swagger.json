@@ -274,6 +274,14 @@
         "priority": {
           "type": "string",
           "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "assignee": {
+          "type": "string",
+          "description": "assignee is a GitHub login to assign the new issue to (wrapped into\nGitHub's assignees: []string at the client layer). Optional — an empty\nvalue creates the issue unassigned (docs/roadmap.md Phase 10f)."
+        },
+        "assigneeUserId": {
+          "type": "string",
+          "description": "assignee_user_id is the Sevitout user ID of the picked assignee, when\npicked via the frontend's directory-backed AssigneePicker (as opposed\nto a raw API call supplying only `assignee` directly) — the server\nresolves it to that user's current display name and stores it as\nTaskResponse.assignee_name, so the linked-tasks list can show a person's\nname instead of their opaque GitHub login. Optional; a lookup failure\n(e.g. an unrecognized ID) is non-fatal — issue creation still succeeds,\njust without assignee_name set."
         }
       }
     },
@@ -303,6 +311,14 @@
         "priority": {
           "type": "string",
           "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "assigneeAccountId": {
+          "type": "string",
+          "description": "assignee_account_id is a Jira Cloud account ID to assign the new issue\nto (sent as Jira's assignee: {accountId: \"...\"}). Optional — an empty\nvalue creates the issue unassigned. Unlike a GitHub login, this is an\nopaque ID a user typically can't see in Jira's own UI without an\nemail-\u003eaccountId lookup (docs/roadmap.md Phase 10f's documented UX risk)."
+        },
+        "assigneeUserId": {
+          "type": "string",
+          "description": "assignee_user_id is the Sevitout user ID of the picked assignee — same\nmeaning as CreateGitHubIssueRequest.assignee_user_id, resolved into\nTaskResponse.assignee_name the same way."
         }
       }
     },
@@ -441,6 +457,14 @@
         },
         "createdBy": {
           "type": "string"
+        },
+        "assignee": {
+          "type": "string",
+          "description": "assignee is the tracker-native assignee identifier set at issue-creation\ntime (a GitHub login, or a Jira account ID) — see\nCreateGitHubIssueRequest.assignee / CreateJiraIssueRequest.assignee_account_id\n(docs/roadmap.md Phase 10f). Absent for tasks linked via LinkTask, or\ncreated before this field existed."
+        },
+        "assigneeName": {
+          "type": "string",
+          "description": "assignee_name is the Sevitout display name of the assignee, resolved\nserver-side at creation time from CreateGitHubIssueRequest.assignee_user_id\n/ CreateJiraIssueRequest.assignee_user_id — a snapshot, not a live\nlookup, the same trade-off already accepted for SEVRoleResponse's own\ndisplay_name. Absent when the assignee wasn't picked from Sevitout's\nown directory (e.g. a raw API call supplying only the tracker-native\n`assignee`); clients should fall back to `assignee` for display in that\ncase."
         }
       },
       "description": "TaskResponse is the linked task record returned by all TaskService RPCs."

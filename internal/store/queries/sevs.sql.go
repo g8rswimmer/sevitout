@@ -20,7 +20,8 @@ SELECT id, title, description, severity_level, status,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, ai_disabled, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by,
+       slack_channel_id
 FROM sevs
 WHERE id = $1
 `
@@ -64,6 +65,7 @@ type GetSEVRow struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
+	SlackChannelID        *string            `json:"slack_channel_id"`
 }
 
 func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
@@ -108,6 +110,7 @@ func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CreatedBy,
+		&i.SlackChannelID,
 	)
 	return i, err
 }
@@ -122,7 +125,8 @@ INSERT INTO sevs (
     right_people_present, right_people_notes, tags,
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-    locked, sensitive, ai_disabled, created_at, updated_at, created_by
+    locked, sensitive, ai_disabled, created_at, updated_at, created_by,
+    slack_channel_id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
@@ -132,7 +136,8 @@ INSERT INTO sevs (
     $21, $22, $23,
     $24, $25, $26, $27, $28,
     $29, $30, $31, $32,
-    $33, $34, $35, $36, $37, $38
+    $33, $34, $35, $36, $37, $38,
+    $39
 )
 `
 
@@ -175,6 +180,7 @@ type InsertSEVParams struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
+	SlackChannelID        *string            `json:"slack_channel_id"`
 }
 
 func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
@@ -217,6 +223,7 @@ func (q *Queries) InsertSEV(ctx context.Context, arg InsertSEVParams) error {
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.CreatedBy,
+		arg.SlackChannelID,
 	)
 	return err
 }
@@ -230,7 +237,8 @@ SELECT id, title, description, severity_level, status,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, ai_disabled, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by,
+       slack_channel_id
 FROM sevs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -280,6 +288,7 @@ type ListSEVsRow struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	CreatedBy             string             `json:"created_by"`
+	SlackChannelID        *string            `json:"slack_channel_id"`
 }
 
 func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsRow, error) {
@@ -330,6 +339,7 @@ func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsR
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CreatedBy,
+			&i.SlackChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -388,7 +398,8 @@ UPDATE sevs SET
     locked                 = $33,
     sensitive              = $34,
     ai_disabled            = $35,
-    updated_at             = $36
+    updated_at             = $36,
+    slack_channel_id       = $37
 WHERE id = $1
 `
 
@@ -429,6 +440,7 @@ type UpdateSEVParams struct {
 	Sensitive             bool               `json:"sensitive"`
 	AiDisabled            bool               `json:"ai_disabled"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	SlackChannelID        *string            `json:"slack_channel_id"`
 }
 
 func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
@@ -469,6 +481,7 @@ func (q *Queries) UpdateSEV(ctx context.Context, arg UpdateSEVParams) error {
 		arg.Sensitive,
 		arg.AiDisabled,
 		arg.UpdatedAt,
+		arg.SlackChannelID,
 	)
 	return err
 }

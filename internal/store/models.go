@@ -176,9 +176,16 @@ type SEV struct {
 	// (proactive and user-triggered), independent of the global per-plugin
 	// enabled/trigger flags. See docs/requirements.md §11.3.
 	AIDisabled bool
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	CreatedBy  string
+	// SlackChannelID is the incident channel cmd/slackbot auto-created for
+	// this SEV, written back via UpdateSEV right after creation (§13.1,
+	// docs/roadmap.md Phase 10e). Nil for SEVs created before this shipped,
+	// and for any SEV whose channel-creation step failed or never ran (e.g.
+	// Slack not configured) — callers must treat a nil value as "no channel
+	// to invite/join", not an error.
+	SlackChannelID *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	CreatedBy      string
 }
 
 // SEVSortField selects the column SEVStore.List orders results by.
@@ -291,8 +298,22 @@ type LinkedTask struct {
 	Priority         TaskPriority
 	DueDate          *time.Time
 	Overdue          bool
-	CreatedAt        time.Time
-	CreatedBy        string
+	// Assignee is the tracker-native assignee identifier set at issue-creation
+	// time (a GitHub login, or a Jira account ID) — see
+	// TaskServer.CreateGitHubIssue/CreateJiraIssue (docs/roadmap.md Phase
+	// 10f). Nil for tasks linked via plain LinkTask, or created before this
+	// field existed.
+	Assignee *string
+	// AssigneeName is the Sevitout display name of the assignee, resolved
+	// server-side at creation time from the assignee_user_id the picker
+	// sends — a snapshot, not a live lookup (the same trade-off already
+	// accepted for SEVRole.DisplayName), so it's what the UI shows instead
+	// of Assignee's opaque tracker-native value. Nil when the assignee
+	// wasn't picked from Sevitout's own directory (e.g. a raw API call);
+	// callers should fall back to Assignee for display in that case.
+	AssigneeName *string
+	CreatedAt    time.Time
+	CreatedBy    string
 }
 
 // SEVLink is a typed directional relationship between two SEVs.
@@ -407,8 +428,17 @@ type User struct {
 	OrgRole      OrgRole
 	Active       bool
 	PasswordHash string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// SlackUserID, GitHubUsername, and JiraAccountID are self-service
+	// integration identities (docs/requirements.md's Slack/GitHub/Jira
+	// integrations, docs/roadmap.md Phase 10) a user manages for themselves
+	// via AuthService.UpdateMyIntegrationIdentities. Nullable, no uniqueness
+	// constraint — a stale/duplicate value just resolves to the wrong/no
+	// invite or assignee, not an integrity risk worth enforcing.
+	SlackUserID    *string
+	GitHubUsername *string
+	JiraAccountID  *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // OnCallRotation defines a named on-call entry, with optional PagerDuty backing and manual overrides.

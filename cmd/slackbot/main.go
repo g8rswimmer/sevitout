@@ -82,6 +82,7 @@ func main() {
 		announcements: pb.NewAnnouncementServiceClient(conn),
 		chats:         pb.NewChatServiceClient(conn),
 		config:        pb.NewConfigServiceClient(conn),
+		directory:     pb.NewAuthServiceClient(conn),
 	}
 
 	defaultChannel, namingConvention, botToken, appToken := loadSlackSettings(ctx, log, api.config, staticBotToken, staticAppToken)

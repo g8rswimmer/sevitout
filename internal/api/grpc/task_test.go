@@ -27,6 +27,7 @@ import (
 type capturedCreateIssue struct {
 	Owner, Repo, Title, Body string
 	Labels                   []string
+	Assignee                 string
 }
 
 type fakeIssueClient struct {
@@ -41,9 +42,9 @@ type fakeIssueClient struct {
 	calls []capturedCreateIssue
 }
 
-func (f *fakeIssueClient) CreateIssue(_ context.Context, owner, repo, title, body string, labels []string) (*grpchandler.CreatedIssue, error) {
+func (f *fakeIssueClient) CreateIssue(_ context.Context, owner, repo, title, body string, labels []string, assignee string) (*grpchandler.CreatedIssue, error) {
 	idx := len(f.calls)
-	f.calls = append(f.calls, capturedCreateIssue{owner, repo, title, body, labels})
+	f.calls = append(f.calls, capturedCreateIssue{owner, repo, title, body, labels, assignee})
 	if idx < len(f.errsByCall) {
 		if err := f.errsByCall[idx]; err != nil {
 			return nil, err
@@ -59,6 +60,7 @@ func (f *fakeIssueClient) CreateIssue(_ context.Context, owner, repo, title, bod
 type capturedCreateJiraIssue struct {
 	ProjectKey, IssueType, Summary, Description string
 	Labels                                      []string
+	AssigneeAccountID                           string
 }
 
 type fakeJiraIssueClient struct {
@@ -67,8 +69,8 @@ type fakeJiraIssueClient struct {
 	calls []capturedCreateJiraIssue
 }
 
-func (f *fakeJiraIssueClient) CreateIssue(_ context.Context, projectKey, issueType, summary, description string, labels []string) (*grpchandler.CreatedIssue, error) {
-	f.calls = append(f.calls, capturedCreateJiraIssue{projectKey, issueType, summary, description, labels})
+func (f *fakeJiraIssueClient) CreateIssue(_ context.Context, projectKey, issueType, summary, description string, labels []string, assigneeAccountID string) (*grpchandler.CreatedIssue, error) {
+	f.calls = append(f.calls, capturedCreateJiraIssue{projectKey, issueType, summary, description, labels, assigneeAccountID})
 	return f.issue, f.err
 }
 
@@ -80,6 +82,7 @@ type testTaskServer struct {
 	sevs   *memory.SEVStore
 	access *memory.SEVAccessStore
 	audit  *memory.AuditStore
+	users  *memory.UserStore
 	pub    *fakePublisher
 }
 
@@ -88,15 +91,17 @@ func newTestTaskServer(gh grpchandler.IssueClient) *testTaskServer {
 	sevs := memory.NewSEVStore()
 	access := memory.NewSEVAccessStore()
 	audit := memory.NewAuditStore()
+	users := memory.NewUserStore()
 	pub := &fakePublisher{}
 	return &testTaskServer{
 		server: grpchandler.NewTaskServer(grpchandler.TaskServerParams{
-			Tasks: tasks, SEVs: sevs, Access: access, Audit: audit, GitHub: gh, Publisher: pub,
+			Tasks: tasks, SEVs: sevs, Access: access, Audit: audit, Users: users, GitHub: gh, Publisher: pub,
 		}),
 		tasks:  tasks,
 		sevs:   sevs,
 		access: access,
 		audit:  audit,
+		users:  users,
 		pub:    pub,
 	}
 }
@@ -110,15 +115,17 @@ func newTestTaskServerWithJira(jira grpchandler.JiraIssueClient) *testTaskServer
 	sevs := memory.NewSEVStore()
 	access := memory.NewSEVAccessStore()
 	audit := memory.NewAuditStore()
+	users := memory.NewUserStore()
 	pub := &fakePublisher{}
 	return &testTaskServer{
 		server: grpchandler.NewTaskServer(grpchandler.TaskServerParams{
-			Tasks: tasks, SEVs: sevs, Access: access, Audit: audit, Jira: jira, Publisher: pub,
+			Tasks: tasks, SEVs: sevs, Access: access, Audit: audit, Users: users, Jira: jira, Publisher: pub,
 		}),
 		tasks:  tasks,
 		sevs:   sevs,
 		access: access,
 		audit:  audit,
+		users:  users,
 		pub:    pub,
 	}
 }
@@ -677,6 +684,116 @@ func TestCreateGitHubIssue_Valid(t *testing.T) {
 	}
 }
 
+// TestCreateGitHubIssue_AssigneePassthrough covers docs/roadmap.md Phase
+// 10f: an assignee is passed to the IssueClient and stored on the linked
+// task, surfacing on the response's assignee field.
+func TestCreateGitHubIssue_AssigneePassthrough(t *testing.T) {
+	gh := &fakeIssueClient{
+		issue: &grpchandler.CreatedIssue{Number: 1, Title: "t", URL: "https://github.com/acme/api/issues/1"},
+	}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	resp, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId: sevID, Owner: "acme", Repo: "api", Title: "t",
+		RelationshipType: "action-item", Priority: "non-critical", Assignee: "alice-gh",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue: %v", err)
+	}
+	if len(gh.calls) != 1 || gh.calls[0].Assignee != "alice-gh" {
+		t.Fatalf("CreateIssue assignee = %v, want alice-gh", gh.calls)
+	}
+	if resp.GetAssignee() != "alice-gh" {
+		t.Errorf("response assignee = %q, want alice-gh", resp.GetAssignee())
+	}
+}
+
+// TestCreateGitHubIssue_AssigneeUserID_ResolvesToName covers the reported
+// bug fix: when assignee_user_id is supplied (as the frontend's
+// AssigneePicker does), the response's assignee_name is resolved
+// server-side from the Sevitout user record — never the raw tracker value
+// GitHub actually uses for the assignment.
+func TestCreateGitHubIssue_AssigneeUserID_ResolvesToName(t *testing.T) {
+	gh := &fakeIssueClient{
+		issue: &grpchandler.CreatedIssue{Number: 1, Title: "t", URL: "https://github.com/acme/api/issues/1"},
+	}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+	now := time.Now()
+	if err := ts.users.Create(ctx, &store.User{
+		ID: "user-1", Email: "alice@example.com", Name: "Alice", OrgRole: store.OrgRoleResponder, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	resp, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId: sevID, Owner: "acme", Repo: "api", Title: "t",
+		RelationshipType: "action-item", Priority: "non-critical",
+		Assignee: "alice-gh", AssigneeUserId: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue: %v", err)
+	}
+	if resp.GetAssignee() != "alice-gh" {
+		t.Errorf("response assignee = %q, want alice-gh (the tracker-native value is unaffected)", resp.GetAssignee())
+	}
+	if resp.GetAssigneeName() != "Alice" {
+		t.Errorf("response assignee_name = %q, want Alice", resp.GetAssigneeName())
+	}
+}
+
+// TestCreateGitHubIssue_UnknownAssigneeUserID_NotFatal asserts a lookup
+// failure for assignee_user_id never blocks issue creation — the GitHub
+// issue has already been created for real by this point.
+func TestCreateGitHubIssue_UnknownAssigneeUserID_NotFatal(t *testing.T) {
+	gh := &fakeIssueClient{
+		issue: &grpchandler.CreatedIssue{Number: 1, Title: "t", URL: "https://github.com/acme/api/issues/1"},
+	}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	resp, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId: sevID, Owner: "acme", Repo: "api", Title: "t",
+		RelationshipType: "action-item", Priority: "non-critical",
+		Assignee: "alice-gh", AssigneeUserId: "no-such-user",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue: %v", err)
+	}
+	if resp.GetAssigneeName() != "" {
+		t.Errorf("response assignee_name = %q, want empty for an unresolvable user", resp.GetAssigneeName())
+	}
+}
+
+// TestCreateGitHubIssue_NoAssignee_OmittedFromResponse asserts an empty
+// assignee is never sent to the tracker and never appears on the response.
+func TestCreateGitHubIssue_NoAssignee_OmittedFromResponse(t *testing.T) {
+	gh := &fakeIssueClient{
+		issue: &grpchandler.CreatedIssue{Number: 1, Title: "t", URL: "https://github.com/acme/api/issues/1"},
+	}
+	ts := newTestTaskServer(gh)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	resp, err := ts.server.CreateGitHubIssue(ctx, &pb.CreateGitHubIssueRequest{
+		SevId: sevID, Owner: "acme", Repo: "api", Title: "t",
+		RelationshipType: "action-item", Priority: "non-critical",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue: %v", err)
+	}
+	if gh.calls[0].Assignee != "" {
+		t.Errorf("CreateIssue assignee = %q, want empty", gh.calls[0].Assignee)
+	}
+	if resp.GetAssignee() != "" {
+		t.Errorf("response assignee = %q, want empty", resp.GetAssignee())
+	}
+}
+
 func TestCreateGitHubIssue_RetriesWithoutLabelsOn422(t *testing.T) {
 	gh := &fakeIssueClient{
 		issue:      &grpchandler.CreatedIssue{Number: 7, Title: "t", URL: "https://github.com/acme/api/issues/7"},
@@ -909,6 +1026,64 @@ func TestCreateJiraIssue_Valid(t *testing.T) {
 	}
 	if jira.calls[0].ProjectKey != "OPS" || jira.calls[0].IssueType != "Task" {
 		t.Errorf("project_key/issue_type: got (%q, %q), want (OPS, Task)", jira.calls[0].ProjectKey, jira.calls[0].IssueType)
+	}
+}
+
+// TestCreateJiraIssue_AssigneePassthrough covers docs/roadmap.md Phase 10f
+// for Jira's assignee_account_id field.
+func TestCreateJiraIssue_AssigneePassthrough(t *testing.T) {
+	jira := &fakeJiraIssueClient{
+		issue: &grpchandler.CreatedIssue{Key: "OPS-1", Title: "t", URL: "https://acme.atlassian.net/browse/OPS-1"},
+	}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+
+	resp, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId: sevID, ProjectKey: "OPS", IssueType: "Task", Summary: "t",
+		RelationshipType: "action-item", Priority: "non-critical", AssigneeAccountId: "acc-123",
+	})
+	if err != nil {
+		t.Fatalf("CreateJiraIssue: %v", err)
+	}
+	if len(jira.calls) != 1 || jira.calls[0].AssigneeAccountID != "acc-123" {
+		t.Fatalf("CreateIssue assignee_account_id = %v, want acc-123", jira.calls)
+	}
+	if resp.GetAssignee() != "acc-123" {
+		t.Errorf("response assignee = %q, want acc-123", resp.GetAssignee())
+	}
+}
+
+// TestCreateJiraIssue_AssigneeUserID_ResolvesToName mirrors
+// TestCreateGitHubIssue_AssigneeUserID_ResolvesToName for Jira's
+// assignee_account_id/assignee_user_id pair.
+func TestCreateJiraIssue_AssigneeUserID_ResolvesToName(t *testing.T) {
+	jira := &fakeJiraIssueClient{
+		issue: &grpchandler.CreatedIssue{Key: "OPS-1", Title: "t", URL: "https://acme.atlassian.net/browse/OPS-1"},
+	}
+	ts := newTestTaskServerWithJira(jira)
+	ctx := context.Background()
+	sevID := seedSEVForTask(t, ts, nil)
+	now := time.Now()
+	if err := ts.users.Create(ctx, &store.User{
+		ID: "user-1", Email: "carol@example.com", Name: "Carol", OrgRole: store.OrgRoleResponder, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	resp, err := ts.server.CreateJiraIssue(ctx, &pb.CreateJiraIssueRequest{
+		SevId: sevID, ProjectKey: "OPS", IssueType: "Task", Summary: "t",
+		RelationshipType: "action-item", Priority: "non-critical",
+		AssigneeAccountId: "acc-123", AssigneeUserId: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateJiraIssue: %v", err)
+	}
+	if resp.GetAssignee() != "acc-123" {
+		t.Errorf("response assignee = %q, want acc-123 (the tracker-native value is unaffected)", resp.GetAssignee())
+	}
+	if resp.GetAssigneeName() != "Carol" {
+		t.Errorf("response assignee_name = %q, want Carol", resp.GetAssigneeName())
 	}
 }
 

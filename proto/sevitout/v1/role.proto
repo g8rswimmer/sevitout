@@ -26,6 +26,19 @@ service RoleService {
       get: "/v1/sevs/{sev_id}/roles"
     };
   }
+
+  // InviteRoleToSlack invites the person holding one role assignment into
+  // the SEV's already-created incident Slack channel (docs/roadmap.md Phase
+  // 10e) — a manual "add to chat" action for a role assigned after the
+  // channel was created (auto-invite at channel-creation time only covers
+  // roles that existed at that moment). Fails FailedPrecondition when the
+  // SEV has no Slack channel recorded, or when the role holder has no
+  // resolvable Slack identity.
+  rpc InviteRoleToSlack(InviteRoleToSlackRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/roles/{id}/invite-to-slack"
+    };
+  }
 }
 
 message SEVRoleResponse {
@@ -57,4 +70,9 @@ message ListRolesRequest {
 
 message ListRolesResponse {
   repeated SEVRoleResponse roles = 1;
+}
+
+message InviteRoleToSlackRequest {
+  string sev_id = 1;
+  int64 id = 2;
 }

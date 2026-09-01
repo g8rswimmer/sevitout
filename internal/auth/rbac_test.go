@@ -18,6 +18,15 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleViewer, "/sevitout.v1.SEVService/ListSEVs", true},
 		{store.OrgRoleViewer, "/sevitout.v1.AuditService/ListAuditEntries", true},
 		{store.OrgRoleViewer, "/sevitout.v1.AuthService/WhoAmI", true},
+		{store.OrgRoleViewer, "/sevitout.v1.AuthService/UpdateMyIntegrationIdentities", true},
+		{store.OrgRoleViewer, "/sevitout.v1.AuthService/ListUserDirectory", true},
+		{store.OrgRoleViewer, "/sevitout.v1.RoleService/ListRoles", true},
+		// Viewer cannot invite to Slack (Responder+) or manage roles (IC+)
+		{store.OrgRoleViewer, "/sevitout.v1.RoleService/InviteRoleToSlack", false},
+		{store.OrgRoleViewer, "/sevitout.v1.RoleService/AssignRole", false},
+		{store.OrgRoleResponder, "/sevitout.v1.RoleService/InviteRoleToSlack", true},
+		{store.OrgRoleResponder, "/sevitout.v1.RoleService/AssignRole", false},
+		{store.OrgRoleIncidentCommander, "/sevitout.v1.RoleService/AssignRole", true},
 		// Viewer cannot write
 		{store.OrgRoleViewer, "/sevitout.v1.SEVService/CreateSEV", false},
 		{store.OrgRoleViewer, "/sevitout.v1.SEVService/UpdateSEV", false},

@@ -2,6 +2,7 @@ package grpc_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,14 +14,57 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/store/memory"
 )
 
+// fakeSlackInviteClient is a grpchandler.SlackInviteClient that records
+// InviteUsers calls and resolves emails from a fixed map, for
+// InviteRoleToSlack tests.
+type fakeSlackInviteClient struct {
+	emailToUserID map[string]string
+	invitedTo     string
+	invitedUsers  []string
+	inviteErr     error
+}
+
+func (f *fakeSlackInviteClient) InviteUsers(_ context.Context, channelID string, userIDs []string) error {
+	f.invitedTo = channelID
+	f.invitedUsers = append(f.invitedUsers, userIDs...)
+	return f.inviteErr
+}
+
+func (f *fakeSlackInviteClient) LookupUserIDByEmail(_ context.Context, email string) (string, error) {
+	return f.emailToUserID[email], nil
+}
+
 // testRoleServer bundles a RoleServer with its backing in-memory stores.
 type testRoleServer struct {
-	server *grpchandler.RoleServer
-	roles  *memory.RoleStore
-	sevs   *memory.SEVStore
-	access *memory.SEVAccessStore
-	audit  *memory.AuditStore
-	pub    *fakePublisher
+	server       *grpchandler.RoleServer
+	roles        *memory.RoleStore
+	sevs         *memory.SEVStore
+	access       *memory.SEVAccessStore
+	audit        *memory.AuditStore
+	pub          *fakePublisher
+	users        *memory.UserStore
+	integrations *memory.IntegrationConfigStore
+	enc          grpchandler.Encryptor
+}
+
+// seedSlackConfig upserts a "slack" integration config with the given
+// bot_token, encrypted with ts.enc — the credential InviteRoleToSlack reads.
+func (ts *testRoleServer) seedSlackConfig(t *testing.T, botToken string) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"bot_token": botToken})
+	if err != nil {
+		t.Fatalf("marshal credentials: %v", err)
+	}
+	encrypted, err := ts.enc.Encrypt(raw)
+	if err != nil {
+		t.Fatalf("encrypt credentials: %v", err)
+	}
+	now := time.Now()
+	if err := ts.integrations.Upsert(context.Background(), &store.IntegrationConfig{
+		IntegrationType: "slack", EncryptedCredentials: encrypted, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed slack config: %v", err)
+	}
 }
 
 func newTestRoleServer() *testRoleServer {
@@ -36,6 +80,36 @@ func newTestRoleServer() *testRoleServer {
 		access: access,
 		audit:  audit,
 		pub:    pub,
+	}
+}
+
+// newTestRoleServerWithSlack is like newTestRoleServer but also wires
+// Users/Integrations/Crypto/SlackFactory, for InviteRoleToSlack tests. slack
+// is the fake every SlackFactory call returns, regardless of botToken.
+func newTestRoleServerWithSlack(t *testing.T, slack *fakeSlackInviteClient) *testRoleServer {
+	t.Helper()
+	roles := memory.NewRoleStore()
+	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
+	audit := memory.NewAuditStore()
+	pub := &fakePublisher{}
+	users := memory.NewUserStore()
+	integrations := memory.NewIntegrationConfigStore()
+	enc := testEncryptor(t)
+	return &testRoleServer{
+		server: grpchandler.NewRoleServer(grpchandler.RoleServerParams{
+			Roles: roles, SEVs: sevs, Access: access, Audit: audit, Publisher: pub,
+			Users: users, Integrations: integrations, Crypto: enc,
+			SlackFactory: func(string) grpchandler.SlackInviteClient { return slack },
+		}),
+		roles:        roles,
+		sevs:         sevs,
+		access:       access,
+		audit:        audit,
+		pub:          pub,
+		users:        users,
+		integrations: integrations,
+		enc:          enc,
 	}
 }
 
@@ -504,5 +578,145 @@ func TestRemoveRole_SensitiveSEVDoesNotPublish(t *testing.T) {
 
 	if events := ts.pub.All(); len(events) != 0 {
 		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+// ── InviteRoleToSlack ─────────────────────────────────────────────────────────
+
+// mustSetSlackChannel fetches sevID, sets SlackChannelID to channelID, and
+// persists it directly — a stand-in for Phase 10e's UpdateSEV write-back
+// without going through the full SEVServer.
+func mustSetSlackChannel(t *testing.T, ts *testRoleServer, sevID, channelID string) {
+	t.Helper()
+	sv, err := ts.sevs.Get(context.Background(), sevID)
+	if err != nil {
+		t.Fatalf("get SEV: %v", err)
+	}
+	sv.SlackChannelID = &channelID
+	if err := ts.sevs.Update(context.Background(), sv); err != nil {
+		t.Fatalf("set slack channel: %v", err)
+	}
+}
+
+func TestInviteRoleToSlack_NoChannel_FailedPrecondition(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	role, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol <carol@example.com>",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	_, err = ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: role.GetId()})
+	if grpcCode(err) != codes.FailedPrecondition {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.FailedPrecondition)
+	}
+}
+
+func TestInviteRoleToSlack_NotConfigured_Unavailable(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	// No seedSlackConfig call — nothing configured.
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+	role, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol <carol@example.com>",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	_, err = ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: role.GetId()})
+	if grpcCode(err) != codes.Unavailable {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.Unavailable)
+	}
+}
+
+func TestInviteRoleToSlack_ResolvesViaStoredSlackUserID(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	now := time.Now()
+	if err := ts.users.Create(context.Background(), &store.User{
+		ID: "user-1", Email: "carol@example.com", Name: "Carol",
+		OrgRole: store.OrgRoleResponder, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	slackID := "U-STORED"
+	if _, err := ts.users.UpdateIntegrationIdentities(context.Background(), "user-1", &slackID, nil, nil); err != nil {
+		t.Fatalf("set slack id: %v", err)
+	}
+
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+	role, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), UserId: "user-1", DisplayName: "Carol",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	if _, err := ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: role.GetId()}); err != nil {
+		t.Fatalf("InviteRoleToSlack: %v", err)
+	}
+	if slack.invitedTo != "C123" || len(slack.invitedUsers) != 1 || slack.invitedUsers[0] != "U-STORED" {
+		t.Errorf("invited (%q, %v), want (C123, [U-STORED])", slack.invitedTo, slack.invitedUsers)
+	}
+}
+
+func TestInviteRoleToSlack_FallsBackToDisplayNameRegex(t *testing.T) {
+	slack := &fakeSlackInviteClient{emailToUserID: map[string]string{"carol@example.com": "U-EMAIL"}}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+	role, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol <carol@example.com>",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	if _, err := ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: role.GetId()}); err != nil {
+		t.Fatalf("InviteRoleToSlack: %v", err)
+	}
+	if len(slack.invitedUsers) != 1 || slack.invitedUsers[0] != "U-EMAIL" {
+		t.Errorf("invited users = %v, want [U-EMAIL]", slack.invitedUsers)
+	}
+}
+
+func TestInviteRoleToSlack_NoResolvableIdentity_FailedPrecondition(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+	role, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "No Email Here",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	_, err = ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: role.GetId()})
+	if grpcCode(err) != codes.FailedPrecondition {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.FailedPrecondition)
+	}
+}
+
+func TestInviteRoleToSlack_RoleNotFound(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	_, err := ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: 9999})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("code = %v, want %v", grpcCode(err), codes.NotFound)
 	}
 }

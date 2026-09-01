@@ -286,6 +286,13 @@ message UserResponse {
   bool active = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
+  // slack_user_id, github_username, and jira_account_id mirror
+  // WhoAmIResponse's self-service identity fields (docs/roadmap.md Phase
+  // 10a) — read-only here (AdminUsersPage shows, but never edits, another
+  // user's identities; each user manages their own via /profile).
+  string slack_user_id = 9;
+  string github_username = 10;
+  string jira_account_id = 11;
 }
 
 message ListUsersRequest {

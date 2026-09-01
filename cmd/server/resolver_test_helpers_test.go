@@ -69,7 +69,7 @@ type fakeIssueClient struct {
 	err    error
 }
 
-func (f *fakeIssueClient) CreateIssue(_ context.Context, _, _, _, _ string, _ []string) (*grpchandler.CreatedIssue, error) {
+func (f *fakeIssueClient) CreateIssue(_ context.Context, _, _, _, _ string, _ []string, _ string) (*grpchandler.CreatedIssue, error) {
 	f.called = true
 	return f.issue, f.err
 }
@@ -81,7 +81,7 @@ type fakeJiraIssueClient struct {
 	err    error
 }
 
-func (f *fakeJiraIssueClient) CreateIssue(_ context.Context, _, _, _, _ string, _ []string) (*grpchandler.CreatedIssue, error) {
+func (f *fakeJiraIssueClient) CreateIssue(_ context.Context, _, _, _, _ string, _ []string, _ string) (*grpchandler.CreatedIssue, error) {
 	f.called = true
 	return f.issue, f.err
 }

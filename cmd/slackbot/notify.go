@@ -17,6 +17,12 @@ type sevPayload struct {
 	Title         string `json:"title"`
 	Status        string `json:"status"`
 	SeverityLevel int32  `json:"severity_level"`
+	// CreatedBy is the SEV's creator (a Sevitout user ID), read by
+	// handleSEVCreated and passed to createIncidentChannel so the creator
+	// is invited into the new incident channel (docs/roadmap.md Phase 11d)
+	// — see resolveCreatorSlackUserID's doc comment for the one case
+	// (`/sev open`) where this doesn't resolve to the actual human opener.
+	CreatedBy string `json:"created_by"`
 }
 
 // announcementPayload is the subset of a protojson-marshaled
@@ -82,7 +88,7 @@ func (b *bot) handleSEVCreated(ctx context.Context, payload json.RawMessage) {
 	}
 
 	if b.channelFor(sev.ID) == "" {
-		b.createIncidentChannel(ctx, sev.ID, sev.Title, sev.SeverityLevel)
+		b.createIncidentChannel(ctx, sev.ID, sev.Title, sev.SeverityLevel, sev.CreatedBy)
 	}
 
 	text := fmt.Sprintf(":rotating_light: SEV-%d opened: *%s* (%s)", sev.SeverityLevel, sev.Title, sev.ID)

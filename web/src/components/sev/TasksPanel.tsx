@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, ExternalLink, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
+import { useAuth } from '@/auth/useAuth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -9,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Section } from '@/components/sev/Section'
+import { AssigneePicker } from '@/components/sev/AssigneePicker'
 import { ExternalSystemBadge } from '@/components/sev/badges'
 import { formatDateTime } from '@/lib/format'
 import { TASK_RELATIONSHIP_LABELS, type TaskPriority, type TaskRelationshipType } from '@/types/api'
@@ -38,6 +40,7 @@ export function TasksPanel({
 }) {
   const queryClient = useQueryClient()
   const tasks = useQuery({ queryKey: ['sevs', sevId, 'tasks'], queryFn: () => api.tasks.list(sevId) })
+  const { user } = useAuth()
 
   const [mode, setMode] = useState<Mode>('link')
   const [url, setUrl] = useState('')
@@ -49,6 +52,19 @@ export function TasksPanel({
   const [repo, setRepo] = useState('')
   const [projectKey, setProjectKey] = useState('')
   const [issueType, setIssueType] = useState('')
+  // Assignee: the tracker-native value actually submitted (a GitHub login
+  // or Jira account ID), the display name shown in its place, and the
+  // Sevitout user ID sent alongside so the server can re-resolve that name
+  // into TaskResponse.assignee_name — set together by AssigneePicker.tsx's
+  // search-and-pick UI, pre-filled from the caller's own stored integration
+  // identity (Roadmap Phase 10f), clearable, and omitted from the request
+  // payload when empty.
+  const [githubAssignee, setGithubAssignee] = useState('')
+  const [githubAssigneeName, setGithubAssigneeName] = useState('')
+  const [githubAssigneeUserId, setGithubAssigneeUserId] = useState('')
+  const [jiraAssignee, setJiraAssignee] = useState('')
+  const [jiraAssigneeName, setJiraAssigneeName] = useState('')
+  const [jiraAssigneeUserId, setJiraAssigneeUserId] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sevs', sevId, 'tasks'] })
@@ -83,12 +99,17 @@ export function TasksPanel({
         body: description || undefined,
         relationship_type: relationshipType,
         priority,
+        assignee: githubAssignee.trim() || undefined,
+        assignee_user_id: githubAssigneeUserId || undefined,
       }),
     onSuccess: () => {
       setOwner('')
       setRepo('')
       setTitle('')
       setDescription('')
+      setGithubAssignee('')
+      setGithubAssigneeName('')
+      setGithubAssigneeUserId('')
       setError(null)
       void invalidate()
     },
@@ -104,12 +125,17 @@ export function TasksPanel({
         description: description || undefined,
         relationship_type: relationshipType,
         priority,
+        assignee_account_id: jiraAssignee.trim() || undefined,
+        assignee_user_id: jiraAssigneeUserId || undefined,
       }),
     onSuccess: () => {
       setProjectKey('')
       setIssueType('')
       setTitle('')
       setDescription('')
+      setJiraAssignee('')
+      setJiraAssigneeName('')
+      setJiraAssigneeUserId('')
       setError(null)
       void invalidate()
     },
@@ -156,6 +182,12 @@ export function TasksPanel({
                     </Badge>
                   )}
                   {t.due_date && <span>Due {formatDateTime(t.due_date)}</span>}
+                  {/* assignee_name (a Sevitout user's display name, resolved
+                      server-side from assignee_user_id) is preferred over
+                      assignee itself — the raw GitHub login/Jira account ID
+                      is only shown as a fallback for a task whose assignee
+                      wasn't picked from Sevitout's own directory. */}
+                  {(t.assignee_name || t.assignee) && <span>Assigned to {t.assignee_name || t.assignee}</span>}
                 </div>
               </div>
               {canManage && (
@@ -193,11 +225,28 @@ export function TasksPanel({
                     setRepo(parsed.repo)
                   }
                 }
+                if (!githubAssignee && user?.github_username) {
+                  setGithubAssignee(user.github_username)
+                  setGithubAssigneeName(user.name)
+                  setGithubAssigneeUserId(user.id)
+                }
               }}
             >
               Create GitHub issue
             </Button>
-            <Button type="button" size="sm" variant={mode === 'jira' ? 'default' : 'outline'} onClick={() => setMode('jira')}>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === 'jira' ? 'default' : 'outline'}
+              onClick={() => {
+                setMode('jira')
+                if (!jiraAssignee && user?.jira_account_id) {
+                  setJiraAssignee(user.jira_account_id)
+                  setJiraAssigneeName(user.name)
+                  setJiraAssigneeUserId(user.id)
+                }
+              }}
+            >
               Create Jira issue
             </Button>
           </div>
@@ -215,28 +264,62 @@ export function TasksPanel({
               <Input aria-label="Task URL" placeholder="https://github.com/org/repo/issues/42" value={url} onChange={(e) => setUrl(e.target.value)} />
             )}
             {mode === 'github' && (
-              <div className="flex gap-2">
-                <Input aria-label="Owner" placeholder="owner" value={owner} onChange={(e) => setOwner(e.target.value)} className="w-1/2" />
-                <Input aria-label="Repo" placeholder="repo" value={repo} onChange={(e) => setRepo(e.target.value)} className="w-1/2" />
-              </div>
+              <>
+                <div className="flex gap-2">
+                  <Input aria-label="Owner" placeholder="owner" value={owner} onChange={(e) => setOwner(e.target.value)} className="w-1/2" />
+                  <Input aria-label="Repo" placeholder="repo" value={repo} onChange={(e) => setRepo(e.target.value)} className="w-1/2" />
+                </div>
+                <AssigneePicker
+                  field="github_username"
+                  value={githubAssignee}
+                  selectedName={githubAssigneeName}
+                  onSelect={(u) => {
+                    setGithubAssignee(u.github_username!)
+                    setGithubAssigneeName(u.name)
+                    setGithubAssigneeUserId(u.id)
+                  }}
+                  onClear={() => {
+                    setGithubAssignee('')
+                    setGithubAssigneeName('')
+                    setGithubAssigneeUserId('')
+                  }}
+                />
+              </>
             )}
             {mode === 'jira' && (
-              <div className="flex gap-2">
-                <Input
-                  aria-label="Project key"
-                  placeholder="e.g. OPS"
-                  value={projectKey}
-                  onChange={(e) => setProjectKey(e.target.value)}
-                  className="w-1/2"
+              <>
+                <div className="flex gap-2">
+                  <Input
+                    aria-label="Project key"
+                    placeholder="e.g. OPS"
+                    value={projectKey}
+                    onChange={(e) => setProjectKey(e.target.value)}
+                    className="w-1/2"
+                  />
+                  <Input
+                    aria-label="Issue type"
+                    placeholder="e.g. Task, Bug"
+                    value={issueType}
+                    onChange={(e) => setIssueType(e.target.value)}
+                    className="w-1/2"
+                  />
+                </div>
+                <AssigneePicker
+                  field="jira_account_id"
+                  value={jiraAssignee}
+                  selectedName={jiraAssigneeName}
+                  onSelect={(u) => {
+                    setJiraAssignee(u.jira_account_id!)
+                    setJiraAssigneeName(u.name)
+                    setJiraAssigneeUserId(u.id)
+                  }}
+                  onClear={() => {
+                    setJiraAssignee('')
+                    setJiraAssigneeName('')
+                    setJiraAssigneeUserId('')
+                  }}
                 />
-                <Input
-                  aria-label="Issue type"
-                  placeholder="e.g. Task, Bug"
-                  value={issueType}
-                  onChange={(e) => setIssueType(e.target.value)}
-                  className="w-1/2"
-                />
-              </div>
+              </>
             )}
             <Input
               aria-label={mode === 'jira' ? 'Summary' : 'Title'}

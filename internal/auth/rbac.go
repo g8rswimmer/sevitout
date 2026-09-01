@@ -22,12 +22,20 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.SEVService/TransitionStatus": store.OrgRoleIncidentCommander,
 	// Audit service
 	"/sevitout.v1.AuditService/ListAuditEntries": store.OrgRoleViewer,
-	// Auth service
-	"/sevitout.v1.AuthService/WhoAmI": store.OrgRoleViewer,
-	// Role service
-	"/sevitout.v1.RoleService/AssignRole": store.OrgRoleIncidentCommander,
-	"/sevitout.v1.RoleService/RemoveRole": store.OrgRoleIncidentCommander,
-	"/sevitout.v1.RoleService/ListRoles":  store.OrgRoleViewer,
+	// Auth service — UpdateMyIntegrationIdentities/ListUserDirectory sit at
+	// the same Viewer floor as WhoAmI: both act purely on the caller's own
+	// identity or return a minimal public-safe directory, not a
+	// user-management surface (docs/roadmap.md Phase 10a).
+	"/sevitout.v1.AuthService/WhoAmI":                        store.OrgRoleViewer,
+	"/sevitout.v1.AuthService/UpdateMyIntegrationIdentities": store.OrgRoleViewer,
+	"/sevitout.v1.AuthService/ListUserDirectory":             store.OrgRoleViewer,
+	// Role service — InviteRoleToSlack is an auxiliary invite action, not
+	// role *management* like AssignRole/RemoveRole, so it sits at the lower
+	// Responder floor (docs/roadmap.md Phase 10e).
+	"/sevitout.v1.RoleService/AssignRole":        store.OrgRoleIncidentCommander,
+	"/sevitout.v1.RoleService/RemoveRole":        store.OrgRoleIncidentCommander,
+	"/sevitout.v1.RoleService/ListRoles":         store.OrgRoleViewer,
+	"/sevitout.v1.RoleService/InviteRoleToSlack": store.OrgRoleResponder,
 	// SEV access service — granting/revoking a user's visibility into a
 	// Sensitive SEV (§14) is scoped the same as unlocking a completed SEV
 	// and creating/revoking a share link: IC or Admin. ListAccess itself

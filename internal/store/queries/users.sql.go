@@ -23,21 +23,25 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash,
+       slack_user_id, github_username, jira_account_id, created_at, updated_at
 FROM users
 WHERE id = $1
 `
 
 type GetUserRow struct {
-	ID           string             `json:"id"`
-	Email        string             `json:"email"`
-	Name         string             `json:"name"`
-	AvatarUrl    *string            `json:"avatar_url"`
-	OrgRole      string             `json:"org_role"`
-	Active       bool               `json:"active"`
-	PasswordHash string             `json:"password_hash"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	Email          string             `json:"email"`
+	Name           string             `json:"name"`
+	AvatarUrl      *string            `json:"avatar_url"`
+	OrgRole        string             `json:"org_role"`
+	Active         bool               `json:"active"`
+	PasswordHash   string             `json:"password_hash"`
+	SlackUserID    *string            `json:"slack_user_id"`
+	GithubUsername *string            `json:"github_username"`
+	JiraAccountID  *string            `json:"jira_account_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetUser(ctx context.Context, id string) (GetUserRow, error) {
@@ -51,6 +55,9 @@ func (q *Queries) GetUser(ctx context.Context, id string) (GetUserRow, error) {
 		&i.OrgRole,
 		&i.Active,
 		&i.PasswordHash,
+		&i.SlackUserID,
+		&i.GithubUsername,
+		&i.JiraAccountID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -58,21 +65,25 @@ func (q *Queries) GetUser(ctx context.Context, id string) (GetUserRow, error) {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash,
+       slack_user_id, github_username, jira_account_id, created_at, updated_at
 FROM users
 WHERE email = $1
 `
 
 type GetUserByEmailRow struct {
-	ID           string             `json:"id"`
-	Email        string             `json:"email"`
-	Name         string             `json:"name"`
-	AvatarUrl    *string            `json:"avatar_url"`
-	OrgRole      string             `json:"org_role"`
-	Active       bool               `json:"active"`
-	PasswordHash string             `json:"password_hash"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	Email          string             `json:"email"`
+	Name           string             `json:"name"`
+	AvatarUrl      *string            `json:"avatar_url"`
+	OrgRole        string             `json:"org_role"`
+	Active         bool               `json:"active"`
+	PasswordHash   string             `json:"password_hash"`
+	SlackUserID    *string            `json:"slack_user_id"`
+	GithubUsername *string            `json:"github_username"`
+	JiraAccountID  *string            `json:"jira_account_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
@@ -86,6 +97,9 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.OrgRole,
 		&i.Active,
 		&i.PasswordHash,
+		&i.SlackUserID,
+		&i.GithubUsername,
+		&i.JiraAccountID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -125,21 +139,25 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, name, avatar_url, org_role, active, password_hash, created_at, updated_at
+SELECT id, email, name, avatar_url, org_role, active, password_hash,
+       slack_user_id, github_username, jira_account_id, created_at, updated_at
 FROM users
 ORDER BY email
 `
 
 type ListUsersRow struct {
-	ID           string             `json:"id"`
-	Email        string             `json:"email"`
-	Name         string             `json:"name"`
-	AvatarUrl    *string            `json:"avatar_url"`
-	OrgRole      string             `json:"org_role"`
-	Active       bool               `json:"active"`
-	PasswordHash string             `json:"password_hash"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	Email          string             `json:"email"`
+	Name           string             `json:"name"`
+	AvatarUrl      *string            `json:"avatar_url"`
+	OrgRole        string             `json:"org_role"`
+	Active         bool               `json:"active"`
+	PasswordHash   string             `json:"password_hash"`
+	SlackUserID    *string            `json:"slack_user_id"`
+	GithubUsername *string            `json:"github_username"`
+	JiraAccountID  *string            `json:"jira_account_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
@@ -159,6 +177,9 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 			&i.OrgRole,
 			&i.Active,
 			&i.PasswordHash,
+			&i.SlackUserID,
+			&i.GithubUsername,
+			&i.JiraAccountID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -198,6 +219,34 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.AvatarUrl,
 		arg.OrgRole,
 		arg.Active,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const updateUserIntegrationIdentities = `-- name: UpdateUserIntegrationIdentities :exec
+UPDATE users SET
+    slack_user_id    = $2,
+    github_username  = $3,
+    jira_account_id  = $4,
+    updated_at       = $5
+WHERE id = $1
+`
+
+type UpdateUserIntegrationIdentitiesParams struct {
+	ID             string             `json:"id"`
+	SlackUserID    *string            `json:"slack_user_id"`
+	GithubUsername *string            `json:"github_username"`
+	JiraAccountID  *string            `json:"jira_account_id"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateUserIntegrationIdentities(ctx context.Context, arg UpdateUserIntegrationIdentitiesParams) error {
+	_, err := q.db.Exec(ctx, updateUserIntegrationIdentities,
+		arg.ID,
+		arg.SlackUserID,
+		arg.GithubUsername,
+		arg.JiraAccountID,
 		arg.UpdatedAt,
 	)
 	return err

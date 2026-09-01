@@ -98,6 +98,12 @@ message SEVResponse {
   // string) run against monitoring_tool — a separate concept from
   // dashboard_url, not a URL (§13.4).
   string query = 38;
+  // slack_channel_id is the incident channel cmd/slackbot auto-created for
+  // this SEV (§13.1, docs/roadmap.md Phase 10e) — absent for SEVs created
+  // before this shipped, or whose channel-creation step never ran/failed.
+  // Not sensitive (raw IDs are already exposed elsewhere), so it's on the
+  // main response rather than gated.
+  string slack_channel_id = 39;
 }
 
 message CreateSEVRequest {
@@ -154,6 +160,11 @@ message UpdateSEVRequest {
   string github_repo = 26;
   string root_cause_reference_url = 27;
   string query = 28;
+  // slack_channel_id records the incident channel cmd/slackbot auto-created
+  // for this SEV, written back right after channel creation (docs/roadmap.md
+  // Phase 10e). Sparse-patch like every other field here: omitted on every
+  // other UpdateSEV call, so this is safe to send from exactly one call site.
+  string slack_channel_id = 29;
 }
 
 message ListSEVsRequest {

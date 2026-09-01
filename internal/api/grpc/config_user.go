@@ -120,5 +120,14 @@ func userToProto(u *store.User) *pb.UserResponse {
 	if u.AvatarURL != nil {
 		resp.AvatarUrl = *u.AvatarURL
 	}
+	if u.SlackUserID != nil {
+		resp.SlackUserId = *u.SlackUserID
+	}
+	if u.GitHubUsername != nil {
+		resp.GithubUsername = *u.GitHubUsername
+	}
+	if u.JiraAccountID != nil {
+		resp.JiraAccountId = *u.JiraAccountID
+	}
 	return resp
 }

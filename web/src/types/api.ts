@@ -48,6 +48,39 @@ export interface WhoAmIResponse {
   avatar_url?: string
   org_role: OrgRole
   oauth_provider?: string
+  // slack_user_id, github_username, and jira_account_id are the caller's own
+  // self-service integration identities (Roadmap Phase 10), set via
+  // AuthService.UpdateMyIntegrationIdentities on the Profile page.
+  slack_user_id?: string
+  github_username?: string
+  jira_account_id?: string
+}
+
+/** Full-replace: send all three fields on every call — an empty string
+ * clears that field, unlike UpdateSEV's sparse-patch convention. */
+export interface UpdateMyIntegrationIdentitiesRequest {
+  slack_user_id: string
+  github_username: string
+  jira_account_id: string
+}
+
+/** A minimal, Viewer-safe directory entry — AuthService.ListUserDirectory's
+ * result shape, deliberately narrower than UserResponse (no role/active
+ * status/timestamps). */
+export interface DirectoryUser {
+  id: string
+  name: string
+  email: string
+  slack_user_id?: string
+  // github_username and jira_account_id back the GitHub/Jira issue-creation
+  // assignee picker (TasksPanel.tsx) — only present when that user has set
+  // the corresponding field on their own profile.
+  github_username?: string
+  jira_account_id?: string
+}
+
+export interface ListUserDirectoryResponse {
+  users?: DirectoryUser[]
 }
 
 export interface PublicUser {
@@ -210,6 +243,10 @@ export interface SEVResponse {
   updated_at: string
   created_by?: string
   ai_disabled?: boolean
+  // slack_channel_id is the incident channel cmd/slackbot auto-created for
+  // this SEV (Roadmap Phase 10e) — absent for SEVs created before this
+  // shipped. Gates RolesPanel's per-role "Add to chat" button.
+  slack_channel_id?: string
 }
 
 export interface ListSEVsResponse {
@@ -514,6 +551,17 @@ export interface TaskResponse {
   overdue?: boolean
   created_at: string
   created_by?: string
+  // assignee is the tracker-native assignee (a GitHub login, or a Jira
+  // account ID) set at issue-creation time (Roadmap Phase 10f). Absent for
+  // tasks linked via LinkTask, or created before this field existed.
+  assignee?: string
+  // assignee_name is the Sevitout display name of the assignee, resolved
+  // server-side at creation time from CreateGitHubIssueRequest.assignee_user_id
+  // / CreateJiraIssueRequest.assignee_user_id — a snapshot, not a live
+  // lookup. Prefer this over `assignee` for display; fall back to `assignee`
+  // only when this is absent (e.g. a task created via a raw API call that
+  // never supplied assignee_user_id).
+  assignee_name?: string
 }
 
 export interface LinkTaskRequest {
@@ -534,6 +582,13 @@ export interface CreateGitHubIssueRequest {
   body?: string
   relationship_type: TaskRelationshipType
   priority: TaskPriority
+  /** A GitHub login to assign the new issue to; omitted creates it unassigned. */
+  assignee?: string
+  /** The Sevitout user ID of the picked assignee (AssigneePicker.tsx) — the
+   * server resolves it to that user's display name and returns it as
+   * TaskResponse.assignee_name, so the linked-tasks list can show a name
+   * instead of the raw GitHub login above. */
+  assignee_user_id?: string
 }
 
 export interface CreateJiraIssueRequest {
@@ -547,6 +602,14 @@ export interface CreateJiraIssueRequest {
   description?: string
   relationship_type: TaskRelationshipType
   priority: TaskPriority
+  /** A Jira Cloud account ID to assign the new issue to; omitted creates it
+   * unassigned. Unlike a GitHub login, this is an opaque ID not visible in
+   * Jira's own UI without an email->accountId lookup — see the Profile
+   * page's help text and demo/integration-user-profiles.md. */
+  assignee_account_id?: string
+  /** The Sevitout user ID of the picked assignee — same meaning as
+   * CreateGitHubIssueRequest.assignee_user_id. */
+  assignee_user_id?: string
 }
 
 export interface ListTasksResponse {
@@ -742,6 +805,13 @@ export interface UserResponse {
   active?: boolean
   created_at: string
   updated_at: string
+  // slack_user_id, github_username, and jira_account_id mirror
+  // WhoAmIResponse's self-service identity fields (Roadmap Phase 10) —
+  // read-only here; AdminUsersPage shows but never edits another user's
+  // identities.
+  slack_user_id?: string
+  github_username?: string
+  jira_account_id?: string
 }
 
 export interface ListUsersResponse {

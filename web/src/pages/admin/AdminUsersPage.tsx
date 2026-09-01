@@ -13,6 +13,26 @@ import { ORG_ROLE_LABELS, type OrgRole, type UserResponse } from '@/types/api'
 
 const ORG_ROLES = Object.keys(ORG_ROLE_LABELS) as OrgRole[]
 
+/** Read-only per-user identity indicator (Roadmap Phase 10g) — a small badge
+ * per integration the user has set for themselves on /profile; no edit
+ * control here, since each user manages their own identities. */
+function IntegrationsCell({ user }: { user: UserResponse }) {
+  const set: string[] = []
+  if (user.slack_user_id) set.push('Slack')
+  if (user.github_username) set.push('GitHub')
+  if (user.jira_account_id) set.push('Jira')
+  if (set.length === 0) return <span className="text-xs text-muted-foreground">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {set.map((s) => (
+        <Badge key={s} variant="outline" className="text-xs">
+          {s}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
 export function AdminUsersPage() {
   const queryClient = useQueryClient()
   const [queryInput, setQueryInput] = useState('')
@@ -81,6 +101,7 @@ export function AdminUsersPage() {
                 <th className="py-2 pr-3">Email</th>
                 <th className="py-2 pr-3">Role</th>
                 <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3">Integrations</th>
                 <th className="py-2 pr-3">Joined</th>
                 <th className="py-2" />
               </tr>
@@ -109,6 +130,9 @@ export function AdminUsersPage() {
                     <Badge variant={u.active === false ? 'outline' : 'secondary'}>
                       {u.active === false ? 'Deactivated' : 'Active'}
                     </Badge>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <IntegrationsCell user={u} />
                   </td>
                   <td className="py-2 pr-3 text-muted-foreground">{formatDateTime(u.created_at)}</td>
                   <td className="py-2 text-right">

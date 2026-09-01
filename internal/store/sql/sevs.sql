@@ -8,7 +8,8 @@ INSERT INTO sevs (
     right_people_present, right_people_notes, tags,
     started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
     mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-    locked, sensitive, ai_disabled, created_at, updated_at, created_by
+    locked, sensitive, ai_disabled, created_at, updated_at, created_by,
+    slack_channel_id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
@@ -18,7 +19,8 @@ INSERT INTO sevs (
     $21, $22, $23,
     $24, $25, $26, $27, $28,
     $29, $30, $31, $32,
-    $33, $34, $35, $36, $37, $38
+    $33, $34, $35, $36, $37, $38,
+    $39
 );
 
 -- name: GetSEV :one
@@ -30,7 +32,8 @@ SELECT id, title, description, severity_level, status,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, ai_disabled, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by,
+       slack_channel_id
 FROM sevs
 WHERE id = $1;
 
@@ -70,7 +73,8 @@ UPDATE sevs SET
     locked                 = $33,
     sensitive              = $34,
     ai_disabled            = $35,
-    updated_at             = $36
+    updated_at             = $36,
+    slack_channel_id       = $37
 WHERE id = $1;
 
 -- name: UpdateSEVLocked :exec
@@ -85,7 +89,8 @@ SELECT id, title, description, severity_level, status,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, ai_disabled, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by,
+       slack_channel_id
 FROM sevs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;

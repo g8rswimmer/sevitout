@@ -24,6 +24,21 @@ const _ = grpc.SupportPackageIsVersion7
 type AuthServiceClient interface {
 	// WhoAmI returns the identity of the currently authenticated caller.
 	WhoAmI(ctx context.Context, in *WhoAmIRequest, opts ...grpc.CallOption) (*WhoAmIResponse, error)
+	// UpdateMyIntegrationIdentities lets the caller manage their own
+	// self-service integration identities (Slack user ID, GitHub username,
+	// Jira account ID — docs/roadmap.md Phase 10a), used to widen Slack
+	// auto-invite and default new tracker issues to the creating user. Unlike
+	// UpdateSEV's sparse-patch convention, this is full-replace: all three
+	// fields are sent on every call, and an empty string clears that field —
+	// this endpoint only ever touches these three fields, so "empty = leave
+	// alone" would make clearing one impossible.
+	UpdateMyIntegrationIdentities(ctx context.Context, in *UpdateMyIntegrationIdentitiesRequest, opts ...grpc.CallOption) (*WhoAmIResponse, error)
+	// ListUserDirectory is a minimal org-wide "who is this person" lookup —
+	// deliberately narrower than ConfigService.ListUsers (an Admin-only
+	// user-management surface): open to any authenticated Viewer, and returns
+	// only the fields needed to resolve a role assignment or a Slack invite
+	// (docs/roadmap.md Phase 10a), never role/active-status/audit fields.
+	ListUserDirectory(ctx context.Context, in *ListUserDirectoryRequest, opts ...grpc.CallOption) (*ListUserDirectoryResponse, error)
 }
 
 type authServiceClient struct {
@@ -43,12 +58,45 @@ func (c *authServiceClient) WhoAmI(ctx context.Context, in *WhoAmIRequest, opts 
 	return out, nil
 }
 
+func (c *authServiceClient) UpdateMyIntegrationIdentities(ctx context.Context, in *UpdateMyIntegrationIdentitiesRequest, opts ...grpc.CallOption) (*WhoAmIResponse, error) {
+	out := new(WhoAmIResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.AuthService/UpdateMyIntegrationIdentities", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) ListUserDirectory(ctx context.Context, in *ListUserDirectoryRequest, opts ...grpc.CallOption) (*ListUserDirectoryResponse, error) {
+	out := new(ListUserDirectoryResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.AuthService/ListUserDirectory", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations must embed UnimplementedAuthServiceServer
 // for forward compatibility
 type AuthServiceServer interface {
 	// WhoAmI returns the identity of the currently authenticated caller.
 	WhoAmI(context.Context, *WhoAmIRequest) (*WhoAmIResponse, error)
+	// UpdateMyIntegrationIdentities lets the caller manage their own
+	// self-service integration identities (Slack user ID, GitHub username,
+	// Jira account ID — docs/roadmap.md Phase 10a), used to widen Slack
+	// auto-invite and default new tracker issues to the creating user. Unlike
+	// UpdateSEV's sparse-patch convention, this is full-replace: all three
+	// fields are sent on every call, and an empty string clears that field —
+	// this endpoint only ever touches these three fields, so "empty = leave
+	// alone" would make clearing one impossible.
+	UpdateMyIntegrationIdentities(context.Context, *UpdateMyIntegrationIdentitiesRequest) (*WhoAmIResponse, error)
+	// ListUserDirectory is a minimal org-wide "who is this person" lookup —
+	// deliberately narrower than ConfigService.ListUsers (an Admin-only
+	// user-management surface): open to any authenticated Viewer, and returns
+	// only the fields needed to resolve a role assignment or a Slack invite
+	// (docs/roadmap.md Phase 10a), never role/active-status/audit fields.
+	ListUserDirectory(context.Context, *ListUserDirectoryRequest) (*ListUserDirectoryResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }
 
@@ -58,6 +106,12 @@ type UnimplementedAuthServiceServer struct {
 
 func (UnimplementedAuthServiceServer) WhoAmI(context.Context, *WhoAmIRequest) (*WhoAmIResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method WhoAmI not implemented")
+}
+func (UnimplementedAuthServiceServer) UpdateMyIntegrationIdentities(context.Context, *UpdateMyIntegrationIdentitiesRequest) (*WhoAmIResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateMyIntegrationIdentities not implemented")
+}
+func (UnimplementedAuthServiceServer) ListUserDirectory(context.Context, *ListUserDirectoryRequest) (*ListUserDirectoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListUserDirectory not implemented")
 }
 func (UnimplementedAuthServiceServer) mustEmbedUnimplementedAuthServiceServer() {}
 
@@ -90,6 +144,42 @@ func _AuthService_WhoAmI_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_UpdateMyIntegrationIdentities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateMyIntegrationIdentitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).UpdateMyIntegrationIdentities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.AuthService/UpdateMyIntegrationIdentities",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).UpdateMyIntegrationIdentities(ctx, req.(*UpdateMyIntegrationIdentitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_ListUserDirectory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListUserDirectoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ListUserDirectory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.AuthService/ListUserDirectory",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ListUserDirectory(ctx, req.(*ListUserDirectoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -100,6 +190,14 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WhoAmI",
 			Handler:    _AuthService_WhoAmI_Handler,
+		},
+		{
+			MethodName: "UpdateMyIntegrationIdentities",
+			Handler:    _AuthService_UpdateMyIntegrationIdentities_Handler,
+		},
+		{
+			MethodName: "ListUserDirectory",
+			Handler:    _AuthService_ListUserDirectory_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

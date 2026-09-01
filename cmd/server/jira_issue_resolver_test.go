@@ -29,7 +29,7 @@ func TestJiraIssueResolver_DatastoreConfiguredAtStartup_PrefersDatastore(t *test
 	fallback := &fakeJiraIssueClient{issue: &grpchandler.CreatedIssue{Key: "OTHER-1"}}
 	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestJiraIssueResolver_NoDatastoreRowAtStartup_FallsBack(t *testing.T) {
 	fallback := &fakeJiraIssueClient{issue: wantIssue}
 	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestJiraIssueResolver_DatastoreRowMissingCloudIDAtStartup_FallsBack(t *test
 	fallback := &fakeJiraIssueClient{issue: wantIssue}
 	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestJiraIssueResolver_DecryptionFailsAtStartup_FallsBackWithoutError(t *tes
 	fallback := &fakeJiraIssueClient{issue: wantIssue}
 	resolver := newJiraIssueResolver(context.Background(), integrations, readKeyEnc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue should swallow decrypt failures, got err: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestJiraIssueResolver_NeitherConfigured_ReturnsErrIntegrationNotConfigured(
 
 	resolver := newJiraIssueResolver(context.Background(), integrations, enc, nil)
 
-	_, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	_, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if !errors.Is(err, grpchandler.ErrIntegrationNotConfigured) {
 		t.Errorf("CreateIssue err = %v, want ErrIntegrationNotConfigured", err)
 	}
@@ -138,7 +138,7 @@ func TestJiraIssueResolver_RefreshWithIncompleteCredentials_ReturnsErrorAndUsesF
 				t.Fatal("RefreshIntegrationCredentials with incomplete credentials/settings should return an error")
 			}
 
-			got, createErr := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+			got, createErr := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 			if createErr != nil {
 				t.Fatalf("CreateIssue: %v", createErr)
 			}
@@ -176,7 +176,7 @@ func TestJiraIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *te
 	fallback := &fakeJiraIssueClient{issue: fallbackIssue}
 	resolver := newJiraIssueResolver(context.Background(), integrations, enc, fallback)
 
-	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	got, err := resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestJiraIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *te
 	if err := resolver.RefreshIntegrationCredentials(context.Background(), "github", creds, settings); err != nil {
 		t.Fatalf("RefreshIntegrationCredentials: %v", err)
 	}
-	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestJiraIssueResolver_RefreshAppliesCredentialsDirectlyWithoutRestart(t *te
 	if err := resolver.RefreshIntegrationCredentials(context.Background(), "jira", creds, settings); err != nil {
 		t.Fatalf("RefreshIntegrationCredentials: %v", err)
 	}
-	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil)
+	got, err = resolver.CreateIssue(context.Background(), "PROJ", "Bug", "summary", "description", nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

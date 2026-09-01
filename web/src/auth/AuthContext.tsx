@@ -11,6 +11,11 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>
   register: (email: string, name: string, password: string) => Promise<void>
   logout: () => void
+  /** Re-fetches WhoAmI and updates the cached user — called after
+   * UpdateMyIntegrationIdentities (ProfilePage) so components reading
+   * useAuth().user (e.g. TasksPanel's assignee pre-fill) see the change
+   * immediately instead of only after a reload. */
+  refreshUser: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)
@@ -69,9 +74,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me)
   }, [])
 
+  const refreshUser = useCallback(async () => {
+    if (!tokenStorage.get()) return
+    const me = await api.auth.whoAmI()
+    setUser(me)
+  }, [])
+
   const value = useMemo(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout],
+    () => ({ user, loading, login, register, logout, refreshUser }),
+    [user, loading, login, register, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

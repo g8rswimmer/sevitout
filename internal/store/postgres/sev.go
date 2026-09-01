@@ -88,6 +88,7 @@ func (s *SEVStore) Create(ctx context.Context, sv *store.SEV) error {
 		CreatedAt:             pgtype.Timestamptz{Time: sv.CreatedAt.UTC(), Valid: true},
 		UpdatedAt:             pgtype.Timestamptz{Time: sv.UpdatedAt.UTC(), Valid: true},
 		CreatedBy:             sv.CreatedBy,
+		SlackChannelID:        sv.SlackChannelID,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -164,6 +165,7 @@ func (s *SEVStore) Update(ctx context.Context, sv *store.SEV) error {
 		Sensitive:             sv.Sensitive,
 		AiDisabled:            sv.AIDisabled,
 		UpdatedAt:             pgtype.Timestamptz{Time: sv.UpdatedAt.UTC(), Valid: true},
+		SlackChannelID:        sv.SlackChannelID,
 	}); err != nil {
 		return fmt.Errorf("postgres sev: update: %w", err)
 	}
@@ -340,7 +342,8 @@ const sevSelectCols = `SELECT id, title, description, severity_level, status,
        right_people_present, right_people_notes, tags,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
-       locked, sensitive, ai_disabled, created_at, updated_at, created_by
+       locked, sensitive, ai_disabled, created_at, updated_at, created_by,
+       slack_channel_id
 FROM sevs`
 
 // buildSEVFilterWhere builds a parameterized WHERE clause from the filter,
@@ -468,6 +471,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		mttdSeconds, mttmSeconds, mttrSeconds *int64
 		dttmSeconds                           *int64
 		createdAt, updatedAt                  pgtype.Timestamptz
+		slackChannelID                        *string
 	)
 	if err := rows.Scan(
 		&id, &title, &desc, &severityLevel, &status,
@@ -479,6 +483,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		&startedAt, &detectedAt, &mitigatedAt, &resolvedAt, &postmortemCompletedAt,
 		&mttdSeconds, &mttmSeconds, &mttrSeconds, &dttmSeconds,
 		&locked, &sensitive, &aiDisabled, &createdAt, &updatedAt, &createdBy,
+		&slackChannelID,
 	); err != nil {
 		return nil, err
 	}
@@ -525,6 +530,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		CreatedAt:             createdAt.Time,
 		UpdatedAt:             updatedAt.Time,
 		CreatedBy:             createdBy,
+		SlackChannelID:        slackChannelID,
 	}, nil
 }
 
@@ -572,5 +578,6 @@ func mapGetSEVRow(r queries.GetSEVRow) (*store.SEV, error) {
 		CreatedAt:             r.CreatedAt.Time,
 		UpdatedAt:             r.UpdatedAt.Time,
 		CreatedBy:             r.CreatedBy,
+		SlackChannelID:        r.SlackChannelID,
 	}, nil
 }

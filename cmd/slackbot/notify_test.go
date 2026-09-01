@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/g8rswimmer/sevitout/internal/api/pb"
 	"github.com/g8rswimmer/sevitout/internal/api/ws"
 )
 
@@ -114,6 +115,31 @@ func TestHandleEvent_SEVCreated_NoDefaultChannelStillCreatesIncidentChannel(t *t
 	// its own channel.
 	if len(fs.posted) != 2 {
 		t.Errorf("posted = %+v, want 2 (intro + notification, both to the new channel)", fs.posted)
+	}
+}
+
+// TestHandleEvent_SEVCreated_InvitesCreatorFromRealPayloadShape asserts
+// created_by (present on a real protojson-marshaled SEVResponse — see
+// internal/api/grpc's publishProto) is decoded and used to invite the
+// creator (docs/roadmap.md Phase 11d), closing the gap where a SEV's
+// creator with a stored Slack identity — but no role assignment — was
+// silently never invited to its own incident channel.
+func TestHandleEvent_SEVCreated_InvitesCreatorFromRealPayloadShape(t *testing.T) {
+	fs := &fakeSlack{}
+	dir := &fakeDirectoryAPI{resp: &pb.ListUserDirectoryResponse{
+		Users: []*pb.DirectoryUser{{Id: "user-1", Name: "Alice", Email: "alice@example.com", SlackUserId: "U-CREATOR"}},
+	}}
+	b := newTestBot(fs, nil, &fakeRoleAPI{resp: &pb.ListRolesResponse{}}, nil, nil, "", "")
+	b.api.directory = dir
+
+	evt := ws.Event{
+		Type:    "sev.created",
+		Payload: []byte(`{"id":"SEV-1","title":"checkout down","severity_level":2,"status":"open","created_by":"user-1"}`),
+	}
+	b.handleEvent(context.Background(), evt)
+
+	if len(fs.invitedUsers) != 1 || fs.invitedUsers[0] != "U-CREATOR" {
+		t.Errorf("invited users = %v, want [U-CREATOR]", fs.invitedUsers)
 	}
 }
 

@@ -91,7 +91,7 @@ export function SevDetailPage() {
 
       <DetailsPanel sev={record} canEdit={canEditDetails} />
       <LifecyclePanel sev={record} canEdit={canEditDetails} />
-      <RolesPanel sevId={sevId} canManage={canCommand} />
+      <RolesPanel sevId={sevId} canManage={canCommand} slackChannelId={record.slack_channel_id} />
       {record.sensitive && <AllowedViewersPanel sevId={sevId} canManage={canCommand} />}
       <AnnouncementsPanel sevId={sevId} canPost={canRespond} />
       <ChatLogPanel sevId={sevId} canAdd={canRespond} />

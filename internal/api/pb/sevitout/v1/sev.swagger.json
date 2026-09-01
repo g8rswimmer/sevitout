@@ -343,6 +343,10 @@
         },
         "query": {
           "type": "string"
+        },
+        "slackChannelId": {
+          "type": "string",
+          "description": "slack_channel_id records the incident channel cmd/slackbot auto-created\nfor this SEV, written back right after channel creation (docs/roadmap.md\nPhase 10e). Sparse-patch like every other field here: omitted on every\nother UpdateSEV call, so this is safe to send from exactly one call site."
         }
       }
     },
@@ -598,6 +602,10 @@
         "query": {
           "type": "string",
           "description": "query is a saved query/expression (e.g. PromQL or a Datadog query\nstring) run against monitoring_tool — a separate concept from\ndashboard_url, not a URL (§13.4)."
+        },
+        "slackChannelId": {
+          "type": "string",
+          "description": "slack_channel_id is the incident channel cmd/slackbot auto-created for\nthis SEV (§13.1, docs/roadmap.md Phase 10e) — absent for SEVs created\nbefore this shipped, or whose channel-creation step never ran/failed.\nNot sensitive (raw IDs are already exposed elsewhere), so it's on the\nmain response rather than gated."
         }
       }
     }
