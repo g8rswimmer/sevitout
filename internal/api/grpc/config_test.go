@@ -1059,6 +1059,69 @@ func TestListIntegrationConfigs(t *testing.T) {
 	}
 }
 
+func TestListEnabledIntegrations_CredentialAndSettingsOnlyTypes(t *testing.T) {
+	enc := testEncryptor(t)
+	ts := newTestConfigServer(enc)
+	ctx := context.Background()
+
+	// slack: has credential fields, credentials configured -> enabled.
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "slack", Credentials: map[string]string{"bot_token": "xoxb-1"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig(slack): %v", err)
+	}
+	// monitoring: settings-only integration_type, settings configured -> enabled.
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "monitoring", Settings: map[string]string{"tool": "datadog"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig(monitoring): %v", err)
+	}
+	// jira: has credential fields, only settings supplied, no credentials ->
+	// not enabled, even though a row exists.
+	if _, err := ts.server.UpsertIntegrationConfig(ctx, &pb.UpsertIntegrationConfigRequest{
+		IntegrationType: "jira", Settings: map[string]string{"cloud_id": "C123"},
+	}); err != nil {
+		t.Fatalf("UpsertIntegrationConfig(jira): %v", err)
+	}
+	// github: no row at all -> not enabled.
+
+	resp, err := ts.server.ListEnabledIntegrations(ctx, &pb.ListEnabledIntegrationsRequest{})
+	if err != nil {
+		t.Fatalf("ListEnabledIntegrations: %v", err)
+	}
+
+	enabled := map[string]bool{}
+	for _, it := range resp.GetEnabledTypes() {
+		enabled[it] = true
+	}
+	if !enabled["slack"] {
+		t.Error("slack should be enabled (credentials configured)")
+	}
+	if !enabled["monitoring"] {
+		t.Error("monitoring should be enabled (settings-only, settings configured)")
+	}
+	if enabled["jira"] {
+		t.Error("jira should not be enabled (settings only, no credentials)")
+	}
+	if enabled["github"] {
+		t.Error("github should not be enabled (no config row)")
+	}
+	if len(resp.GetEnabledTypes()) != 2 {
+		t.Errorf("enabled_types = %v, want exactly [slack, monitoring]", resp.GetEnabledTypes())
+	}
+}
+
+func TestListEnabledIntegrations_NoneConfigured(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	resp, err := ts.server.ListEnabledIntegrations(context.Background(), &pb.ListEnabledIntegrationsRequest{})
+	if err != nil {
+		t.Fatalf("ListEnabledIntegrations: %v", err)
+	}
+	if len(resp.GetEnabledTypes()) != 0 {
+		t.Errorf("enabled_types = %v, want empty", resp.GetEnabledTypes())
+	}
+}
+
 // ── Data retention ────────────────────────────────────────────────────────────
 
 func TestGetRetentionConfig_DefaultsToRetainForever(t *testing.T) {

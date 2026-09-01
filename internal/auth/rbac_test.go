@@ -27,6 +27,8 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleResponder, "/sevitout.v1.RoleService/InviteRoleToSlack", true},
 		{store.OrgRoleResponder, "/sevitout.v1.RoleService/AssignRole", false},
 		{store.OrgRoleIncidentCommander, "/sevitout.v1.RoleService/AssignRole", true},
+		// JoinSlackChannel is a self-service action, open to any Viewer.
+		{store.OrgRoleViewer, "/sevitout.v1.RoleService/JoinSlackChannel", true},
 		// Viewer cannot write
 		{store.OrgRoleViewer, "/sevitout.v1.SEVService/CreateSEV", false},
 		{store.OrgRoleViewer, "/sevitout.v1.SEVService/UpdateSEV", false},
@@ -140,6 +142,9 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/ListRetentionConfig", true},
 		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/IntegrationsHealth", true},
 		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/IntegrationsHealth", false},
+		// ListEnabledIntegrations is the one integration-config RPC open to
+		// any Viewer — it returns only a list of type strings.
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListEnabledIntegrations", true},
 
 		// WebSocket subscription (pseudo-method checked manually by internal/api/ws)
 		{store.OrgRoleViewer, "/sevitout.v1.WebSocket/Subscribe", true},

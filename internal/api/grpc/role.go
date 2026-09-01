@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -135,7 +136,70 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		publishProto(s.publisher, req.GetSevId(), "role.changed", resp)
 	}
 
+	// Best-effort: if the SEV already has an incident Slack channel, invite
+	// this role's holder into it immediately rather than requiring a manual
+	// "Add to chat" click for every role assigned after channel creation.
+	// InviteRoleToSlack (§10e) remains available for retrying a failed
+	// auto-invite or for roles assigned before this existed.
+	s.autoInviteRoleToSlack(ctx, sevRecord, role)
+
 	return resp, nil
+}
+
+// autoInviteRoleToSlack best-effort invites role's holder into sevRecord's
+// already-created incident Slack channel immediately upon assignment. A
+// failure here never fails AssignRole — the role assignment itself already
+// succeeded — so every error path here logs and returns rather than
+// propagating, the same posture as auditAppendBestEffort. A no-op when Slack
+// invite support isn't wired up, the SEV has no recorded channel, or the
+// role holder has no resolvable Slack identity — all expected, silent cases,
+// not failures.
+func (s *RoleServer) autoInviteRoleToSlack(ctx context.Context, sevRecord *store.SEV, role *store.SEVRole) {
+	if s.slackFactory == nil || s.integrations == nil {
+		return
+	}
+	if sevRecord.SlackChannelID == nil || *sevRecord.SlackChannelID == "" {
+		return
+	}
+
+	cfg, err := s.integrations.Get(ctx, "slack")
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			slog.WarnContext(ctx, "auto-invite to slack: failed to get slack integration config", "sev_id", sevRecord.ID, "err", err)
+		}
+		return
+	}
+	creds, err := DecryptIntegrationCredentials(s.crypto, cfg)
+	if err != nil {
+		slog.WarnContext(ctx, "auto-invite to slack: failed to decrypt slack integration credentials", "sev_id", sevRecord.ID, "err", err)
+		return
+	}
+	botToken := creds["bot_token"]
+	if botToken == "" {
+		return
+	}
+	slackClient := s.slackFactory(botToken)
+
+	slackUserID, err := s.resolveRoleSlackUserID(ctx, slackClient, role)
+	if err != nil {
+		slog.WarnContext(ctx, "auto-invite to slack: failed to resolve Slack identity", "sev_id", sevRecord.ID, "role_id", role.ID, "err", err)
+		return
+	}
+	if slackUserID == "" {
+		return
+	}
+
+	if err := slackClient.InviteUsers(ctx, *sevRecord.SlackChannelID, []string{slackUserID}); err != nil {
+		slog.WarnContext(ctx, "auto-invite to slack: failed to invite", "sev_id", sevRecord.ID, "role_id", role.ID, "err", err)
+		return
+	}
+
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
+		SEVID:     sevRecord.ID,
+		UserID:    role.CreatedBy,
+		Action:    "role.invited_to_slack",
+		CreatedAt: time.Now(),
+	})
 }
 
 func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) (*emptypb.Empty, error) {
@@ -292,6 +356,115 @@ func (s *RoleServer) InviteRoleToSlack(ctx context.Context, req *pb.InviteRoleTo
 	})
 
 	return &emptypb.Empty{}, nil
+}
+
+// JoinSlackChannel invites ctx's caller into sevID's already-created incident
+// Slack channel — a self-service "add me" action (docs/roadmap.md Phase
+// 11c), unlike InviteRoleToSlack's IC/Admin-driven invite of a named role
+// holder. codes.FailedPrecondition when the SEV has no Slack channel
+// recorded, when Slack invite support isn't wired up at all, or when the
+// caller has no resolvable Slack identity. codes.PermissionDenied when the
+// caller lacks full (non visibility-restricted) access to a Sensitive SEV —
+// a security gate InviteRoleToSlack's IC/Admin-only RBAC floor didn't need,
+// but this Viewer-floor RPC does: Slack channel membership itself isn't
+// gated by Sevitout RBAC once granted, so self-service join must not become
+// a side-channel around sensitive-SEV restrictions. Deliberately reports
+// PermissionDenied here rather than following loadVisibleSEV's usual
+// existence-masking NotFound convention — the caller already knows the SEV
+// exists (they're looking at its detail page), so there's nothing left to
+// mask.
+func (s *RoleServer) JoinSlackChannel(ctx context.Context, req *pb.JoinSlackChannelRequest) (*emptypb.Empty, error) {
+	if req.GetSevId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "sev_id is required")
+	}
+	if s.slackFactory == nil || s.integrations == nil {
+		return nil, status.Error(codes.Unavailable, "Slack integration is not configured")
+	}
+	uc, ok := auth.UserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	sevRecord, err := s.sevs.Get(ctx, req.GetSevId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "SEV not found")
+		}
+		return nil, internalError(ctx, "failed to get SEV", err)
+	}
+	visible, err := sensitiveSEVVisible(ctx, s.access, sevRecord)
+	if err != nil {
+		return nil, internalError(ctx, "failed to check SEV visibility", err)
+	}
+	if !visible {
+		return nil, status.Error(codes.PermissionDenied, "you do not have access to this SEV")
+	}
+	if sevRecord.SlackChannelID == nil || *sevRecord.SlackChannelID == "" {
+		return nil, status.Error(codes.FailedPrecondition, "this SEV has no Slack channel to join")
+	}
+
+	cfg, err := s.integrations.Get(ctx, "slack")
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.Unavailable, "Slack integration is not configured")
+		}
+		return nil, internalError(ctx, "failed to get slack integration config", err)
+	}
+	creds, err := DecryptIntegrationCredentials(s.crypto, cfg)
+	if err != nil {
+		return nil, internalError(ctx, "failed to decrypt slack integration credentials", err)
+	}
+	botToken := creds["bot_token"]
+	if botToken == "" {
+		return nil, status.Error(codes.Unavailable, "Slack integration is not configured")
+	}
+	slackClient := s.slackFactory(botToken)
+
+	slackUserID, err := s.resolveCallerSlackUserID(ctx, slackClient, uc)
+	if err != nil {
+		return nil, internalError(ctx, "failed to resolve Slack identity", err)
+	}
+	if slackUserID == "" {
+		return nil, status.Error(codes.FailedPrecondition, "no Slack identity on file — set one in your profile")
+	}
+
+	if err := slackClient.InviteUsers(ctx, *sevRecord.SlackChannelID, []string{slackUserID}); err != nil {
+		return nil, internalError(ctx, "failed to invite to Slack channel", err)
+	}
+
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
+		SEVID:     req.GetSevId(),
+		UserID:    uc.UserID,
+		Action:    "role.joined_slack_channel",
+		CreatedAt: time.Now(),
+	})
+
+	return &emptypb.Empty{}, nil
+}
+
+// resolveCallerSlackUserID resolves uc (the RPC caller) to a Slack user ID,
+// trying (in order): a stored User.SlackUserID, then LookupUserIDByEmail
+// against uc's email. Returns ("", nil) — not an error — when neither
+// resolves, matching resolveRoleSlackUserID's "silently skip, don't fail"
+// posture for an unmatched invitee.
+func (s *RoleServer) resolveCallerSlackUserID(ctx context.Context, slackClient SlackInviteClient, uc *auth.UserContext) (string, error) {
+	email := uc.Email
+	if s.users != nil {
+		user, err := s.users.Get(ctx, uc.UserID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return "", err
+		}
+		if user != nil {
+			if user.SlackUserID != nil && *user.SlackUserID != "" {
+				return *user.SlackUserID, nil
+			}
+			email = user.Email
+		}
+	}
+	if email == "" {
+		return "", nil
+	}
+	return slackClient.LookupUserIDByEmail(ctx, email)
 }
 
 // resolveRoleSlackUserID resolves role to a Slack user ID, trying (in

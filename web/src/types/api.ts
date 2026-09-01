@@ -431,6 +431,17 @@ export interface ListRolesResponse {
   roles?: SEVRoleResponse[]
 }
 
+// --- Integration-aware SEV UI (Roadmap Phase 11) ---------------------------
+
+export interface ListEnabledIntegrationsResponse {
+  // enabled_types lists integration_types (e.g. "slack", "jira") that
+  // currently have meaningful store-configured settings/credentials — see
+  // the backend RPC's proto doc comment for the static-env-var-fallback
+  // limitation (an integration active only via env var shows as absent
+  // here).
+  enabled_types?: string[]
+}
+
 // --- Sensitive SEV access grants (§14) -------------------------------------
 
 export interface SEVAccessResponse {

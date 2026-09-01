@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Section } from '@/components/sev/Section'
+import { useEnabledIntegrations } from '@/lib/useEnabledIntegrations'
 import { SEV_ROLE_LABELS, type DirectoryUser, type SEVRoleType } from '@/types/api'
 
 const ROLE_TYPES = Object.keys(SEV_ROLE_LABELS) as SEVRoleType[]
@@ -26,6 +27,12 @@ export function RolesPanel({
 }) {
   const queryClient = useQueryClient()
   const roles = useQuery({ queryKey: ['sevs', sevId, 'roles'], queryFn: () => api.roles.list(sevId) })
+  // Roadmap Phase 11b: the per-role "Add to chat" button renders only when
+  // the "slack" integration is configured — not just when a channel exists.
+  // (Self-service "Join Slack channel" lives at the top of the SEV detail
+  // page — see JoinSlackChannelButton.tsx — not in this section.)
+  const { isEnabled: isIntegrationEnabled } = useEnabledIntegrations()
+  const slackEnabled = isIntegrationEnabled('slack')
 
   const [roleType, setRoleType] = useState<SEVRoleType>('responder')
   const [displayName, setDisplayName] = useState('')
@@ -96,7 +103,7 @@ export function RolesPanel({
                 <span>{r.display_name || r.user_id || '—'}</span>
               </div>
               <div className="flex items-center gap-1">
-                {canManage && (
+                {canManage && slackEnabled && (
                   <Button
                     variant="ghost"
                     size="icon"

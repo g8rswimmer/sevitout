@@ -166,6 +166,29 @@
         ]
       }
     },
+    "/v1/config/enabled-integrations": {
+      "get": {
+        "summary": "ListEnabledIntegrations is a viewer-safe signal of which integration_types\ncurrently have meaningful store-configured settings or credentials\n(docs/roadmap.md Phase 11a) — used by the SEV detail page to hide an\nintegration-tied action (e.g. \"Create Jira issue\") when that integration\nisn't configured, without exposing anything an Admin-only endpoint\nwouldn't already consider safe to hand to any Viewer: no settings\nvalues, no credentials_configured per type, just the list of enabled\ntypes. Reflects store-configured integrations only — see this RPC's\nresponse doc comment for the static-env-var-fallback limitation.",
+        "operationId": "ConfigService_ListEnabledIntegrations",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListEnabledIntegrationsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
     "/v1/config/integration-catalog": {
       "get": {
         "summary": "GetIntegrationCatalog returns the fixed, ordered field schema for every\nintegration_type this server recognizes (docs/roadmap.md Phase 9) — a\npure translation of internal/integrations/catalog.All with no store\naccess. It's the single source of truth the admin UI renders its\nsidebar + schema-driven detail form from, and UpsertIntegrationConfig\nvalidates incoming requests against the same catalog.",
@@ -1313,6 +1336,18 @@
             "type": "object",
             "$ref": "#/definitions/v1AIPluginResponse"
           }
+        }
+      }
+    },
+    "v1ListEnabledIntegrationsResponse": {
+      "type": "object",
+      "properties": {
+        "enabledTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "enabled_types lists the integration_types (e.g. \"slack\", \"jira\") that\ncurrently have a meaningful store-configured credentials or settings\nblob — the same \"configured\" concept the admin UI already uses (see\nGetIntegrationCatalog). Known limitation: an integration activated only\nvia its static env-var fallback (PagerDuty/GitHub/Jira, with zero store\nrows — see cmd/server's *Resolver types) is not reflected here, so it\nshows as \"not enabled\" even though the backend would actually serve the\nrequest. See docs/roadmap.md Phase 11a for why a fully accurate signal\nis out of scope for this phase."
         }
       }
     },

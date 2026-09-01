@@ -13,6 +13,7 @@ import { Section } from '@/components/sev/Section'
 import { AssigneePicker } from '@/components/sev/AssigneePicker'
 import { ExternalSystemBadge } from '@/components/sev/badges'
 import { formatDateTime } from '@/lib/format'
+import { useEnabledIntegrations } from '@/lib/useEnabledIntegrations'
 import { TASK_RELATIONSHIP_LABELS, type TaskPriority, type TaskRelationshipType } from '@/types/api'
 
 const RELATIONSHIP_TYPES = Object.keys(TASK_RELATIONSHIP_LABELS) as TaskRelationshipType[]
@@ -41,6 +42,11 @@ export function TasksPanel({
   const queryClient = useQueryClient()
   const tasks = useQuery({ queryKey: ['sevs', sevId, 'tasks'], queryFn: () => api.tasks.list(sevId) })
   const { user } = useAuth()
+  // Roadmap Phase 11b: hide a tracker's create-issue action when it isn't
+  // configured — if only Jira is enabled, GitHub's option isn't offered.
+  const { isEnabled: isIntegrationEnabled } = useEnabledIntegrations()
+  const githubEnabled = isIntegrationEnabled('github')
+  const jiraEnabled = isIntegrationEnabled('jira')
 
   const [mode, setMode] = useState<Mode>('link')
   const [url, setUrl] = useState('')
@@ -212,43 +218,47 @@ export function TasksPanel({
             <Button type="button" size="sm" variant={mode === 'link' ? 'default' : 'outline'} onClick={() => setMode('link')}>
               Link existing
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={mode === 'github' ? 'default' : 'outline'}
-              onClick={() => {
-                setMode('github')
-                if (!owner && !repo) {
-                  const parsed = parseRepo(defaultRepo)
-                  if (parsed) {
-                    setOwner(parsed.owner)
-                    setRepo(parsed.repo)
+            {githubEnabled && (
+              <Button
+                type="button"
+                size="sm"
+                variant={mode === 'github' ? 'default' : 'outline'}
+                onClick={() => {
+                  setMode('github')
+                  if (!owner && !repo) {
+                    const parsed = parseRepo(defaultRepo)
+                    if (parsed) {
+                      setOwner(parsed.owner)
+                      setRepo(parsed.repo)
+                    }
                   }
-                }
-                if (!githubAssignee && user?.github_username) {
-                  setGithubAssignee(user.github_username)
-                  setGithubAssigneeName(user.name)
-                  setGithubAssigneeUserId(user.id)
-                }
-              }}
-            >
-              Create GitHub issue
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={mode === 'jira' ? 'default' : 'outline'}
-              onClick={() => {
-                setMode('jira')
-                if (!jiraAssignee && user?.jira_account_id) {
-                  setJiraAssignee(user.jira_account_id)
-                  setJiraAssigneeName(user.name)
-                  setJiraAssigneeUserId(user.id)
-                }
-              }}
-            >
-              Create Jira issue
-            </Button>
+                  if (!githubAssignee && user?.github_username) {
+                    setGithubAssignee(user.github_username)
+                    setGithubAssigneeName(user.name)
+                    setGithubAssigneeUserId(user.id)
+                  }
+                }}
+              >
+                Create GitHub issue
+              </Button>
+            )}
+            {jiraEnabled && (
+              <Button
+                type="button"
+                size="sm"
+                variant={mode === 'jira' ? 'default' : 'outline'}
+                onClick={() => {
+                  setMode('jira')
+                  if (!jiraAssignee && user?.jira_account_id) {
+                    setJiraAssignee(user.jira_account_id)
+                    setJiraAssigneeName(user.name)
+                    setJiraAssigneeUserId(user.id)
+                  }
+                }}
+              >
+                Create Jira issue
+              </Button>
+            )}
           </div>
 
           <form

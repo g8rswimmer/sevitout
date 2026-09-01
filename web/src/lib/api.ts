@@ -27,6 +27,7 @@ import type {
   ListAIPluginsResponse,
   ListAnnouncementsResponse,
   ListChatEntriesResponse,
+  ListEnabledIntegrationsResponse,
   ListIntegrationConfigsResponse,
   ListLinkedSEVsResponse,
   ListOnCallRotationsResponse,
@@ -299,6 +300,10 @@ export const api = {
     // into the SEV's already-created incident Slack channel.
     inviteToSlack: (sevId: string, id: string) =>
       request<void>(`/v1/sevs/${sevId}/roles/${id}/invite-to-slack`, { method: 'POST', body: '{}' }),
+    // Self-service "join" (Roadmap Phase 11c) — invites the caller
+    // themselves, no role_id needed.
+    joinSlackChannel: (sevId: string) =>
+      request<void>(`/v1/sevs/${sevId}/join-slack-channel`, { method: 'POST', body: '{}' }),
   },
   // Explicit per-user visibility grants for Sensitive SEVs (§14). Grant/revoke
   // require Incident Commander or Admin server-side; list is open to anyone
@@ -411,6 +416,10 @@ export const api = {
       // internal/api/grpc/integrations_health.go) — hence the /admin/ path
       // instead of /v1/config/.
       health: () => request<IntegrationsHealthResponse>('/admin/integrations/health'),
+      // Viewer-safe "which integrations are configured" signal (Roadmap
+      // Phase 11a) — gates SEV-page integration actions; unlike every other
+      // method in this group, open to any authenticated user, not Admin-only.
+      enabled: () => request<ListEnabledIntegrationsResponse>('/v1/config/enabled-integrations'),
     },
     retention: {
       list: () => request<ListRetentionConfigResponse>('/v1/config/retention'),

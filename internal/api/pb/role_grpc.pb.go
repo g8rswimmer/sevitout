@@ -23,6 +23,13 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RoleServiceClient interface {
+	// AssignRole, in addition to recording the assignment, best-effort invites
+	// the role holder into the SEV's incident Slack channel when one is
+	// already recorded (SEV.slack_channel_id) — every assigned role gets
+	// added automatically, not just those present at channel-creation time
+	// (docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never
+	// fails the assignment itself; InviteRoleToSlack below remains available
+	// to retry or to invite a role assigned before the channel existed.
 	AssignRole(ctx context.Context, in *AssignRoleRequest, opts ...grpc.CallOption) (*SEVRoleResponse, error)
 	RemoveRole(ctx context.Context, in *RemoveRoleRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListRoles(ctx context.Context, in *ListRolesRequest, opts ...grpc.CallOption) (*ListRolesResponse, error)
@@ -34,6 +41,18 @@ type RoleServiceClient interface {
 	// SEV has no Slack channel recorded, or when the role holder has no
 	// resolvable Slack identity.
 	InviteRoleToSlack(ctx context.Context, in *InviteRoleToSlackRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// JoinSlackChannel is a self-service "add me" action (docs/roadmap.md
+	// Phase 11c) — unlike InviteRoleToSlack, it invites the *caller*, not a
+	// named role holder, so it needs no role_id and no IC/Responder floor:
+	// any Viewer with real (non visibility-restricted) access to the SEV may
+	// call it. Resolution order is the caller's own identity: stored
+	// SlackUserID, then LookupUserIDByEmail against the caller's own email.
+	// FailedPrecondition when the SEV has no Slack channel recorded or the
+	// caller has no resolvable Slack identity; PermissionDenied when the
+	// caller lacks full access to a Sensitive SEV — see the handler's doc
+	// comment for why that check is explicit here and wasn't part of Phase
+	// 10e's InviteRoleToSlack.
+	JoinSlackChannel(ctx context.Context, in *JoinSlackChannelRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type roleServiceClient struct {
@@ -80,10 +99,26 @@ func (c *roleServiceClient) InviteRoleToSlack(ctx context.Context, in *InviteRol
 	return out, nil
 }
 
+func (c *roleServiceClient) JoinSlackChannel(ctx context.Context, in *JoinSlackChannelRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.RoleService/JoinSlackChannel", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RoleServiceServer is the server API for RoleService service.
 // All implementations must embed UnimplementedRoleServiceServer
 // for forward compatibility
 type RoleServiceServer interface {
+	// AssignRole, in addition to recording the assignment, best-effort invites
+	// the role holder into the SEV's incident Slack channel when one is
+	// already recorded (SEV.slack_channel_id) — every assigned role gets
+	// added automatically, not just those present at channel-creation time
+	// (docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never
+	// fails the assignment itself; InviteRoleToSlack below remains available
+	// to retry or to invite a role assigned before the channel existed.
 	AssignRole(context.Context, *AssignRoleRequest) (*SEVRoleResponse, error)
 	RemoveRole(context.Context, *RemoveRoleRequest) (*emptypb.Empty, error)
 	ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error)
@@ -95,6 +130,18 @@ type RoleServiceServer interface {
 	// SEV has no Slack channel recorded, or when the role holder has no
 	// resolvable Slack identity.
 	InviteRoleToSlack(context.Context, *InviteRoleToSlackRequest) (*emptypb.Empty, error)
+	// JoinSlackChannel is a self-service "add me" action (docs/roadmap.md
+	// Phase 11c) — unlike InviteRoleToSlack, it invites the *caller*, not a
+	// named role holder, so it needs no role_id and no IC/Responder floor:
+	// any Viewer with real (non visibility-restricted) access to the SEV may
+	// call it. Resolution order is the caller's own identity: stored
+	// SlackUserID, then LookupUserIDByEmail against the caller's own email.
+	// FailedPrecondition when the SEV has no Slack channel recorded or the
+	// caller has no resolvable Slack identity; PermissionDenied when the
+	// caller lacks full access to a Sensitive SEV — see the handler's doc
+	// comment for why that check is explicit here and wasn't part of Phase
+	// 10e's InviteRoleToSlack.
+	JoinSlackChannel(context.Context, *JoinSlackChannelRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedRoleServiceServer()
 }
 
@@ -113,6 +160,9 @@ func (UnimplementedRoleServiceServer) ListRoles(context.Context, *ListRolesReque
 }
 func (UnimplementedRoleServiceServer) InviteRoleToSlack(context.Context, *InviteRoleToSlackRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteRoleToSlack not implemented")
+}
+func (UnimplementedRoleServiceServer) JoinSlackChannel(context.Context, *JoinSlackChannelRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method JoinSlackChannel not implemented")
 }
 func (UnimplementedRoleServiceServer) mustEmbedUnimplementedRoleServiceServer() {}
 
@@ -199,6 +249,24 @@ func _RoleService_InviteRoleToSlack_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RoleService_JoinSlackChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinSlackChannelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RoleServiceServer).JoinSlackChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.RoleService/JoinSlackChannel",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RoleServiceServer).JoinSlackChannel(ctx, req.(*JoinSlackChannelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RoleService_ServiceDesc is the grpc.ServiceDesc for RoleService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -221,6 +289,10 @@ var RoleService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InviteRoleToSlack",
 			Handler:    _RoleService_InviteRoleToSlack_Handler,
+		},
+		{
+			MethodName: "JoinSlackChannel",
+			Handler:    _RoleService_JoinSlackChannel_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

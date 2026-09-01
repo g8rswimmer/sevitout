@@ -9,6 +9,13 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+/** Matches useEnabledIntegrations' request (Roadmap Phase 11b) — every test
+ * below must handle this URL, since the hook fires unconditionally on
+ * mount regardless of canManage. */
+function enabledIntegrationsHandler(types: string[]) {
+  return (url: string) => (url === '/v1/config/enabled-integrations' ? jsonResponse({ enabled_types: types }) : null)
+}
+
 const SEV_ID = 'SEV-2026-0001'
 
 function task(overrides: Partial<TaskResponse>): TaskResponse {
@@ -47,8 +54,11 @@ describe('TasksPanel', () => {
         task({ id: '4', external_system: 'linear', title: 'Something else' }),
       ],
     }
+    const enabled = enabledIntegrationsHandler([])
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/tasks`) return Promise.resolve(jsonResponse(list))
       return Promise.reject(new Error(`unexpected fetch: ${url}`))
     })
@@ -70,8 +80,11 @@ describe('TasksPanel', () => {
   })
 
   it('hides the create/link controls when canManage is false', async () => {
+    const enabled = enabledIntegrationsHandler(['github', 'jira'])
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/tasks`) return Promise.resolve(jsonResponse({ tasks: [] }))
       return Promise.reject(new Error(`unexpected fetch: ${url}`))
     })
@@ -83,10 +96,41 @@ describe('TasksPanel', () => {
     expect(screen.queryByRole('button', { name: /link existing/i })).not.toBeInTheDocument()
   })
 
+  it('shows only the enabled trackers\' create-issue options, gated independently of canManage', async () => {
+    const cases: { enabledTypes: string[]; expectGithub: boolean; expectJira: boolean }[] = [
+      { enabledTypes: ['jira'], expectGithub: false, expectJira: true },
+      { enabledTypes: ['github'], expectGithub: true, expectJira: false },
+      { enabledTypes: [], expectGithub: false, expectJira: false },
+      { enabledTypes: ['github', 'jira'], expectGithub: true, expectJira: true },
+    ]
+    for (const { enabledTypes, expectGithub, expectJira } of cases) {
+      const enabled = enabledIntegrationsHandler(enabledTypes)
+      vi.mocked(fetch).mockImplementation((input) => {
+        const url = String(input)
+        const enabledResp = enabled(url)
+        if (enabledResp) return Promise.resolve(enabledResp)
+        if (url === `/v1/sevs/${SEV_ID}/tasks`) return Promise.resolve(jsonResponse({ tasks: [] }))
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+      const { unmount } = renderWithProviders(<TasksPanel sevId={SEV_ID} canManage />)
+
+      await screen.findByText('No tasks linked yet.')
+      // "Link existing" needs no integration — always present when canManage.
+      expect(screen.getByRole('button', { name: /link existing/i })).toBeInTheDocument()
+      expect(!!screen.queryByRole('button', { name: /create github issue/i })).toBe(expectGithub)
+      expect(!!screen.queryByRole('button', { name: /create jira issue/i })).toBe(expectJira)
+
+      unmount()
+    }
+  })
+
   it('creates a Jira issue with the expected fields and resets the form', async () => {
+    const enabled = enabledIntegrationsHandler(['jira'])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
       if (url === `/v1/sevs/${SEV_ID}/jira-issues` && method === 'POST') {
         return Promise.resolve(jsonResponse(task({ id: '9', external_system: 'jira', title: 'Checkout errors' })))
@@ -135,9 +179,12 @@ describe('TasksPanel', () => {
   })
 
   it('shows the server error message on a failed Jira create', async () => {
+    const enabled = enabledIntegrationsHandler(['jira'])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
       if (url === `/v1/sevs/${SEV_ID}/jira-issues` && method === 'POST') {
         return Promise.resolve(jsonResponse({ message: 'Jira integration is not configured' }, 503))
@@ -160,9 +207,12 @@ describe('TasksPanel', () => {
 
   it('pre-fills the GitHub assignee from the caller stored identity, shown by name, clearable and omitted when empty', async () => {
     localStorage.setItem('sevitout.token', 'test-token')
+    const enabled = enabledIntegrationsHandler(['github'])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === '/v1/auth/me') {
         return Promise.resolve(
           jsonResponse({ id: 'u1', email: 'alice@example.com', name: 'Alice', org_role: 'responder', github_username: 'alice-gh' }),
@@ -206,9 +256,12 @@ describe('TasksPanel', () => {
   })
 
   it('searching and picking a GitHub assignee submits their github_username and assignee_user_id, shown by name', async () => {
+    const enabled = enabledIntegrationsHandler(['github'])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
       if (url.startsWith('/v1/auth/directory') && method === 'GET') {
         return Promise.resolve(
@@ -256,9 +309,12 @@ describe('TasksPanel', () => {
   })
 
   it('searching and picking a Jira assignee submits their jira_account_id and assignee_user_id', async () => {
+    const enabled = enabledIntegrationsHandler(['jira'])
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/tasks` && method === 'GET') return Promise.resolve(jsonResponse({ tasks: [] }))
       if (url.startsWith('/v1/auth/directory') && method === 'GET') {
         return Promise.resolve(
@@ -302,8 +358,11 @@ describe('TasksPanel', () => {
         task({ id: '2', external_system: 'jira', title: 'No name on file', assignee: 'acc-99' }),
       ],
     }
+    const enabled = enabledIntegrationsHandler([])
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)
+      const enabledResp = enabled(url)
+      if (enabledResp) return Promise.resolve(enabledResp)
       if (url === `/v1/sevs/${SEV_ID}/tasks`) return Promise.resolve(jsonResponse(list))
       return Promise.reject(new Error(`unexpected fetch: ${url}`))
     })

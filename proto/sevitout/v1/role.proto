@@ -10,6 +10,13 @@ import "google/protobuf/timestamp.proto";
 
 // RoleService manages people and role assignments on a SEV.
 service RoleService {
+  // AssignRole, in addition to recording the assignment, best-effort invites
+  // the role holder into the SEV's incident Slack channel when one is
+  // already recorded (SEV.slack_channel_id) — every assigned role gets
+  // added automatically, not just those present at channel-creation time
+  // (docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never
+  // fails the assignment itself; InviteRoleToSlack below remains available
+  // to retry or to invite a role assigned before the channel existed.
   rpc AssignRole(AssignRoleRequest) returns (SEVRoleResponse) {
     option (google.api.http) = {
       post: "/v1/sevs/{sev_id}/roles"
@@ -37,6 +44,23 @@ service RoleService {
   rpc InviteRoleToSlack(InviteRoleToSlackRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       post: "/v1/sevs/{sev_id}/roles/{id}/invite-to-slack"
+    };
+  }
+
+  // JoinSlackChannel is a self-service "add me" action (docs/roadmap.md
+  // Phase 11c) — unlike InviteRoleToSlack, it invites the *caller*, not a
+  // named role holder, so it needs no role_id and no IC/Responder floor:
+  // any Viewer with real (non visibility-restricted) access to the SEV may
+  // call it. Resolution order is the caller's own identity: stored
+  // SlackUserID, then LookupUserIDByEmail against the caller's own email.
+  // FailedPrecondition when the SEV has no Slack channel recorded or the
+  // caller has no resolvable Slack identity; PermissionDenied when the
+  // caller lacks full access to a Sensitive SEV — see the handler's doc
+  // comment for why that check is explicit here and wasn't part of Phase
+  // 10e's InviteRoleToSlack.
+  rpc JoinSlackChannel(JoinSlackChannelRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v1/sevs/{sev_id}/join-slack-channel"
     };
   }
 }
@@ -75,4 +99,8 @@ message ListRolesResponse {
 message InviteRoleToSlackRequest {
   string sev_id = 1;
   int64 id = 2;
+}
+
+message JoinSlackChannelRequest {
+  string sev_id = 1;
 }

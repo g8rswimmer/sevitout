@@ -16,6 +16,38 @@
     "application/json"
   ],
   "paths": {
+    "/v1/sevs/{sevId}/join-slack-channel": {
+      "post": {
+        "summary": "JoinSlackChannel is a self-service \"add me\" action (docs/roadmap.md\nPhase 11c) — unlike InviteRoleToSlack, it invites the *caller*, not a\nnamed role holder, so it needs no role_id and no IC/Responder floor:\nany Viewer with real (non visibility-restricted) access to the SEV may\ncall it. Resolution order is the caller's own identity: stored\nSlackUserID, then LookupUserIDByEmail against the caller's own email.\nFailedPrecondition when the SEV has no Slack channel recorded or the\ncaller has no resolvable Slack identity; PermissionDenied when the\ncaller lacks full access to a Sensitive SEV — see the handler's doc\ncomment for why that check is explicit here and wasn't part of Phase\n10e's InviteRoleToSlack.",
+        "operationId": "RoleService_JoinSlackChannel",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "RoleService"
+        ]
+      }
+    },
     "/v1/sevs/{sevId}/roles": {
       "get": {
         "operationId": "RoleService_ListRoles",
@@ -46,6 +78,7 @@
         ]
       },
       "post": {
+        "summary": "AssignRole, in addition to recording the assignment, best-effort invites\nthe role holder into the SEV's incident Slack channel when one is\nalready recorded (SEV.slack_channel_id) — every assigned role gets\nadded automatically, not just those present at channel-creation time\n(docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never\nfails the assignment itself; InviteRoleToSlack below remains available\nto retry or to invite a role assigned before the channel existed.",
         "operationId": "RoleService_AssignRole",
         "responses": {
           "200": {
