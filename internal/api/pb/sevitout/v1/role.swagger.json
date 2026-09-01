@@ -78,6 +78,7 @@
         ]
       },
       "post": {
+        "summary": "AssignRole, in addition to recording the assignment, best-effort invites\nthe role holder into the SEV's incident Slack channel when one is\nalready recorded (SEV.slack_channel_id) — every assigned role gets\nadded automatically, not just those present at channel-creation time\n(docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never\nfails the assignment itself; InviteRoleToSlack below remains available\nto retry or to invite a role assigned before the channel existed.",
         "operationId": "RoleService_AssignRole",
         "responses": {
           "200": {

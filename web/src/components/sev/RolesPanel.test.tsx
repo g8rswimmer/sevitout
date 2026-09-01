@@ -50,9 +50,10 @@ describe('RolesPanel', () => {
     expect(screen.queryByRole('button', { name: /assign/i })).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/remove/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/add .* to slack channel/i)).not.toBeInTheDocument()
-    // No slack_channel_id on this SEV, so the self-service Join button is
-    // absent too, even though canManage is irrelevant to it.
-    expect(screen.queryByRole('button', { name: /join slack channel/i })).not.toBeInTheDocument()
+    // Rendered (not hidden) even with no slack_channel_id on this SEV, and
+    // regardless of canManage — but disabled, since there's no channel to
+    // join yet.
+    expect(screen.getByRole('button', { name: /join slack channel/i })).toBeDisabled()
   })
 
   it('hides Slack-tied actions entirely when the slack integration is not enabled, even with a channel recorded', async () => {
@@ -213,13 +214,15 @@ describe('RolesPanel', () => {
 
   // ── Join Slack channel (Roadmap Phase 11c) ─────────────────────────────────
 
-  it('shows "Join Slack channel" only when slack is enabled and the SEV has a channel, regardless of canManage', async () => {
-    const cases: { canManage: boolean; slackEnabled: boolean; slackChannelId?: string; expectVisible: boolean }[] = [
-      { canManage: false, slackEnabled: true, slackChannelId: 'C123', expectVisible: true },
+  it('shows "Join Slack channel" whenever slack is enabled — hidden only when the integration itself is off, disabled (not hidden) on an older SEV with no channel yet', async () => {
+    const cases: { canManage: boolean; slackEnabled: boolean; slackChannelId?: string; expectVisible: boolean; expectEnabled?: boolean }[] = [
+      { canManage: false, slackEnabled: true, slackChannelId: 'C123', expectVisible: true, expectEnabled: true },
       { canManage: true, slackEnabled: false, slackChannelId: 'C123', expectVisible: false },
-      { canManage: true, slackEnabled: true, slackChannelId: undefined, expectVisible: false },
+      // An older SEV with no recorded channel: still shown, just disabled —
+      // it must stay discoverable, not silently vanish.
+      { canManage: true, slackEnabled: true, slackChannelId: undefined, expectVisible: true, expectEnabled: false },
     ]
-    for (const { canManage, slackEnabled, slackChannelId, expectVisible } of cases) {
+    for (const { canManage, slackEnabled, slackChannelId, expectVisible, expectEnabled } of cases) {
       const enabled = enabledIntegrationsHandler(slackEnabled ? ['slack'] : [])
       vi.mocked(fetch).mockImplementation((input) => {
         const url = String(input)
@@ -233,7 +236,9 @@ describe('RolesPanel', () => {
       )
 
       await screen.findByText('No roles assigned yet.')
-      expect(!!screen.queryByRole('button', { name: /join slack channel/i })).toBe(expectVisible)
+      const button = screen.queryByRole('button', { name: /join slack channel/i })
+      expect(!!button).toBe(expectVisible)
+      if (button) expect(button.hasAttribute('disabled')).toBe(!expectEnabled)
 
       unmount()
     }

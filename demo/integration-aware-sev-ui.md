@@ -12,6 +12,22 @@ roles but never gave a viewer of the SEV a way to join its incident channel
 themselves. This phase closes those gaps. (11d — inviting the SEV creator —
 shipped early; see `demo/integration-user-profiles.md`'s "10h" section.)
 
+The intended end state for incident-channel membership is now:
+
+1. **On creation**: the creator is added (10h — shipped before this phase).
+2. **On role assignment**: whoever is assigned *any* role is added
+   automatically, not just at channel-creation time (11's follow-up, below).
+3. **Self-service**: anyone with real access to the SEV can add themselves
+   (11c).
+
+**Follow-up fix, folded into this phase after initial review**: two gaps were
+found once (1) and (3) were exercised end-to-end — (2) had no automatic path
+at all (only the pre-existing manual "Add to chat" button), and "Join Slack
+channel" was hidden entirely on any SEV without a recorded channel, which in
+practice meant every SEV predating Phase 10e's `slack_channel_id` write-back.
+Both are fixed here; see 11c and the "Design notes" below for the button's
+corrected visibility rule.
+
 **11a. Backend: viewer-safe "enabled integrations" signal**
 
 - New RPC `ConfigService.ListEnabledIntegrations` → `GET
@@ -41,10 +57,11 @@ shipped early; see `demo/integration-user-profiles.md`'s "10h" section.)
   enabled, "Create Jira issue" only when `jira` is enabled. If only Jira is
   configured, GitHub's option simply isn't offered; if neither is, only
   "Link existing" (which needs no integration) remains.
-- `RolesPanel.tsx`: the per-role "Add to chat" button (Phase 10e) and this
-  phase's "Join Slack channel" button both render only when `slack` is
-  enabled **and** `SEV.slack_channel_id` is set — previously "Add to chat"
-  only checked the channel.
+- `RolesPanel.tsx`: the per-role "Add to chat" button (Phase 10e) renders
+  only when `slack` is enabled **and** `SEV.slack_channel_id` is set
+  (previously it only checked the channel). The section-level "Join Slack
+  channel" button (11c) instead renders whenever `slack` is enabled, **full
+  stop** — see 11c below for why it doesn't also require a recorded channel.
 
 **11c. Backend + frontend: self-service "Join Slack channel"**
 
@@ -73,6 +90,36 @@ shipped early; see `demo/integration-user-profiles.md`'s "10h" section.)
   section's header (next to the section title, visually adjacent to the
   per-role "Add to chat" buttons below it), independent of `canManage` — any
   Viewer with real access to the SEV may click it.
+- **Visible whenever `slack` is enabled, disabled (not hidden) when the SEV
+  has no recorded channel** — a corrected design from this phase's first
+  pass, which hid the button entirely without a channel. That made it
+  disappear for every SEV predating Phase 10e's `slack_channel_id`
+  write-back, i.e. most existing SEVs at rollout time. Mirrors the per-role
+  "Add to chat" button's own long-standing disabled-not-hidden precedent
+  (10e): the action stays discoverable, with a tooltip explaining why it's
+  inactive, rather than looking like it was never built. Clicking it on such
+  a SEV isn't offered at all — there's still no channel to resolve into.
+
+**Follow-up: automatic invite on role assignment**
+
+- `RoleServer.AssignRole` (`internal/api/grpc/role.go`) now best-effort
+  invites the newly assigned role's holder into the SEV's incident Slack
+  channel immediately, whenever one is already recorded — closing the gap
+  where every role assigned after channel creation needed a manual "Add to
+  chat" click. Reuses the same identity-resolution order as
+  `InviteRoleToSlack` (stored `SlackUserID` → email lookup → `DisplayName`
+  regex fallback → skip).
+- A Slack-side failure here (rate limit, decrypt error, integration
+  unconfigured, no resolvable identity) never fails the `AssignRole` call
+  itself — it's logged at `Warn` and swallowed, the same posture
+  `auditAppendBestEffort` already uses elsewhere in this file. A successful
+  auto-invite records the same `role.invited_to_slack` audit action
+  `InviteRoleToSlack` does.
+- `InviteRoleToSlack` (the manual "Add to chat" button) remains — it's now
+  mainly useful for retrying a failed auto-invite, or for a role that was
+  assigned before the SEV had a Slack channel at all (e.g. assigned in the
+  same request flow that triggers channel creation, or on an older SEV once
+  it's manually backfilled).
 
 ## Design notes
 
@@ -126,14 +173,22 @@ curl -s http://localhost:8080/v1/config/enabled-integrations -H "Authorization: 
 2. Configure Slack too (`demo/datastore-slack-bot-credentials.md`) and create
    a new SEV from the web UI — `cmd/slackbot` creates its incident channel as
    usual. Open the SEV's **Roles** section: a **Join Slack channel** button
-   appears in the section header.
+   appears in the section header, enabled.
 3. Log in as a *different* user who holds no role on that SEV, with a Slack
    identity set on their own profile, and open the same SEV — **Join Slack
    channel** is visible and enabled for them too (it's self-service, not
    gated by `canManage`). Clicking it invites them into the channel directly.
-4. Unconfigure Slack (or use a SEV created before Slack was ever configured,
-   so `slack_channel_id` is unset) — both **Join Slack channel** and every
-   per-role **Add to chat** button disappear entirely.
+4. Assign a new role on that SEV (e.g. Responder) to a user with a Slack
+   identity set — no button click needed: they're invited to the channel as
+   part of the assignment itself. The per-role "Add to chat" button is still
+   there if you need to retry.
+5. Open an *older* SEV — one predating this feature, with no
+   `slack_channel_id` — and confirm **Join Slack channel** is still visible
+   in the Roles section header, just disabled (hover it to see why); the
+   per-role "Add to chat" buttons are absent for the same reason.
+6. Unconfigure Slack entirely (remove the "slack" integration config) — now
+   **Join Slack channel** disappears too, since the integration itself isn't
+   enabled, not just this particular SEV's channel.
 
 ## Verify tests pass
 
@@ -153,12 +208,17 @@ New coverage:
   stored-identity resolution, email-lookup fallback, no-resolvable-identity,
   no-channel, not-configured, SEV-not-found, unauthenticated, and both the
   Sensitive-SEV-`PermissionDenied` and granted-access/Incident-Commander-
-  bypass paths.
+  bypass paths — plus four `TestAssignRole_*AutoInvite*`/`SucceedsWhenAuto-
+  InviteFails` cases covering the automatic invite-on-assignment path added
+  in the follow-up fix (invites when a channel is recorded, no-ops without
+  one or without Slack configured, and never fails the assignment itself on
+  a Slack-side error).
 - `web/src/components/sev/TasksPanel.test.tsx`: create-issue button gating
   across Jira-only, GitHub-only, neither, and both-enabled combinations.
 - `web/src/components/sev/RolesPanel.test.tsx`: "Join Slack channel"
-  visibility across `canManage`/`slackEnabled`/`slackChannelId` combinations,
-  plus its success and server-error states.
+  visibility and enabled/disabled state across `canManage`/`slackEnabled`/
+  `slackChannelId` combinations (including the older-SEV
+  visible-but-disabled case), plus its success and server-error states.
 
 ## Known limitations
 
@@ -172,9 +232,15 @@ New coverage:
   service account for that path, a harmless no-op, not a duplicate of the
   human who's separately invited via the existing pending-opener path.
 - **No retroactive backfill**: a SEV created before Slack was configured, or
-  before `slack_channel_id` started being recorded (Phase 10e), has no join
-  target — both "Add to chat" and "Join Slack channel" simply don't render
-  for it, same as Phase 10e's existing "Add to chat" limitation.
+  before `slack_channel_id` started being recorded (Phase 10e), still has no
+  join target — "Add to chat" and "Join Slack channel" both stay inert for
+  it (the button itself no longer disappears, per the follow-up fix above,
+  but clicking still isn't offered — there's no channel ID to invite into).
+  Backfilling old SEVs by resolving their channel from the naming convention
+  (`{default_channel}`/`channel_naming_convention`) via a Slack channel-name
+  lookup is a named follow-up, not built here — `internal/integrations/slack`
+  has no such lookup method today, and a manually-created or since-renamed
+  channel wouldn't match the computed name anyway.
 
 See [`docs/roadmap.md`](../docs/roadmap.md) (Phase 11) and
 [`docs/architecture-evolution.md`](../docs/architecture-evolution.md) for the

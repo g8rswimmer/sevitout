@@ -96,14 +96,18 @@ export function RolesPanel({
     <Section
       title="Roles"
       action={
-        slackEnabled &&
-        slackChannelId && (
+        // Rendered whenever the "slack" integration is enabled at all —
+        // including on an older SEV with no recorded channel yet, so the
+        // action stays discoverable rather than silently absent. Disabled
+        // (not hidden), mirroring the per-role "Add to chat" button below.
+        slackEnabled && (
           <Button
             type="button"
             size="sm"
             variant="outline"
+            title={slackChannelId ? undefined : 'This SEV has no Slack channel'}
             onClick={() => joinSlackChannel.mutate()}
-            disabled={joinSlackChannel.isPending}
+            disabled={!slackChannelId || joinSlackChannel.isPending}
           >
             <LogIn className="h-3.5 w-3.5" /> {joinSlackChannel.isPending ? 'Joining…' : 'Join Slack channel'}
           </Button>

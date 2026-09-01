@@ -23,6 +23,13 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RoleServiceClient interface {
+	// AssignRole, in addition to recording the assignment, best-effort invites
+	// the role holder into the SEV's incident Slack channel when one is
+	// already recorded (SEV.slack_channel_id) — every assigned role gets
+	// added automatically, not just those present at channel-creation time
+	// (docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never
+	// fails the assignment itself; InviteRoleToSlack below remains available
+	// to retry or to invite a role assigned before the channel existed.
 	AssignRole(ctx context.Context, in *AssignRoleRequest, opts ...grpc.CallOption) (*SEVRoleResponse, error)
 	RemoveRole(ctx context.Context, in *RemoveRoleRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListRoles(ctx context.Context, in *ListRolesRequest, opts ...grpc.CallOption) (*ListRolesResponse, error)
@@ -105,6 +112,13 @@ func (c *roleServiceClient) JoinSlackChannel(ctx context.Context, in *JoinSlackC
 // All implementations must embed UnimplementedRoleServiceServer
 // for forward compatibility
 type RoleServiceServer interface {
+	// AssignRole, in addition to recording the assignment, best-effort invites
+	// the role holder into the SEV's incident Slack channel when one is
+	// already recorded (SEV.slack_channel_id) — every assigned role gets
+	// added automatically, not just those present at channel-creation time
+	// (docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never
+	// fails the assignment itself; InviteRoleToSlack below remains available
+	// to retry or to invite a role assigned before the channel existed.
 	AssignRole(context.Context, *AssignRoleRequest) (*SEVRoleResponse, error)
 	RemoveRole(context.Context, *RemoveRoleRequest) (*emptypb.Empty, error)
 	ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error)

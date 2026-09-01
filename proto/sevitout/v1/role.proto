@@ -10,6 +10,13 @@ import "google/protobuf/timestamp.proto";
 
 // RoleService manages people and role assignments on a SEV.
 service RoleService {
+  // AssignRole, in addition to recording the assignment, best-effort invites
+  // the role holder into the SEV's incident Slack channel when one is
+  // already recorded (SEV.slack_channel_id) — every assigned role gets
+  // added automatically, not just those present at channel-creation time
+  // (docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never
+  // fails the assignment itself; InviteRoleToSlack below remains available
+  // to retry or to invite a role assigned before the channel existed.
   rpc AssignRole(AssignRoleRequest) returns (SEVRoleResponse) {
     option (google.api.http) = {
       post: "/v1/sevs/{sev_id}/roles"

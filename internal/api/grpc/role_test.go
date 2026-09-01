@@ -3,6 +3,7 @@ package grpc_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -652,14 +653,17 @@ func TestInviteRoleToSlack_ResolvesViaStoredSlackUserID(t *testing.T) {
 		t.Fatalf("set slack id: %v", err)
 	}
 
+	// The role is assigned before the channel exists — the realistic case
+	// for InviteRoleToSlack's manual "Add to chat" button, since AssignRole
+	// itself now auto-invites when a channel is already recorded.
 	sevID := seedSEVForRole(t, ts)
-	mustSetSlackChannel(t, ts, sevID, "C123")
 	role, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
 		SevId: sevID, RoleType: string(store.SEVRoleResponder), UserId: "user-1", DisplayName: "Carol",
 	})
 	if err != nil {
 		t.Fatalf("AssignRole: %v", err)
 	}
+	mustSetSlackChannel(t, ts, sevID, "C123")
 
 	if _, err := ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: role.GetId()}); err != nil {
 		t.Fatalf("InviteRoleToSlack: %v", err)
@@ -673,14 +677,16 @@ func TestInviteRoleToSlack_FallsBackToDisplayNameRegex(t *testing.T) {
 	slack := &fakeSlackInviteClient{emailToUserID: map[string]string{"carol@example.com": "U-EMAIL"}}
 	ts := newTestRoleServerWithSlack(t, slack)
 	ts.seedSlackConfig(t, "xoxb-1")
+	// The role is assigned before the channel exists — see the identical
+	// comment in TestInviteRoleToSlack_ResolvesViaStoredSlackUserID.
 	sevID := seedSEVForRole(t, ts)
-	mustSetSlackChannel(t, ts, sevID, "C123")
 	role, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
 		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol <carol@example.com>",
 	})
 	if err != nil {
 		t.Fatalf("AssignRole: %v", err)
 	}
+	mustSetSlackChannel(t, ts, sevID, "C123")
 
 	if _, err := ts.server.InviteRoleToSlack(context.Background(), &pb.InviteRoleToSlackRequest{SevId: sevID, Id: role.GetId()}); err != nil {
 		t.Fatalf("InviteRoleToSlack: %v", err)
@@ -720,6 +726,89 @@ func TestInviteRoleToSlack_RoleNotFound(t *testing.T) {
 	if grpcCode(err) != codes.NotFound {
 		t.Errorf("code = %v, want %v", grpcCode(err), codes.NotFound)
 	}
+}
+
+// ── Auto-invite on AssignRole ─────────────────────────────────────────────────
+
+func TestAssignRole_AutoInvitesToSlackWhenChannelRecorded(t *testing.T) {
+	slack := &fakeSlackInviteClient{}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	now := time.Now()
+	if err := ts.users.Create(context.Background(), &store.User{
+		ID: "user-1", Email: "carol@example.com", Name: "Carol",
+		OrgRole: store.OrgRoleResponder, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	slackID := "U-STORED"
+	if _, err := ts.users.UpdateIntegrationIdentities(context.Background(), "user-1", &slackID, nil, nil); err != nil {
+		t.Fatalf("set slack id: %v", err)
+	}
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	if _, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), UserId: "user-1", DisplayName: "Carol",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	if slack.invitedTo != "C123" || len(slack.invitedUsers) != 1 || slack.invitedUsers[0] != "U-STORED" {
+		t.Errorf("invited (%q, %v), want (C123, [U-STORED])", slack.invitedTo, slack.invitedUsers)
+	}
+}
+
+func TestAssignRole_NoAutoInviteWhenNoChannel(t *testing.T) {
+	slack := &fakeSlackInviteClient{emailToUserID: map[string]string{"carol@example.com": "U-EMAIL"}}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	// No mustSetSlackChannel call — nothing to invite into.
+
+	if _, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol <carol@example.com>",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	if len(slack.invitedUsers) != 0 {
+		t.Errorf("invited users = %v, want none (no Slack channel recorded)", slack.invitedUsers)
+	}
+}
+
+func TestAssignRole_SucceedsWhenAutoInviteFails(t *testing.T) {
+	slack := &fakeSlackInviteClient{inviteErr: errors.New("slack: rate limited")}
+	ts := newTestRoleServerWithSlack(t, slack)
+	ts.seedSlackConfig(t, "xoxb-1")
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	// A Slack-side failure must not fail the role assignment itself.
+	resp, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol <carol@example.com>",
+	})
+	if err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+	if resp.GetId() == 0 {
+		t.Error("role should still be assigned despite the Slack invite failing")
+	}
+}
+
+func TestAssignRole_NoAutoInviteWhenSlackNotConfigured(t *testing.T) {
+	// No slack wiring at all — mirrors newTestRoleServer's default shape.
+	ts := newTestRoleServer()
+	sevID := seedSEVForRole(t, ts)
+	mustSetSlackChannel(t, ts, sevID, "C123")
+
+	if _, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Carol",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+	// Nothing to assert beyond "no panic" — slackFactory is nil, so
+	// autoInviteRoleToSlack must no-op cleanly.
 }
 
 // ── JoinSlackChannel ──────────────────────────────────────────────────────────

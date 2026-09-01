@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -135,7 +136,70 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		publishProto(s.publisher, req.GetSevId(), "role.changed", resp)
 	}
 
+	// Best-effort: if the SEV already has an incident Slack channel, invite
+	// this role's holder into it immediately rather than requiring a manual
+	// "Add to chat" click for every role assigned after channel creation.
+	// InviteRoleToSlack (§10e) remains available for retrying a failed
+	// auto-invite or for roles assigned before this existed.
+	s.autoInviteRoleToSlack(ctx, sevRecord, role)
+
 	return resp, nil
+}
+
+// autoInviteRoleToSlack best-effort invites role's holder into sevRecord's
+// already-created incident Slack channel immediately upon assignment. A
+// failure here never fails AssignRole — the role assignment itself already
+// succeeded — so every error path here logs and returns rather than
+// propagating, the same posture as auditAppendBestEffort. A no-op when Slack
+// invite support isn't wired up, the SEV has no recorded channel, or the
+// role holder has no resolvable Slack identity — all expected, silent cases,
+// not failures.
+func (s *RoleServer) autoInviteRoleToSlack(ctx context.Context, sevRecord *store.SEV, role *store.SEVRole) {
+	if s.slackFactory == nil || s.integrations == nil {
+		return
+	}
+	if sevRecord.SlackChannelID == nil || *sevRecord.SlackChannelID == "" {
+		return
+	}
+
+	cfg, err := s.integrations.Get(ctx, "slack")
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			slog.WarnContext(ctx, "auto-invite to slack: failed to get slack integration config", "sev_id", sevRecord.ID, "err", err)
+		}
+		return
+	}
+	creds, err := DecryptIntegrationCredentials(s.crypto, cfg)
+	if err != nil {
+		slog.WarnContext(ctx, "auto-invite to slack: failed to decrypt slack integration credentials", "sev_id", sevRecord.ID, "err", err)
+		return
+	}
+	botToken := creds["bot_token"]
+	if botToken == "" {
+		return
+	}
+	slackClient := s.slackFactory(botToken)
+
+	slackUserID, err := s.resolveRoleSlackUserID(ctx, slackClient, role)
+	if err != nil {
+		slog.WarnContext(ctx, "auto-invite to slack: failed to resolve Slack identity", "sev_id", sevRecord.ID, "role_id", role.ID, "err", err)
+		return
+	}
+	if slackUserID == "" {
+		return
+	}
+
+	if err := slackClient.InviteUsers(ctx, *sevRecord.SlackChannelID, []string{slackUserID}); err != nil {
+		slog.WarnContext(ctx, "auto-invite to slack: failed to invite", "sev_id", sevRecord.ID, "role_id", role.ID, "err", err)
+		return
+	}
+
+	auditAppendBestEffort(ctx, s.audit, &store.AuditEntry{
+		SEVID:     sevRecord.ID,
+		UserID:    role.CreatedBy,
+		Action:    "role.invited_to_slack",
+		CreatedAt: time.Now(),
+	})
 }
 
 func (s *RoleServer) RemoveRole(ctx context.Context, req *pb.RemoveRoleRequest) (*emptypb.Empty, error) {
