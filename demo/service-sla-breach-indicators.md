@@ -250,6 +250,39 @@ New/updated coverage:
   inline at creation time, with a blank severity-level row triggering no
   `UpsertServiceSLA` call at all.
 
+## Follow-up #3, same phase: a real bug from the MTTPC→RTPC rename
+
+The Follow-up #1 rename (migration `000017` edited in place, from `mttpc_*` to
+`rtpc_*` columns) was based on an assumption that turned out to be wrong: that
+because this branch had never been pushed, no real database could have already
+applied it. In practice, `golang-migrate` (the tool `deploy/docker-compose.yml`'s
+`migrate` service and `make migrate` both use) tracks applied migrations **by
+version number only** — it never diffs file content — so a local dev database
+that had run `make migrate` against the pre-rename code (creating `mttpc_seconds`/
+`mttpc_target_seconds`) recorded version 17 as applied and silently kept those
+column names forever once the file's content changed underneath it. Every SEV
+read or write then failed: `column "rtpc_seconds" does not exist (SQLSTATE
+42703)` — surfacing in the UI as "the dashboard and SEV panels are not able to
+list the SEVs."
+
+**Fix**: a new migration, `000018_rtpc_column_rename_repair.up.sql`, does a
+guarded `ALTER TABLE ... RENAME COLUMN` — `sevs.mttpc_seconds` →
+`sevs.rtpc_seconds`, `service_slas.mttpc_target_seconds` →
+`service_slas.rtpc_target_seconds` — wrapped in an `information_schema.columns`
+existence check, so it repairs a drifted database and is a verified no-op on a
+fresh one (000017 already creates the `rtpc_*` names directly there).
+**Live-verified** both directions with a throwaway Postgres container: applying
+the pre-rename migration set (reconstructed from this branch's own git history)
+to reproduce the drifted state, confirming the exact `column "rtpc_seconds" does
+not exist` failure on `CreateSEV`/`ListSEVs`/`GetDashboardMetrics`, then
+confirming migration 18 repairs it — and separately, that a completely fresh
+database migrates cleanly through 18 with no behavior change.
+
+**Anyone who ran `make migrate` (or the `migrate` compose service) against this
+branch before this fix needs to run it again** — `docker compose up migrate` or
+`make migrate` — to pick up migration 18 and repair their database; no manual
+SQL is required.
+
 ## Known limitations
 
 - **No org-wide default/fallback SLA.** A SEV with no attached service, or whose
