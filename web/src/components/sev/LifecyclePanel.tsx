@@ -108,8 +108,8 @@ export function LifecyclePanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bo
           <SLABadge status={sev.sla_status?.mttr} label="MTTR" />
         </MetricField>
         <MetricField label="DTTM" definition={METRIC_DEFINITIONS.DTTM} value={sev.dttm_seconds} />
-        <MetricField label="MTTPC" definition={METRIC_DEFINITIONS.MTTPC} value={sev.mttpc_seconds}>
-          <SLABadge status={sev.sla_status?.mttpc} label="MTTPC" />
+        <MetricField label="RTPC" definition={METRIC_DEFINITIONS.RTPC} value={sev.rtpc_seconds}>
+          <SLABadge status={sev.sla_status?.rtpc} label="RTPC" />
         </MetricField>
       </div>
     </Section>

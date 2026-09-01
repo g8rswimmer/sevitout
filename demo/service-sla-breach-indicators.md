@@ -42,7 +42,7 @@ and UI.
   `LifecyclePanel.tsx`, and as an overall summary badge next to the severity/status
   badges on both the SEV detail page and the SEV list.
 
-## Follow-up, same phase: metric tooltips + an MTTPC (postmortem-tail) SLA
+## Follow-up, same phase: metric tooltips + an RTPC (postmortem-tail) SLA
 
 Two gaps surfaced from user feedback right after the above shipped: the acronyms
 (MTTD/MTTM/MTTR) were unexplained wherever they appeared, and the SLA targets only
@@ -57,37 +57,74 @@ also want held to a deadline.
   keyboard-focus, per its own doc comment — not mouse-only). The admin SLA editor's
   four target columns ("MTTD target (min)", etc.) each carry the icon next to their
   header now, not just the per-SEV metric fields that already had one.
-- **New metric: MTTPC — Mitigation to Postmortem Complete**
-  (`postmortem_completed_at − mitigated_at`). This is the same point-A-to-point-B
+- **New metric: RTPC — Resolution to Postmortem Complete**
+  (`postmortem_completed_at − resolved_at`). This is the same point-A-to-point-B
   shape as the existing `DTTMSeconds` (detection→mitigation), deliberately **not**
-  "from `started_at`" like MTTD/MTTM/MTTR — a SEV open for days before mitigation
+  "from `started_at`" like MTTD/MTTM/MTTR — a SEV open for days before resolution
   shouldn't count against a fast postmortem turnaround. `ComputeMetrics` computes it
-  alongside the other three; `EvaluateSLA` evaluates it against `MitigatedAt` as its
+  alongside the other three; `EvaluateSLA` evaluates it against `ResolvedAt` as its
   baseline (not `StartedAt`); `MostStrictSLA` reduces it across services the same
-  way as the other three. A 4th target column (`mttpc_target_seconds`) was added to
+  way as the other three. A 4th target column (`rtpc_target_seconds`) was added to
   `service_slas` (migration `000017`) and threaded through the same
   store/proto/handler/UI surface as the original three — `ServiceSLAEditor.tsx`'s
   table is now 4 target columns instead of 3, and `LifecyclePanel.tsx` shows a 5th
-  metric field (MTTPC, with its own `SLABadge`) alongside MTTD/MTTM/MTTR/DTTM.
+  metric field (RTPC, with its own `SLABadge`) alongside MTTD/MTTM/MTTR/DTTM.
+  **Corrected mid-phase**: this metric first shipped as "MTTPC," measured from
+  `MitigatedAt` — the postmortem clock is conventionally understood to start once
+  the incident is *resolved*, not merely mitigated, so both the name and the
+  baseline were changed to RTPC/`ResolvedAt` before this reached anyone outside
+  this branch. Noted here rather than silently reconciled, per this project's usual
+  practice for mid-phase corrections.
 - **Live-verified**, continuing a real `cmd/server` session:
 
   ```bash
-  # Configure a 24h MTTPC target alongside the existing 5-minute MTTD target.
+  # Configure a 24h RTPC target alongside the existing 5-minute MTTD target.
   curl -s -X PUT localhost:8080/v1/config/services/checkout/sla/1 -H "Authorization: Bearer $TOKEN" \
-    -H 'Content-Type: application/json' -d '{"severity_level":1,"mttd_target_seconds":300,"mttpc_target_seconds":86400}'
+    -H 'Content-Type: application/json' -d '{"severity_level":1,"mttd_target_seconds":300,"rtpc_target_seconds":86400}'
 
-  # Mitigate a SEV 10 minutes ago — well within the 24h target, even though
-  # started_at was never set (proving MTTPC's baseline really is mitigated_at).
+  # Resolve a SEV 10 minutes ago — well within the 24h target, even though
+  # started_at was never set (proving RTPC's baseline really is resolved_at).
   curl -s -X POST localhost:8080/v1/sevs/SEV-2026-0001/transition -H "Authorization: Bearer $TOKEN" \
-    -H 'Content-Type: application/json' -d '{"to_status":"mitigated","mitigated_at":"<10 min ago>"}'
-  # {"sla_status": {"mttpc": "ok", "mttpc_target_seconds": "86400", "overall": "ok", ...}}
+    -H 'Content-Type: application/json' -d '{"to_status":"resolved","resolved_at":"<10 min ago>"}'
+  # {"sla_status": {"rtpc": "ok", "rtpc_target_seconds": "86400", "overall": "ok", ...}}
 
-  # Complete the postmortem ~26 hours after mitigation — over the 24h target.
+  # Complete the postmortem ~26 hours after resolution — over the 24h target.
   curl -s -X POST localhost:8080/v1/sevs/SEV-2026-0001/transition -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
-    -d '{"to_status":"postmortem_complete","postmortem_completed_at":"<~26h after mitigated_at>"}'
-  # {"mttpc_seconds": "94209", "sla_status": {"mttpc": "breached", "overall": "breached", ...}}
+    -d '{"to_status":"postmortem_complete","postmortem_completed_at":"<~26h after resolved_at>"}'
+  # {"rtpc_seconds": "94209", "sla_status": {"rtpc": "breached", "overall": "breached", ...}}
   ```
+
+## Follow-up #2, same phase: tooltip UX fix + SLA targets at service-creation time
+
+Two more rounds of user feedback:
+
+- **Tooltip UX fix.** `InfoTooltip` (`components/ui/tooltip.tsx`) previously set both
+  a `title` attribute *and* rendered its own styled `role="tooltip"` span — the
+  native browser tooltip (an unstyled box, after the OS hover delay) was appearing
+  **in addition to** the custom one, and `cursor-help` was swapping the pointer for
+  a question-mark cursor on every hover. `title` is now removed entirely (the
+  `sr-only` span already covers screen readers, and keyboard-focus already reveals
+  the styled tooltip via `group-focus-visible`, so it added nothing but the
+  duplicate box), and the cursor override is gone — hovering now shows exactly one
+  tooltip, with the ordinary pointer.
+- **SLA targets at service-creation time.** `AdminServicesPage.tsx`'s "New service"
+  form previously only let an admin set SLAs *after* creating a service, via the
+  separate "Manage SLAs" action. It now embeds the same 4-column,
+  per-severity-level target table directly in the creation form (optional — a blank
+  row is skipped). On submit, the service is created first, then
+  `UpsertServiceSLA` is called once per severity level that has at least one
+  non-blank field, in parallel. Shared logic (`SEVERITY_LEVELS`, the per-row form
+  shape, minutes→seconds conversion) moved to a new `web/src/lib/slaTargets.ts` so
+  the creation form and `ServiceSLAEditor.tsx` (still used for editing after the
+  fact) can't drift apart; `ServiceSLAEditor.tsx`'s `ColumnHeader` (label + info
+  tooltip) is exported and reused by both tables rather than duplicated.
+  **Known limitation, stated explicitly**: if the service itself is created but one
+  of its SLA upserts then fails, the service is not rolled back (and is made visible
+  in the list immediately, specifically so this partial-failure state isn't hidden)
+  — the admin sees the error and can retry via "Manage SLAs" on the now-existing
+  service, rather than the form silently succeeding or the created service vanishing
+  from view.
 
 ## Prerequisites
 
@@ -178,20 +215,20 @@ cd web && npx tsc -b && npx vitest run && npx oxlint
 ```
 
 New/updated coverage:
-- `internal/sev/metrics_test.go`: `MTTPCSeconds` computed from
-  `mitigated_at`/`postmortem_completed_at` (added to the all-timestamps case, plus
-  a dedicated MTTPC-only case and the no-timestamps nil case).
+- `internal/sev/metrics_test.go`: `RTPCSeconds` computed from
+  `resolved_at`/`postmortem_completed_at` (added to the all-timestamps case, plus a
+  dedicated RTPC-only case and the no-timestamps nil case).
 - `internal/sev/sla_test.go` (new): `MostStrictSLA`'s multi-service min-reduction
   (now across all four metrics) and no-rows case; `EvaluateSLA`'s four status
   outcomes per metric, the at-risk→breached/ok transition once the final timestamp
-  lands, overall-is-worst-of-four, and MTTPC specifically: measured from
-  `MitigatedAt` (not `StartedAt`) via a case where those two baselines would give
-  opposite answers, not-applicable before mitigation, and breached once finalized.
+  lands, overall-is-worst-of-four, and RTPC specifically: measured from
+  `ResolvedAt` (not `StartedAt`) via a case where those two baselines would give
+  opposite answers, not-applicable before resolution, and breached once finalized.
 - `internal/store/memory/memory_test.go`: `TestServiceSLAStore` — insert, get,
   not-found, update-preserves-ID, per-service listing in ascending severity order,
   batch `ListForServices` across multiple service IDs, delete/delete-not-found.
 - `internal/api/grpc/config_test.go`: `ServiceSLA` RPC tests — valid upsert +
-  round-trip (now asserting `mttpc_target_seconds` too), unknown service rejected,
+  round-trip (now asserting `rtpc_target_seconds` too), unknown service rejected,
   invalid severity level rejected, a zero-valued field clears its target
   (full-replace semantics), not-found on get/delete, list returns only configured
   severity levels in order, missing `service_id` rejected.
@@ -199,16 +236,19 @@ New/updated coverage:
   most-strict target resolves correctly across two attached services, a still-open
   SEV shows `at_risk` before any target is finalized, a late-detected SEV shows
   `breached` once `MTTDSeconds` is computed, a SEV with no attached service gets no
-  `sla_status` at all; plus MTTPC-specific: `MttpcSeconds` computed on the
-  `PostmortemComplete` transition, and `sla_status.mttpc` correctly using
-  `mitigated_at` as its baseline via `GetSEV`.
+  `sla_status` at all; plus RTPC-specific: `RtpcSeconds` computed on the
+  `PostmortemComplete` transition, and `sla_status.rtpc` correctly using
+  `resolved_at` as its baseline via `GetSEV`.
 - `web/src/components/sev/badges.test.tsx` (new): `SLABadge` renders nothing for
   `ok`/`not_applicable`/undefined, an "at risk" badge, a "breached" badge, and
   defaults its label to "SLA".
 - `web/src/pages/admin/AdminServicesPage.test.tsx`: opening the SLA editor and
   saving a target converts minutes to seconds correctly in the request body; every
-  target column's info icon exposes the right metric definition via its `title`
-  attribute, and an MTTPC target saves correctly.
+  target column's info icon exposes the right metric definition text (present
+  whether or not it's currently hovered — no `title` attribute involved anymore);
+  an RTPC target saves correctly; and a new service can have an SLA target set
+  inline at creation time, with a blank severity-level row triggering no
+  `UpsertServiceSLA` call at all.
 
 ## Known limitations
 

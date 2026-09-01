@@ -12,8 +12,8 @@ func int64p(v int64) *int64 { return &v }
 
 func TestMostStrictSLA_TakesMinimumPerMetric(t *testing.T) {
 	rows := []*store.ServiceSLA{
-		{ServiceID: "checkout", MTTDTargetSeconds: int64p(600), MTTMTargetSeconds: int64p(1800), MTTPCTargetSeconds: int64p(172800)},
-		{ServiceID: "payments", MTTDTargetSeconds: int64p(300), MTTRTargetSeconds: int64p(3600), MTTPCTargetSeconds: int64p(86400)},
+		{ServiceID: "checkout", MTTDTargetSeconds: int64p(600), MTTMTargetSeconds: int64p(1800), RTPCTargetSeconds: int64p(172800)},
+		{ServiceID: "payments", MTTDTargetSeconds: int64p(300), MTTRTargetSeconds: int64p(3600), RTPCTargetSeconds: int64p(86400)},
 	}
 	targets := sev.MostStrictSLA(rows)
 
@@ -26,15 +26,15 @@ func TestMostStrictSLA_TakesMinimumPerMetric(t *testing.T) {
 	if targets.MTTRTargetSeconds == nil || *targets.MTTRTargetSeconds != 3600 {
 		t.Fatalf("MTTRTargetSeconds = %v, want 3600 (only payments configures it)", targets.MTTRTargetSeconds)
 	}
-	if targets.MTTPCTargetSeconds == nil || *targets.MTTPCTargetSeconds != 86400 {
-		t.Fatalf("MTTPCTargetSeconds = %v, want 86400 (strictest of 172800, 86400)", targets.MTTPCTargetSeconds)
+	if targets.RTPCTargetSeconds == nil || *targets.RTPCTargetSeconds != 86400 {
+		t.Fatalf("RTPCTargetSeconds = %v, want 86400 (strictest of 172800, 86400)", targets.RTPCTargetSeconds)
 	}
 }
 
 func TestMostStrictSLA_NoRows(t *testing.T) {
 	targets := sev.MostStrictSLA(nil)
 	if targets.MTTDTargetSeconds != nil || targets.MTTMTargetSeconds != nil || targets.MTTRTargetSeconds != nil ||
-		targets.MTTPCTargetSeconds != nil {
+		targets.RTPCTargetSeconds != nil {
 		t.Fatalf("expected all-nil targets with no rows, got %+v", targets)
 	}
 }
@@ -136,44 +136,44 @@ func TestEvaluateSLA_OverallIsWorstOfThree(t *testing.T) {
 	}
 }
 
-func TestEvaluateSLA_MTTPCMeasuredFromMitigatedAtNotStartedAt(t *testing.T) {
-	// StartedAt is 2 hours before MitigatedAt — if MTTPC were (incorrectly)
+func TestEvaluateSLA_RTPCMeasuredFromResolvedAtNotStartedAt(t *testing.T) {
+	// StartedAt is 2 hours before ResolvedAt — if RTPC were (incorrectly)
 	// measured from StartedAt like MTTD/MTTM/MTTR, this would already be
-	// breached against a 1-hour target. It isn't: MTTPC's baseline is
-	// MitigatedAt, and only 10 minutes have elapsed since then.
-	mitigated := slaStart.Add(2 * time.Hour)
-	s := &store.SEV{StartedAt: &slaStart, MitigatedAt: &mitigated}
-	targets := sev.SLATargets{MTTPCTargetSeconds: int64p(3600)} // 1 hour
-	now := mitigated.Add(10 * time.Minute)
+	// breached against a 1-hour target. It isn't: RTPC's baseline is
+	// ResolvedAt, and only 10 minutes have elapsed since then.
+	resolved := slaStart.Add(2 * time.Hour)
+	s := &store.SEV{StartedAt: &slaStart, ResolvedAt: &resolved}
+	targets := sev.SLATargets{RTPCTargetSeconds: int64p(3600)} // 1 hour
+	now := resolved.Add(10 * time.Minute)
 
 	eval := sev.EvaluateSLA(s, targets, now)
-	if eval.MTTPC != sev.SLAOnTrack {
-		t.Fatalf("MTTPC = %v, want ok (10m elapsed since MitigatedAt < 1h target)", eval.MTTPC)
+	if eval.RTPC != sev.SLAOnTrack {
+		t.Fatalf("RTPC = %v, want ok (10m elapsed since ResolvedAt < 1h target)", eval.RTPC)
 	}
 }
 
-func TestEvaluateSLA_MTTPCNotApplicableBeforeMitigation(t *testing.T) {
-	s := &store.SEV{StartedAt: &slaStart} // not yet mitigated
-	targets := sev.SLATargets{MTTPCTargetSeconds: int64p(3600)}
+func TestEvaluateSLA_RTPCNotApplicableBeforeResolution(t *testing.T) {
+	s := &store.SEV{StartedAt: &slaStart} // not yet resolved
+	targets := sev.SLATargets{RTPCTargetSeconds: int64p(3600)}
 
 	eval := sev.EvaluateSLA(s, targets, slaStart.Add(2*time.Hour))
-	if eval.MTTPC != sev.SLANotApplicable {
-		t.Fatalf("MTTPC = %v, want not_applicable (no MitigatedAt baseline yet)", eval.MTTPC)
+	if eval.RTPC != sev.SLANotApplicable {
+		t.Fatalf("RTPC = %v, want not_applicable (no ResolvedAt baseline yet)", eval.RTPC)
 	}
 }
 
-func TestEvaluateSLA_MTTPCBreachedOncePostmortemCompletedLate(t *testing.T) {
-	mitigated := slaStart.Add(time.Hour)
-	postmortemComplete := mitigated.Add(48 * time.Hour) // over a 24h target
+func TestEvaluateSLA_RTPCBreachedOncePostmortemCompletedLate(t *testing.T) {
+	resolved := slaStart.Add(time.Hour)
+	postmortemComplete := resolved.Add(48 * time.Hour) // over a 24h target
 	s := &store.SEV{
-		StartedAt: &slaStart, MitigatedAt: &mitigated,
-		PostmortemCompletedAt: &postmortemComplete, MTTPCSeconds: int64p(48 * 3600),
+		StartedAt: &slaStart, ResolvedAt: &resolved,
+		PostmortemCompletedAt: &postmortemComplete, RTPCSeconds: int64p(48 * 3600),
 	}
-	targets := sev.SLATargets{MTTPCTargetSeconds: int64p(24 * 3600)}
+	targets := sev.SLATargets{RTPCTargetSeconds: int64p(24 * 3600)}
 
 	eval := sev.EvaluateSLA(s, targets, postmortemComplete.Add(time.Hour))
-	if eval.MTTPC != sev.SLABreached {
-		t.Fatalf("MTTPC = %v, want breached (final 48h > 24h target)", eval.MTTPC)
+	if eval.RTPC != sev.SLABreached {
+		t.Fatalf("RTPC = %v, want breached (final 48h > 24h target)", eval.RTPC)
 	}
 	if eval.Overall != sev.SLABreached {
 		t.Fatalf("Overall = %v, want breached", eval.Overall)

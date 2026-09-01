@@ -1204,7 +1204,7 @@ func TestUpsertServiceSLA_Valid(t *testing.T) {
 	mustCreateService(t, ts, "checkout", "Checkout")
 
 	resp, err := ts.server.UpsertServiceSLA(ctx, &pb.UpsertServiceSLARequest{
-		ServiceId: "checkout", SeverityLevel: 1, MttdTargetSeconds: 300, MttrTargetSeconds: 3600, MttpcTargetSeconds: 86400,
+		ServiceId: "checkout", SeverityLevel: 1, MttdTargetSeconds: 300, MttrTargetSeconds: 3600, RtpcTargetSeconds: 86400,
 	})
 	if err != nil {
 		t.Fatalf("UpsertServiceSLA: %v", err)
@@ -1215,8 +1215,8 @@ func TestUpsertServiceSLA_Valid(t *testing.T) {
 	if resp.GetMttmTargetSeconds() != 0 {
 		t.Errorf("MttmTargetSeconds = %d, want 0 (never set)", resp.GetMttmTargetSeconds())
 	}
-	if resp.GetMttpcTargetSeconds() != 86400 {
-		t.Errorf("MttpcTargetSeconds = %d, want 86400", resp.GetMttpcTargetSeconds())
+	if resp.GetRtpcTargetSeconds() != 86400 {
+		t.Errorf("RtpcTargetSeconds = %d, want 86400", resp.GetRtpcTargetSeconds())
 	}
 
 	got, err := ts.server.GetServiceSLA(ctx, &pb.GetServiceSLARequest{ServiceId: "checkout", SeverityLevel: 1})
@@ -1226,8 +1226,8 @@ func TestUpsertServiceSLA_Valid(t *testing.T) {
 	if got.GetMttdTargetSeconds() != 300 {
 		t.Errorf("persisted MttdTargetSeconds = %d, want 300", got.GetMttdTargetSeconds())
 	}
-	if got.GetMttpcTargetSeconds() != 86400 {
-		t.Errorf("persisted MttpcTargetSeconds = %d, want 86400", got.GetMttpcTargetSeconds())
+	if got.GetRtpcTargetSeconds() != 86400 {
+		t.Errorf("persisted RtpcTargetSeconds = %d, want 86400", got.GetRtpcTargetSeconds())
 	}
 }
 

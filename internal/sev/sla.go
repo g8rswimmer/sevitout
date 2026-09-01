@@ -45,9 +45,9 @@ type SLATargets struct {
 	MTTDTargetSeconds *int64
 	MTTMTargetSeconds *int64
 	MTTRTargetSeconds *int64
-	// MTTPCTargetSeconds targets MTTPCSeconds (Mitigation to Postmortem
-	// Complete) — see store.SEV.MTTPCSeconds' doc comment.
-	MTTPCTargetSeconds *int64
+	// RTPCTargetSeconds targets RTPCSeconds (Resolution to Postmortem
+	// Complete) — see store.SEV.RTPCSeconds' doc comment.
+	RTPCTargetSeconds *int64
 }
 
 // MostStrictSLA reduces every attached service's SLA row at a SEV's
@@ -62,7 +62,7 @@ func MostStrictSLA(rows []*store.ServiceSLA) SLATargets {
 		targets.MTTDTargetSeconds = stricter(targets.MTTDTargetSeconds, row.MTTDTargetSeconds)
 		targets.MTTMTargetSeconds = stricter(targets.MTTMTargetSeconds, row.MTTMTargetSeconds)
 		targets.MTTRTargetSeconds = stricter(targets.MTTRTargetSeconds, row.MTTRTargetSeconds)
-		targets.MTTPCTargetSeconds = stricter(targets.MTTPCTargetSeconds, row.MTTPCTargetSeconds)
+		targets.RTPCTargetSeconds = stricter(targets.RTPCTargetSeconds, row.RTPCTargetSeconds)
 	}
 	return targets
 }
@@ -83,22 +83,22 @@ func stricter(current, candidate *int64) *int64 {
 // SLAEvaluation is the live per-metric breach status for one SEV, plus the
 // worst of the four as Overall.
 type SLAEvaluation struct {
-	MTTD, MTTM, MTTR, MTTPC SLAMetricStatus
-	Overall                 SLAMetricStatus
+	MTTD, MTTM, MTTR, RTPC SLAMetricStatus
+	Overall                SLAMetricStatus
 }
 
 // EvaluateSLA derives s's live SLA status against targets as of now. Mirrors
 // ComputeMetrics' own nil-safety: a metric with no baseline timestamp yet is
 // SLANotApplicable, not an error. MTTD/MTTM/MTTR are measured from
-// StartedAt; MTTPC is measured from MitigatedAt instead, matching
-// MTTPCSeconds' own "point A to point B" shape (see its doc comment) rather
+// StartedAt; RTPC is measured from ResolvedAt instead, matching
+// RTPCSeconds' own "point A to point B" shape (see its doc comment) rather
 // than "from incident start."
 func EvaluateSLA(s *store.SEV, targets SLATargets, now time.Time) SLAEvaluation {
 	eval := SLAEvaluation{
-		MTTD:  evalMetric(s.StartedAt, s.MTTDSeconds, targets.MTTDTargetSeconds, now),
-		MTTM:  evalMetric(s.StartedAt, s.MTTMSeconds, targets.MTTMTargetSeconds, now),
-		MTTR:  evalMetric(s.StartedAt, s.MTTRSeconds, targets.MTTRTargetSeconds, now),
-		MTTPC: evalMetric(s.MitigatedAt, s.MTTPCSeconds, targets.MTTPCTargetSeconds, now),
+		MTTD: evalMetric(s.StartedAt, s.MTTDSeconds, targets.MTTDTargetSeconds, now),
+		MTTM: evalMetric(s.StartedAt, s.MTTMSeconds, targets.MTTMTargetSeconds, now),
+		MTTR: evalMetric(s.StartedAt, s.MTTRSeconds, targets.MTTRTargetSeconds, now),
+		RTPC: evalMetric(s.ResolvedAt, s.RTPCSeconds, targets.RTPCTargetSeconds, now),
 	}
 	eval.Overall = eval.MTTD
 	if slaSeverity[eval.MTTM] > slaSeverity[eval.Overall] {
@@ -107,8 +107,8 @@ func EvaluateSLA(s *store.SEV, targets SLATargets, now time.Time) SLAEvaluation 
 	if slaSeverity[eval.MTTR] > slaSeverity[eval.Overall] {
 		eval.Overall = eval.MTTR
 	}
-	if slaSeverity[eval.MTTPC] > slaSeverity[eval.Overall] {
-		eval.Overall = eval.MTTPC
+	if slaSeverity[eval.RTPC] > slaSeverity[eval.Overall] {
+		eval.Overall = eval.RTPC
 	}
 	return eval
 }

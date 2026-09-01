@@ -10,7 +10,9 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
 import { recordToTagRows, tagRowsToRecord, TagRowsEditor, type TagRow } from '@/components/sev/TagRowsEditor'
-import { ServiceSLAEditor } from '@/components/admin/ServiceSLAEditor'
+import { ColumnHeader, ServiceSLAEditor } from '@/components/admin/ServiceSLAEditor'
+import { emptySLARowForm, minutesToSeconds, SEVERITY_LEVELS, slaRowFormHasAnyValue, type SLARowForm } from '@/lib/slaTargets'
+import { METRIC_DEFINITIONS } from '@/lib/metricDefinitions'
 import type { ServiceResponse } from '@/types/api'
 
 interface ServiceForm {
@@ -42,6 +44,10 @@ export function AdminServicesPage() {
   const [creating, setCreating] = useState(false)
   const [createForm, setCreateForm] = useState<ServiceForm>(() => toForm())
   const [createError, setCreateError] = useState<string | null>(null)
+  // Optional SLA targets set alongside creation, so an admin doesn't need a
+  // separate "Manage SLAs" step right after adding a service. Same
+  // per-severity-level shape ServiceSLAEditor.tsx edits after the fact.
+  const [createSlaForms, setCreateSlaForms] = useState<Record<number, SLARowForm>>({})
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<ServiceForm>(() => toForm())
@@ -54,20 +60,53 @@ export function AdminServicesPage() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'services'] })
 
+  function createSlaFormFor(level: number): SLARowForm {
+    return createSlaForms[level] ?? emptySLARowForm()
+  }
+
+  function setCreateSlaFormFor(level: number, form: SLARowForm) {
+    setCreateSlaForms((f) => ({ ...f, [level]: form }))
+  }
+
   const createMutation = useMutation({
-    mutationFn: () =>
-      api.services.create({
+    mutationFn: async () => {
+      const svc = await api.services.create({
         id: createForm.id,
         name: createForm.name,
         description: createForm.description || undefined,
         owning_team: createForm.owningTeam || undefined,
         pagerduty_service_id: createForm.pagerdutyServiceId || undefined,
         tags: tagRowsToRecord(createForm.tags),
-      }),
+      })
+      // Invalidate as soon as the service itself exists, before the SLA
+      // upserts below — if one of those fails, the service is still visible
+      // in the list (and createError explains the partial failure) instead
+      // of silently existing but hidden, which would make "Create" look
+      // like it failed outright and invite a confusing duplicate-ID retry.
+      invalidate()
+      // Only severity levels where at least one target was actually filled
+      // in get an UpsertServiceSLA call — an all-blank row means "no SLA at
+      // this severity level," not a zeroed-out row worth persisting.
+      const levelsWithSla = SEVERITY_LEVELS.filter((level) => slaRowFormHasAnyValue(createSlaFormFor(level)))
+      await Promise.all(
+        levelsWithSla.map((level) => {
+          const form = createSlaFormFor(level)
+          return api.config.serviceSLA.upsert(svc.id, level, {
+            severity_level: level,
+            mttd_target_seconds: minutesToSeconds(form.mttd),
+            mttm_target_seconds: minutesToSeconds(form.mttm),
+            mttr_target_seconds: minutesToSeconds(form.mttr),
+            rtpc_target_seconds: minutesToSeconds(form.rtpc),
+          })
+        }),
+      )
+      return svc
+    },
     onSuccess: () => {
       invalidate()
       setCreating(false)
       setCreateForm(toForm())
+      setCreateSlaForms({})
       setCreateError(null)
     },
     onError: (err) => setCreateError(err instanceof ApiError ? err.message : 'Failed to create service'),
@@ -161,6 +200,76 @@ export function AdminServicesPage() {
             <Field label="Tags">
               <TagRowsEditor rows={createForm.tags} onChange={(tags) => setCreateForm((f) => ({ ...f, tags }))} />
             </Field>
+            <div className="flex flex-col gap-1.5">
+              <Label>SLA targets (optional)</Label>
+              <p className="text-xs text-muted-foreground">
+                Target response times per severity level, in minutes. Leave a field blank to skip it — targets can
+                always be added or changed later from this service's "Manage SLAs" action.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="py-2 pr-3">Severity</th>
+                      <ColumnHeader label="MTTD" definition={METRIC_DEFINITIONS.MTTD} />
+                      <ColumnHeader label="MTTM" definition={METRIC_DEFINITIONS.MTTM} />
+                      <ColumnHeader label="MTTR" definition={METRIC_DEFINITIONS.MTTR} />
+                      <ColumnHeader label="RTPC" definition={METRIC_DEFINITIONS.RTPC} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SEVERITY_LEVELS.map((level) => {
+                      const form = createSlaFormFor(level)
+                      return (
+                        <tr key={level} className="border-b border-border last:border-0">
+                          <td className="py-2 pr-3 font-medium">SEV-{level}</td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service MTTD target minutes for SEV-${level}`}
+                              value={form.mttd}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, mttd: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service MTTM target minutes for SEV-${level}`}
+                              value={form.mttm}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, mttm: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service MTTR target minutes for SEV-${level}`}
+                              value={form.mttr}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, mttr: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service RTPC target minutes for SEV-${level}`}
+                              value={form.rtpc}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, rtpc: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             {createError && (
               <p role="alert" className="text-sm text-destructive">
                 {createError}

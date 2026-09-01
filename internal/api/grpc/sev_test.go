@@ -1386,7 +1386,7 @@ func TestListSEVs_SLAStatusPopulated(t *testing.T) {
 
 func int64Ptr(v int64) *int64 { return &v }
 
-func TestTransitionStatus_MTTPCSecondsComputedOnPostmortemComplete(t *testing.T) {
+func TestTransitionStatus_RTPCSecondsComputedOnPostmortemComplete(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
@@ -1395,14 +1395,14 @@ func TestTransitionStatus_MTTPCSecondsComputedOnPostmortemComplete(t *testing.T)
 		t.Fatalf("CreateSEV: %v", err)
 	}
 
-	mitigatedAt := time.Now().Add(-2 * time.Hour)
 	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
-		Id: created.GetId(), ToStatus: string(store.SEVStatusMitigated), MitigatedAt: timestamppb.New(mitigatedAt),
+		Id: created.GetId(), ToStatus: string(store.SEVStatusMitigated),
 	}); err != nil {
 		t.Fatalf("TransitionStatus(Mitigated): %v", err)
 	}
+	resolvedAt := time.Now().Add(-2 * time.Hour)
 	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
-		Id: created.GetId(), ToStatus: string(store.SEVStatusResolved),
+		Id: created.GetId(), ToStatus: string(store.SEVStatusResolved), ResolvedAt: timestamppb.New(resolvedAt),
 	}); err != nil {
 		t.Fatalf("TransitionStatus(Resolved): %v", err)
 	}
@@ -1420,21 +1420,21 @@ func TestTransitionStatus_MTTPCSecondsComputedOnPostmortemComplete(t *testing.T)
 		t.Fatalf("TransitionStatus(PostmortemComplete): %v", err)
 	}
 
-	if resp.GetMttpcSeconds() == 0 {
-		t.Fatal("MttpcSeconds = 0, want computed value (postmortem_completed_at - mitigated_at)")
+	if resp.GetRtpcSeconds() == 0 {
+		t.Fatal("RtpcSeconds = 0, want computed value (postmortem_completed_at - resolved_at)")
 	}
 	// ~2 hours (7200s), allowing slack for test execution time.
-	if resp.GetMttpcSeconds() < 7195 || resp.GetMttpcSeconds() > 7210 {
-		t.Errorf("MttpcSeconds = %d, want ~7200 (2h since mitigated_at)", resp.GetMttpcSeconds())
+	if resp.GetRtpcSeconds() < 7195 || resp.GetRtpcSeconds() > 7210 {
+		t.Errorf("RtpcSeconds = %d, want ~7200 (2h since resolved_at)", resp.GetRtpcSeconds())
 	}
 }
 
-func TestGetSEV_SLAStatus_MTTPCUsesMitigatedAtAsBaseline(t *testing.T) {
+func TestGetSEV_SLAStatus_RTPCUsesResolvedAtAsBaseline(t *testing.T) {
 	ts := newTestSEVServer()
 	ctx := context.Background()
 
 	if err := ts.serviceSLAs.Upsert(ctx, &store.ServiceSLA{
-		ServiceID: "checkout", SeverityLevel: 1, MTTPCTargetSeconds: int64Ptr(86400), // 24h
+		ServiceID: "checkout", SeverityLevel: 1, RTPCTargetSeconds: int64Ptr(86400), // 24h
 	}); err != nil {
 		t.Fatalf("seed SLA: %v", err)
 	}
@@ -1446,21 +1446,26 @@ func TestGetSEV_SLAStatus_MTTPCUsesMitigatedAtAsBaseline(t *testing.T) {
 		t.Fatalf("CreateSEV: %v", err)
 	}
 
-	// Mitigated only 10 minutes ago — well within the 24h MTTPC target, even
-	// though the SEV started 2 days ago. If MTTPC were (incorrectly) measured
-	// from started_at like MTTD/MTTM/MTTR, this would show breached.
-	mitigatedAt := time.Now().Add(-10 * time.Minute)
 	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
-		Id: created.GetId(), ToStatus: string(store.SEVStatusMitigated), MitigatedAt: timestamppb.New(mitigatedAt),
+		Id: created.GetId(), ToStatus: string(store.SEVStatusMitigated),
 	}); err != nil {
 		t.Fatalf("TransitionStatus(Mitigated): %v", err)
+	}
+	// Resolved only 10 minutes ago — well within the 24h RTPC target, even
+	// though the SEV started 2 days ago. If RTPC were (incorrectly) measured
+	// from started_at like MTTD/MTTM/MTTR, this would show breached.
+	resolvedAt := time.Now().Add(-10 * time.Minute)
+	if _, err := ts.server.TransitionStatus(ctx, &pb.TransitionStatusRequest{
+		Id: created.GetId(), ToStatus: string(store.SEVStatusResolved), ResolvedAt: timestamppb.New(resolvedAt),
+	}); err != nil {
+		t.Fatalf("TransitionStatus(Resolved): %v", err)
 	}
 
 	got, err := ts.server.GetSEV(ctx, &pb.GetSEVRequest{Id: created.GetId()})
 	if err != nil {
 		t.Fatalf("GetSEV: %v", err)
 	}
-	if got.GetSlaStatus().GetMttpc() != "ok" {
-		t.Errorf("Mttpc = %q, want ok (10m elapsed since mitigated_at < 24h target)", got.GetSlaStatus().GetMttpc())
+	if got.GetSlaStatus().GetRtpc() != "ok" {
+		t.Errorf("Rtpc = %q, want ok (10m elapsed since resolved_at < 24h target)", got.GetSlaStatus().GetRtpc())
 	}
 }

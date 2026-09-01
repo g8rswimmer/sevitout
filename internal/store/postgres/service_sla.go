@@ -28,12 +28,12 @@ func (s *ServiceSLAStore) Upsert(ctx context.Context, sla *store.ServiceSLA) err
 	q := queries.New(s.pool)
 
 	id, err := q.UpsertServiceSLA(ctx, queries.UpsertServiceSLAParams{
-		ServiceID:          sla.ServiceID,
-		SeverityLevel:      sla.SeverityLevel,
-		MttdTargetSeconds:  sla.MTTDTargetSeconds,
-		MttmTargetSeconds:  sla.MTTMTargetSeconds,
-		MttrTargetSeconds:  sla.MTTRTargetSeconds,
-		MttpcTargetSeconds: sla.MTTPCTargetSeconds,
+		ServiceID:         sla.ServiceID,
+		SeverityLevel:     sla.SeverityLevel,
+		MttdTargetSeconds: sla.MTTDTargetSeconds,
+		MttmTargetSeconds: sla.MTTMTargetSeconds,
+		MttrTargetSeconds: sla.MTTRTargetSeconds,
+		RtpcTargetSeconds: sla.RTPCTargetSeconds,
 	})
 	if err != nil {
 		return fmt.Errorf("postgres service sla: upsert: %w", err)
@@ -106,14 +106,14 @@ func (s *ServiceSLAStore) ListForServices(ctx context.Context, serviceIDs []stri
 
 func mapServiceSLARow(r queries.ServiceSla) *store.ServiceSLA {
 	return &store.ServiceSLA{
-		ID:                 r.ID,
-		ServiceID:          r.ServiceID,
-		SeverityLevel:      r.SeverityLevel,
-		MTTDTargetSeconds:  r.MttdTargetSeconds,
-		MTTMTargetSeconds:  r.MttmTargetSeconds,
-		MTTRTargetSeconds:  r.MttrTargetSeconds,
-		MTTPCTargetSeconds: r.MttpcTargetSeconds,
-		CreatedAt:          r.CreatedAt.Time,
-		UpdatedAt:          r.UpdatedAt.Time,
+		ID:                r.ID,
+		ServiceID:         r.ServiceID,
+		SeverityLevel:     r.SeverityLevel,
+		MTTDTargetSeconds: r.MttdTargetSeconds,
+		MTTMTargetSeconds: r.MttmTargetSeconds,
+		MTTRTargetSeconds: r.MttrTargetSeconds,
+		RTPCTargetSeconds: r.RtpcTargetSeconds,
+		CreatedAt:         r.CreatedAt.Time,
+		UpdatedAt:         r.UpdatedAt.Time,
 	}
 }

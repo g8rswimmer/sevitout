@@ -1184,7 +1184,7 @@
           "type": "string",
           "format": "int64"
         },
-        "mttpcTargetSeconds": {
+        "rtpcTargetSeconds": {
           "type": "string",
           "format": "int64"
         }
@@ -1727,10 +1727,10 @@
           "type": "string",
           "format": "date-time"
         },
-        "mttpcTargetSeconds": {
+        "rtpcTargetSeconds": {
           "type": "string",
           "format": "int64",
-          "description": "mttpc_target_seconds targets Mitigation to Postmortem Complete — see\nSEVResponse.mttpc_seconds."
+          "description": "rtpc_target_seconds targets Resolution to Postmortem Complete — see\nSEVResponse.rtpc_seconds."
         }
       }
     },

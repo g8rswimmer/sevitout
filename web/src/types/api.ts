@@ -237,10 +237,10 @@ export interface SEVResponse {
   mttm_seconds?: string
   mttr_seconds?: string
   dttm_seconds?: string
-  // mttpc_seconds is Mitigation to Postmortem Complete
-  // (postmortem_completed_at − mitigated_at) — the same point-A-to-point-B
+  // rtpc_seconds is Resolution to Postmortem Complete
+  // (postmortem_completed_at − resolved_at) — the same point-A-to-point-B
   // shape as dttm_seconds above, not "from started_at" like the three above it.
-  mttpc_seconds?: string
+  rtpc_seconds?: string
   locked?: boolean
   sensitive?: boolean
   created_at: string
@@ -267,17 +267,17 @@ export interface SLAStatus {
   mttd?: SLAMetricStatus
   mttm?: SLAMetricStatus
   mttr?: SLAMetricStatus
-  // overall is the worst of mttd/mttm/mttr/mttpc — what a summary badge shows.
+  // overall is the worst of mttd/mttm/mttr/rtpc — what a summary badge shows.
   overall?: SLAMetricStatus
   // Resolved target seconds per metric (the most-strict value across the
   // SEV's affected services); absent when not_applicable.
   mttd_target_seconds?: string
   mttm_target_seconds?: string
   mttr_target_seconds?: string
-  // mttpc is measured from mitigated_at, not started_at — see
-  // SEVResponse.mttpc_seconds.
-  mttpc?: SLAMetricStatus
-  mttpc_target_seconds?: string
+  // rtpc is measured from resolved_at, not started_at — see
+  // SEVResponse.rtpc_seconds.
+  rtpc?: SLAMetricStatus
+  rtpc_target_seconds?: string
 }
 
 export interface ListSEVsResponse {
@@ -849,9 +849,9 @@ export interface ServiceSLAResponse {
   mttr_target_seconds?: string
   created_at: string
   updated_at: string
-  // mttpc_target_seconds targets Mitigation to Postmortem Complete — see
-  // SEVResponse.mttpc_seconds.
-  mttpc_target_seconds?: string
+  // rtpc_target_seconds targets Resolution to Postmortem Complete — see
+  // SEVResponse.rtpc_seconds.
+  rtpc_target_seconds?: string
 }
 
 export interface ListServiceSLAsResponse {
@@ -865,7 +865,7 @@ export interface UpsertServiceSLARequest {
   mttd_target_seconds?: number
   mttm_target_seconds?: number
   mttr_target_seconds?: number
-  mttpc_target_seconds?: number
+  rtpc_target_seconds?: number
 }
 
 export interface UserResponse {

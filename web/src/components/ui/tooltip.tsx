@@ -3,16 +3,17 @@ import { cn } from '@/lib/utils'
 
 /** A minimal CSS-only tooltip (no Radix — see components/ui/select.tsx and
  * checkbox.tsx for the same "plain element over a new dependency" choice for
- * a single use case). `title` gives every browser a free native fallback;
- * the visible styled tooltip shows on hover and on keyboard focus
- * (`group-focus-visible`), so it's reachable without a mouse too. */
+ * a single use case). No `title` attribute — that triggers the browser's own
+ * native tooltip *in addition to* the styled one below (a second, unstyled
+ * "box" appearing after the OS hover delay, on top of ours), and screen
+ * readers already get the text via the `sr-only` span, so it added nothing.
+ * The styled tooltip shows on hover and on keyboard focus
+ * (`group-focus-visible`), so it's reachable without a mouse too; cursor is
+ * left at its default rather than the `help` (question-mark) cursor — the
+ * info icon itself is the affordance. */
 export function InfoTooltip({ text, className }: { text: string; className?: string }) {
   return (
-    <span
-      tabIndex={0}
-      title={text}
-      className={cn('group relative inline-flex cursor-help align-middle outline-none', className)}
-    >
+    <span tabIndex={0} className={cn('group relative inline-flex align-middle outline-none', className)}>
       <Info className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
       <span className="sr-only">{text}</span>
       <span

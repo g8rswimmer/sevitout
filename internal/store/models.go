@@ -170,14 +170,15 @@ type SEV struct {
 	MTTMSeconds           *int64
 	MTTRSeconds           *int64
 	DTTMSeconds           *int64
-	// MTTPCSeconds is Mitigation to Postmortem Complete — the same "point A to
+	// RTPCSeconds is Resolution to Postmortem Complete — the same "point A to
 	// point B" shape as DTTMSeconds above (postmortem_completed_at −
-	// mitigated_at), not "from StartedAt" like MTTD/MTTM/MTTR (Phase 12
+	// resolved_at), not "from StartedAt" like MTTD/MTTM/MTTR (Phase 12
 	// follow-up: an SLA target teams want on the postmortem tail, not just
-	// incident response).
-	MTTPCSeconds *int64
-	Locked       bool
-	Sensitive    bool
+	// incident response). Measured from ResolvedAt, not MitigatedAt — the
+	// postmortem clock starts once the incident itself is resolved.
+	RTPCSeconds *int64
+	Locked      bool
+	Sensitive   bool
 	// AIDisabled opts this specific SEV out of all AI plugin dispatch
 	// (proactive and user-triggered), independent of the global per-plugin
 	// enabled/trigger flags. See docs/requirements.md §11.3.
@@ -437,11 +438,11 @@ type ServiceSLA struct {
 	MTTDTargetSeconds *int64
 	MTTMTargetSeconds *int64
 	MTTRTargetSeconds *int64
-	// MTTPCTargetSeconds targets MTTPCSeconds (Mitigation to Postmortem
+	// RTPCTargetSeconds targets RTPCSeconds (Resolution to Postmortem
 	// Complete) on SEV — see that field's doc comment.
-	MTTPCTargetSeconds *int64
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	RTPCTargetSeconds *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // User is a registered user who authenticates with email and password.

@@ -58,12 +58,12 @@ func (s *ConfigServer) UpsertServiceSLA(ctx context.Context, req *pb.UpsertServi
 		SeverityLevel: int16(req.GetSeverityLevel()),
 		// A field left at 0 clears that metric's target — full-replace, like
 		// UpdateRetentionConfigRequest, not a sparse patch.
-		MTTDTargetSeconds:  nonZeroTarget(req.GetMttdTargetSeconds()),
-		MTTMTargetSeconds:  nonZeroTarget(req.GetMttmTargetSeconds()),
-		MTTRTargetSeconds:  nonZeroTarget(req.GetMttrTargetSeconds()),
-		MTTPCTargetSeconds: nonZeroTarget(req.GetMttpcTargetSeconds()),
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		MTTDTargetSeconds: nonZeroTarget(req.GetMttdTargetSeconds()),
+		MTTMTargetSeconds: nonZeroTarget(req.GetMttmTargetSeconds()),
+		MTTRTargetSeconds: nonZeroTarget(req.GetMttrTargetSeconds()),
+		RTPCTargetSeconds: nonZeroTarget(req.GetRtpcTargetSeconds()),
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := s.serviceSLAs.Upsert(ctx, sla); err != nil {
 		return nil, internalError(ctx, "failed to upsert service SLA", err)
@@ -131,8 +131,8 @@ func serviceSLAToProto(sla *store.ServiceSLA) *pb.ServiceSLAResponse {
 	if sla.MTTRTargetSeconds != nil {
 		resp.MttrTargetSeconds = *sla.MTTRTargetSeconds
 	}
-	if sla.MTTPCTargetSeconds != nil {
-		resp.MttpcTargetSeconds = *sla.MTTPCTargetSeconds
+	if sla.RTPCTargetSeconds != nil {
+		resp.RtpcTargetSeconds = *sla.RTPCTargetSeconds
 	}
 	return resp
 }

@@ -331,9 +331,9 @@ message ServiceSLAResponse {
   int64 mttr_target_seconds = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
-  // mttpc_target_seconds targets Mitigation to Postmortem Complete — see
-  // SEVResponse.mttpc_seconds.
-  int64 mttpc_target_seconds = 8;
+  // rtpc_target_seconds targets Resolution to Postmortem Complete — see
+  // SEVResponse.rtpc_seconds.
+  int64 rtpc_target_seconds = 8;
 }
 
 message GetServiceSLARequest {
@@ -349,7 +349,7 @@ message UpsertServiceSLARequest {
   int64 mttd_target_seconds = 3;
   int64 mttm_target_seconds = 4;
   int64 mttr_target_seconds = 5;
-  int64 mttpc_target_seconds = 6;
+  int64 rtpc_target_seconds = 6;
 }
 
 message DeleteServiceSLARequest {

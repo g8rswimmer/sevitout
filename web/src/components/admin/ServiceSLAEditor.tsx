@@ -6,39 +6,25 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { InfoTooltip } from '@/components/ui/tooltip'
 import { METRIC_DEFINITIONS } from '@/lib/metricDefinitions'
+import { emptySLARowForm, minutesToSeconds, SEVERITY_LEVELS, type SLARowForm } from '@/lib/slaTargets'
 import type { ServiceSLAResponse } from '@/types/api'
 
-const SEVERITY_LEVELS = [1, 2, 3, 4]
-
-interface RowForm {
-  mttd: string // minutes, empty string = unset
-  mttm: string
-  mttr: string
-  mttpc: string
-}
-
-function toForm(sla?: ServiceSLAResponse): RowForm {
+function toForm(sla?: ServiceSLAResponse): SLARowForm {
   return {
     mttd: sla?.mttd_target_seconds ? String(Math.round(Number(sla.mttd_target_seconds) / 60)) : '',
     mttm: sla?.mttm_target_seconds ? String(Math.round(Number(sla.mttm_target_seconds) / 60)) : '',
     mttr: sla?.mttr_target_seconds ? String(Math.round(Number(sla.mttr_target_seconds) / 60)) : '',
-    mttpc: sla?.mttpc_target_seconds ? String(Math.round(Number(sla.mttpc_target_seconds) / 60)) : '',
+    rtpc: sla?.rtpc_target_seconds ? String(Math.round(Number(sla.rtpc_target_seconds) / 60)) : '',
   }
-}
-
-/** minutes (a form field's string value) → seconds, or undefined when the
- * field is blank (clears that metric's target — UpsertServiceSLA is a
- * full-replace, like UpdateRetentionConfigRequest, not a sparse patch). */
-function minutesToSeconds(v: string): number | undefined {
-  const n = Number(v)
-  return v.trim() !== '' && n > 0 ? Math.round(n * 60) : undefined
 }
 
 /** One target-minutes column header, an acronym plus an info icon whose
  * hover/focus tooltip gives the plain-English definition — the same
  * METRIC_DEFINITIONS text LifecyclePanel.tsx shows per-SEV, so an admin
- * unfamiliar with "MTTD" isn't left guessing what they're configuring. */
-function ColumnHeader({ label, definition }: { label: string; definition: string }) {
+ * unfamiliar with "MTTD" isn't left guessing what they're configuring.
+ * Exported for reuse by AdminServicesPage.tsx's "New service" form, which
+ * renders the identical header row while collecting initial SLA targets. */
+export function ColumnHeader({ label, definition }: { label: string; definition: string }) {
   return (
     <th className="py-2 pr-3">
       <span className="inline-flex items-center gap-1">
@@ -60,7 +46,7 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
     queryFn: () => api.config.serviceSLA.list(serviceId),
   })
 
-  const [forms, setForms] = useState<Record<number, RowForm>>({})
+  const [forms, setForms] = useState<Record<number, SLARowForm>>({})
   const [errors, setErrors] = useState<Record<number, string>>({})
 
   const byLevel = new Map((slas.data?.slas ?? []).map((s) => [s.severity_level, s]))
@@ -68,13 +54,13 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'serviceSLA', serviceId] })
 
   const upsertMutation = useMutation({
-    mutationFn: ({ level, form }: { level: number; form: RowForm }) =>
+    mutationFn: ({ level, form }: { level: number; form: SLARowForm }) =>
       api.config.serviceSLA.upsert(serviceId, level, {
         severity_level: level,
         mttd_target_seconds: minutesToSeconds(form.mttd),
         mttm_target_seconds: minutesToSeconds(form.mttm),
         mttr_target_seconds: minutesToSeconds(form.mttr),
-        mttpc_target_seconds: minutesToSeconds(form.mttpc),
+        rtpc_target_seconds: minutesToSeconds(form.rtpc),
       }),
     onSuccess: (_data, { level }) => {
       invalidate()
@@ -88,15 +74,15 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
     mutationFn: (level: number) => api.config.serviceSLA.delete(serviceId, level),
     onSuccess: (_data, level) => {
       invalidate()
-      setForms((f) => ({ ...f, [level]: { mttd: '', mttm: '', mttr: '', mttpc: '' } }))
+      setForms((f) => ({ ...f, [level]: emptySLARowForm() }))
     },
   })
 
-  function formFor(level: number): RowForm {
+  function formFor(level: number): SLARowForm {
     return forms[level] ?? toForm(byLevel.get(level))
   }
 
-  function setFormFor(level: number, form: RowForm) {
+  function setFormFor(level: number, form: SLARowForm) {
     setForms((f) => ({ ...f, [level]: form }))
   }
 
@@ -119,7 +105,7 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
               <ColumnHeader label="MTTD" definition={METRIC_DEFINITIONS.MTTD} />
               <ColumnHeader label="MTTM" definition={METRIC_DEFINITIONS.MTTM} />
               <ColumnHeader label="MTTR" definition={METRIC_DEFINITIONS.MTTR} />
-              <ColumnHeader label="MTTPC" definition={METRIC_DEFINITIONS.MTTPC} />
+              <ColumnHeader label="RTPC" definition={METRIC_DEFINITIONS.RTPC} />
               <th className="py-2" />
             </tr>
           </thead>
@@ -164,9 +150,9 @@ export function ServiceSLAEditor({ serviceId }: { serviceId: string }) {
                     <Input
                       type="number"
                       min={0}
-                      aria-label={`MTTPC target minutes for SEV-${level}`}
-                      value={form.mttpc}
-                      onChange={(e) => setFormFor(level, { ...form, mttpc: e.target.value })}
+                      aria-label={`RTPC target minutes for SEV-${level}`}
+                      value={form.rtpc}
+                      onChange={(e) => setFormFor(level, { ...form, rtpc: e.target.value })}
                       className="w-24"
                     />
                   </td>

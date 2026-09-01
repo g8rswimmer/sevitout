@@ -66,6 +66,54 @@ describe('AdminServicesPage', () => {
     expect(JSON.parse(String(call[1]!.body))).toMatchObject({ id: 'payments', name: 'Payments Service' })
   })
 
+  it('creates a new service with an SLA target set at creation time', async () => {
+    let services = [CHECKOUT]
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url === '/v1/config/services' && method === 'GET') return Promise.resolve(jsonResponse({ services }))
+      if (url === '/v1/config/services' && method === 'POST') {
+        const body = JSON.parse(String(init?.body))
+        const created = { ...body, active: true, created_at: 'now', updated_at: 'now' }
+        services = [...services, created]
+        return Promise.resolve(jsonResponse(created))
+      }
+      if (url === '/v1/config/services/payments/sla/1' && method === 'PUT') {
+        return Promise.resolve(
+          jsonResponse({ service_id: 'payments', severity_level: 1, mttd_target_seconds: '300', created_at: 'now', updated_at: 'now' }),
+        )
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+
+    renderWithProviders(<AdminServicesPage />)
+    await screen.findByText('Checkout')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /new service/i }))
+    await user.type(screen.getByLabelText('ID (slug)'), 'payments')
+    await user.type(screen.getByLabelText('Name'), 'Payments Service')
+    await user.type(screen.getByLabelText('New service MTTD target minutes for SEV-1'), '5')
+    // A blank row (SEV-2) must not trigger an UpsertServiceSLA call at all.
+    await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(([url, init]) => String(url) === '/v1/config/services/payments/sla/1' && init?.method === 'PUT')
+      expect(call).toBeDefined()
+    })
+    const slaCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => String(url) === '/v1/config/services/payments/sla/1' && init?.method === 'PUT')!
+    expect(JSON.parse(String(slaCall[1]!.body))).toMatchObject({ severity_level: 1, mttd_target_seconds: 300 })
+
+    const sla2Call = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url) === '/v1/config/services/payments/sla/2')
+    expect(sla2Call).toBeUndefined()
+  })
+
   it('edits a service and saves the updated fields', async () => {
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
@@ -141,7 +189,7 @@ describe('AdminServicesPage', () => {
     expect(JSON.parse(String(call[1]!.body))).toMatchObject({ severity_level: 1, mttd_target_seconds: 300 })
   })
 
-  it('shows metric definitions on hover and saves an MTTPC target', async () => {
+  it('shows metric definitions on hover and saves an RTPC target', async () => {
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
@@ -152,7 +200,7 @@ describe('AdminServicesPage', () => {
           jsonResponse({
             service_id: 'checkout',
             severity_level: 1,
-            mttpc_target_seconds: '86400',
+            rtpc_target_seconds: '86400',
             created_at: 'now',
             updated_at: 'now',
           }),
@@ -167,14 +215,14 @@ describe('AdminServicesPage', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /manage slas for checkout/i }))
 
-    // Every target column header carries an info icon whose title attribute
-    // (a free native tooltip, per InfoTooltip's doc comment) gives the
-    // plain-English metric definition.
-    expect(await screen.findByTitle(/Mean Time to Detect/i)).toBeInTheDocument()
-    expect(screen.getByTitle(/Mitigation to Postmortem Complete/i)).toBeInTheDocument()
+    // Every target column header carries an info icon; the definition text
+    // is present twice per icon (sr-only text + the styled hover/focus
+    // tooltip), even before any hover interaction.
+    expect((await screen.findAllByText(/Mean Time to Detect/i)).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Resolution to Postmortem Complete/i).length).toBeGreaterThan(0)
 
-    const mttpcInput = screen.getByLabelText('MTTPC target minutes for SEV-1')
-    await user.type(mttpcInput, '1440')
+    const rtpcInput = screen.getByLabelText('RTPC target minutes for SEV-1')
+    await user.type(rtpcInput, '1440')
     const saveButtons = screen.getAllByRole('button', { name: /^save$/i })
     await user.click(saveButtons[0])
 
@@ -187,7 +235,7 @@ describe('AdminServicesPage', () => {
     const call = vi
       .mocked(fetch)
       .mock.calls.find(([url, init]) => String(url) === '/v1/config/services/checkout/sla/1' && init?.method === 'PUT')!
-    expect(JSON.parse(String(call[1]!.body))).toMatchObject({ severity_level: 1, mttpc_target_seconds: 86400 })
+    expect(JSON.parse(String(call[1]!.body))).toMatchObject({ severity_level: 1, rtpc_target_seconds: 86400 })
   })
 
   it('deletes a service directly (no confirmation step)', async () => {
