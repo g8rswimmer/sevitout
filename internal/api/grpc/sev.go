@@ -40,6 +40,7 @@ type SEVServer struct {
 	history     store.StatusHistoryStore
 	roles       store.RoleStore
 	services    store.ServiceStore
+	serviceSLAs store.ServiceSLAStore // nil disables live SLA breach status (e.g. in tests that don't need it)
 	postmortems store.PostmortemStore
 	links       store.SEVLinkStore
 	access      store.SEVAccessStore
@@ -59,6 +60,7 @@ type SEVServerParams struct {
 	History     store.StatusHistoryStore
 	Roles       store.RoleStore
 	Services    store.ServiceStore
+	ServiceSLAs store.ServiceSLAStore
 	Postmortems store.PostmortemStore
 	Links       store.SEVLinkStore
 	Access      store.SEVAccessStore
@@ -75,6 +77,7 @@ func NewSEVServer(p SEVServerParams) *SEVServer {
 		history:     p.History,
 		roles:       p.Roles,
 		services:    p.Services,
+		serviceSLAs: p.ServiceSLAs,
 		postmortems: p.Postmortems,
 		links:       p.Links,
 		access:      p.Access,
@@ -318,7 +321,7 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		}
 	}
 
-	resp := sevToProto(record)
+	resp := s.sevToProtoWithSLA(ctx, record)
 	if !record.Sensitive {
 		// Published after on-call auto-population above so a subscriber
 		// reacting to sev.created (the Slack bot's auto incident-channel
@@ -360,7 +363,7 @@ func (s *SEVServer) GetSEV(ctx context.Context, req *pb.GetSEVRequest) (*pb.SEVR
 	if !visible {
 		return nil, status.Error(codes.NotFound, "SEV not found")
 	}
-	return sevToProto(record), nil
+	return s.sevToProtoWithSLA(ctx, record), nil
 }
 
 // applySEVUpdate copies every field req sets onto record — an unset/empty
@@ -541,7 +544,7 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 		CreatedAt: record.UpdatedAt,
 	})
 
-	resp := sevToProto(record)
+	resp := s.sevToProtoWithSLA(ctx, record)
 	if !record.Sensitive {
 		publishProto(s.publisher, record.ID, "sev.updated", resp)
 	}
@@ -600,7 +603,7 @@ func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.
 		}
 		resp := &pb.ListSEVsResponse{Total: int32(total)}
 		for _, r := range records {
-			resp.Sevs = append(resp.Sevs, sevToProto(r))
+			resp.Sevs = append(resp.Sevs, s.sevToProtoWithSLA(ctx, r))
 		}
 		return resp, nil
 	}
@@ -625,7 +628,7 @@ func (s *SEVServer) ListSEVs(ctx context.Context, req *pb.ListSEVsRequest) (*pb.
 
 	resp := &pb.ListSEVsResponse{Total: int32(total)}
 	for _, r := range visible {
-		resp.Sevs = append(resp.Sevs, sevToProto(r))
+		resp.Sevs = append(resp.Sevs, s.sevToProtoWithSLA(ctx, r))
 	}
 	return resp, nil
 }
@@ -781,7 +784,7 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 		CreatedAt: now,
 	})
 
-	resp := sevToProto(record)
+	resp := s.sevToProtoWithSLA(ctx, record)
 	if !record.Sensitive {
 		publishProto(s.publisher, record.ID, "sev.status_changed", resp)
 	}
@@ -813,6 +816,53 @@ func validateUnlock(u Unlocker, token, sevID string) error {
 		return status.Error(codes.PermissionDenied, "invalid unlock token")
 	}
 	return nil
+}
+
+// sevToProtoWithSLA builds record's SEVResponse and attaches its live SLA
+// breach status (docs/roadmap.md Phase 12): the most-strict target across
+// record's AffectedServices at its severity level, evaluated against now.
+// A lookup failure is logged and treated as "no SLA configured" rather than
+// failing the response — the badge is a UI nicety, not something that
+// should turn an otherwise-successful SEV read into an error. sevToProto
+// itself stays free of I/O; this is the one place that combines it with the
+// store lookup.
+func (s *SEVServer) sevToProtoWithSLA(ctx context.Context, record *store.SEV) *pb.SEVResponse {
+	resp := sevToProto(record)
+	if s.serviceSLAs == nil || len(record.AffectedServices) == 0 {
+		return resp
+	}
+	rows, err := s.serviceSLAs.ListForServices(ctx, record.AffectedServices, record.SeverityLevel)
+	if err != nil {
+		slog.ErrorContext(ctx, "SLA lookup failed", "sev_id", record.ID, "err", err)
+		return resp
+	}
+	targets := sev.MostStrictSLA(rows)
+	eval := sev.EvaluateSLA(record, targets, time.Now())
+	resp.SlaStatus = slaEvaluationToProto(eval, targets)
+	return resp
+}
+
+func slaEvaluationToProto(eval sev.SLAEvaluation, targets sev.SLATargets) *pb.SLAStatus {
+	status := &pb.SLAStatus{
+		Mttd:    string(eval.MTTD),
+		Mttm:    string(eval.MTTM),
+		Mttr:    string(eval.MTTR),
+		Rtpc:    string(eval.RTPC),
+		Overall: string(eval.Overall),
+	}
+	if targets.MTTDTargetSeconds != nil {
+		status.MttdTargetSeconds = *targets.MTTDTargetSeconds
+	}
+	if targets.MTTMTargetSeconds != nil {
+		status.MttmTargetSeconds = *targets.MTTMTargetSeconds
+	}
+	if targets.MTTRTargetSeconds != nil {
+		status.MttrTargetSeconds = *targets.MTTRTargetSeconds
+	}
+	if targets.RTPCTargetSeconds != nil {
+		status.RtpcTargetSeconds = *targets.RTPCTargetSeconds
+	}
+	return status
 }
 
 func sevToProto(s *store.SEV) *pb.SEVResponse {
@@ -906,6 +956,9 @@ func sevToProto(s *store.SEV) *pb.SEVResponse {
 	}
 	if s.DTTMSeconds != nil {
 		resp.DttmSeconds = *s.DTTMSeconds
+	}
+	if s.RTPCSeconds != nil {
+		resp.RtpcSeconds = *s.RTPCSeconds
 	}
 	if s.SlackChannelID != nil {
 		resp.SlackChannelId = *s.SlackChannelID

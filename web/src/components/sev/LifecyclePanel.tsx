@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
@@ -6,17 +6,10 @@ import { Button } from '@/components/ui/button'
 import { InfoTooltip } from '@/components/ui/tooltip'
 import { Section } from '@/components/sev/Section'
 import { DateTimeField } from '@/components/sev/DateTimeField'
+import { SLABadge } from '@/components/sev/badges'
 import { formatDateTime, formatDurationSeconds, toDateTimeLocalValue } from '@/lib/format'
+import { METRIC_DEFINITIONS } from '@/lib/metricDefinitions'
 import { SEV_LIFECYCLE_STAGES, SEV_STATUS_LABELS, type SEVResponse } from '@/types/api'
-
-/** Definitions shown in each metric's info tooltip — docs/requirements.md
- * §2.2 spells out the formula; this is the plain-English acronym expansion. */
-const METRIC_DEFINITIONS = {
-  MTTD: 'Mean Time to Detect — detected_at − started_at',
-  MTTM: 'Mean Time to Mitigate — mitigated_at − started_at',
-  MTTR: 'Mean Time to Resolve — resolved_at − started_at',
-  DTTM: 'Detection to Mitigation — mitigated_at − detected_at',
-} as const
 
 export function LifecyclePanel({ sev, canEdit }: { sev: SEVResponse; canEdit: boolean }) {
   const queryClient = useQueryClient()
@@ -105,10 +98,19 @@ export function LifecyclePanel({ sev, canEdit }: { sev: SEVResponse; canEdit: bo
       )}
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3 text-sm sm:grid-cols-4">
-        <MetricField label="MTTD" definition={METRIC_DEFINITIONS.MTTD} value={sev.mttd_seconds} />
-        <MetricField label="MTTM" definition={METRIC_DEFINITIONS.MTTM} value={sev.mttm_seconds} />
-        <MetricField label="MTTR" definition={METRIC_DEFINITIONS.MTTR} value={sev.mttr_seconds} />
+        <MetricField label="MTTD" definition={METRIC_DEFINITIONS.MTTD} value={sev.mttd_seconds}>
+          <SLABadge status={sev.sla_status?.mttd} label="MTTD" />
+        </MetricField>
+        <MetricField label="MTTM" definition={METRIC_DEFINITIONS.MTTM} value={sev.mttm_seconds}>
+          <SLABadge status={sev.sla_status?.mttm} label="MTTM" />
+        </MetricField>
+        <MetricField label="MTTR" definition={METRIC_DEFINITIONS.MTTR} value={sev.mttr_seconds}>
+          <SLABadge status={sev.sla_status?.mttr} label="MTTR" />
+        </MetricField>
         <MetricField label="DTTM" definition={METRIC_DEFINITIONS.DTTM} value={sev.dttm_seconds} />
+        <MetricField label="RTPC" definition={METRIC_DEFINITIONS.RTPC} value={sev.rtpc_seconds}>
+          <SLABadge status={sev.sla_status?.rtpc} label="RTPC" />
+        </MetricField>
       </div>
     </Section>
   )
@@ -123,14 +125,27 @@ function TimestampField({ label, value }: { label: string; value?: string }) {
   )
 }
 
-function MetricField({ label, definition, value }: { label: string; definition: string; value?: string }) {
+function MetricField({
+  label,
+  definition,
+  value,
+  children,
+}: {
+  label: string
+  definition: string
+  value?: string
+  children?: ReactNode
+}) {
   return (
     <div>
       <dt className="flex items-center gap-1 text-xs text-muted-foreground">
         {label}
         <InfoTooltip text={definition} />
       </dt>
-      <dd className="font-medium">{formatDurationSeconds(value)}</dd>
+      <dd className="flex flex-wrap items-center gap-1.5 font-medium">
+        {formatDurationSeconds(value)}
+        {children}
+      </dd>
     </div>
   )
 }

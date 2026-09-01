@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Gauge, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,9 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
 import { recordToTagRows, tagRowsToRecord, TagRowsEditor, type TagRow } from '@/components/sev/TagRowsEditor'
+import { ColumnHeader, ServiceSLAEditor } from '@/components/admin/ServiceSLAEditor'
+import { emptySLARowForm, hoursToSeconds, SEVERITY_LEVELS, slaRowFormHasAnyValue, type SLARowForm } from '@/lib/slaTargets'
+import { METRIC_DEFINITIONS } from '@/lib/metricDefinitions'
 import type { ServiceResponse } from '@/types/api'
 
 interface ServiceForm {
@@ -41,27 +44,69 @@ export function AdminServicesPage() {
   const [creating, setCreating] = useState(false)
   const [createForm, setCreateForm] = useState<ServiceForm>(() => toForm())
   const [createError, setCreateError] = useState<string | null>(null)
+  // Optional SLA targets set alongside creation, so an admin doesn't need a
+  // separate "Manage SLAs" step right after adding a service. Same
+  // per-severity-level shape ServiceSLAEditor.tsx edits after the fact.
+  const [createSlaForms, setCreateSlaForms] = useState<Record<number, SLARowForm>>({})
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<ServiceForm>(() => toForm())
   const [editError, setEditError] = useState<string | null>(null)
 
+  // Roadmap Phase 12: at most one service's SLA editor is expanded at a
+  // time, independent of editingId (name/description edit and SLA editing
+  // are separate concerns, not mutually exclusive).
+  const [slaServiceId, setSlaServiceId] = useState<string | null>(null)
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'services'] })
 
+  function createSlaFormFor(level: number): SLARowForm {
+    return createSlaForms[level] ?? emptySLARowForm()
+  }
+
+  function setCreateSlaFormFor(level: number, form: SLARowForm) {
+    setCreateSlaForms((f) => ({ ...f, [level]: form }))
+  }
+
   const createMutation = useMutation({
-    mutationFn: () =>
-      api.services.create({
+    mutationFn: async () => {
+      const svc = await api.services.create({
         id: createForm.id,
         name: createForm.name,
         description: createForm.description || undefined,
         owning_team: createForm.owningTeam || undefined,
         pagerduty_service_id: createForm.pagerdutyServiceId || undefined,
         tags: tagRowsToRecord(createForm.tags),
-      }),
+      })
+      // Invalidate as soon as the service itself exists, before the SLA
+      // upserts below — if one of those fails, the service is still visible
+      // in the list (and createError explains the partial failure) instead
+      // of silently existing but hidden, which would make "Create" look
+      // like it failed outright and invite a confusing duplicate-ID retry.
+      invalidate()
+      // Only severity levels where at least one target was actually filled
+      // in get an UpsertServiceSLA call — an all-blank row means "no SLA at
+      // this severity level," not a zeroed-out row worth persisting.
+      const levelsWithSla = SEVERITY_LEVELS.filter((level) => slaRowFormHasAnyValue(createSlaFormFor(level)))
+      await Promise.all(
+        levelsWithSla.map((level) => {
+          const form = createSlaFormFor(level)
+          return api.config.serviceSLA.upsert(svc.id, level, {
+            severity_level: level,
+            mttd_target_seconds: hoursToSeconds(form.mttd),
+            mttm_target_seconds: hoursToSeconds(form.mttm),
+            mttr_target_seconds: hoursToSeconds(form.mttr),
+            rtpc_target_seconds: hoursToSeconds(form.rtpc),
+          })
+        }),
+      )
+      return svc
+    },
     onSuccess: () => {
       invalidate()
       setCreating(false)
       setCreateForm(toForm())
+      setCreateSlaForms({})
       setCreateError(null)
     },
     onError: (err) => setCreateError(err instanceof ApiError ? err.message : 'Failed to create service'),
@@ -155,6 +200,76 @@ export function AdminServicesPage() {
             <Field label="Tags">
               <TagRowsEditor rows={createForm.tags} onChange={(tags) => setCreateForm((f) => ({ ...f, tags }))} />
             </Field>
+            <div className="flex flex-col gap-1.5">
+              <Label>SLA targets (optional)</Label>
+              <p className="text-xs text-muted-foreground">
+                Target response times per severity level, in whole hours. Leave a field blank to skip it — targets can
+                always be added or changed later from this service's "Manage SLAs" action.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="py-2 pr-3">Severity</th>
+                      <ColumnHeader label="MTTD" definition={METRIC_DEFINITIONS.MTTD} />
+                      <ColumnHeader label="MTTM" definition={METRIC_DEFINITIONS.MTTM} />
+                      <ColumnHeader label="MTTR" definition={METRIC_DEFINITIONS.MTTR} />
+                      <ColumnHeader label="RTPC" definition={METRIC_DEFINITIONS.RTPC} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SEVERITY_LEVELS.map((level) => {
+                      const form = createSlaFormFor(level)
+                      return (
+                        <tr key={level} className="border-b border-border last:border-0">
+                          <td className="py-2 pr-3 font-medium">SEV-{level}</td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service MTTD target hours for SEV-${level}`}
+                              value={form.mttd}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, mttd: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service MTTM target hours for SEV-${level}`}
+                              value={form.mttm}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, mttm: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service MTTR target hours for SEV-${level}`}
+                              value={form.mttr}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, mttr: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="number"
+                              min={0}
+                              aria-label={`New service RTPC target hours for SEV-${level}`}
+                              value={form.rtpc}
+                              onChange={(e) => setCreateSlaFormFor(level, { ...form, rtpc: e.target.value })}
+                              className="w-24"
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             {createError && (
               <p role="alert" className="text-sm text-destructive">
                 {createError}
@@ -194,9 +309,10 @@ export function AdminServicesPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.map((svc) =>
-                  editingId === svc.id ? (
-                    <tr key={svc.id} className="border-b border-border align-top">
+                {list.map((svc) => (
+                  <Fragment key={svc.id}>
+                  {editingId === svc.id ? (
+                    <tr className="border-b border-border align-top">
                       <td colSpan={7} className="py-3">
                         <div className="flex flex-col gap-3">
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -260,7 +376,7 @@ export function AdminServicesPage() {
                       </td>
                     </tr>
                   ) : (
-                    <tr key={svc.id} className="border-b border-border">
+                    <tr className="border-b border-border">
                       <td className="py-2 pr-3 font-mono text-xs">{svc.id}</td>
                       <td className="py-2 pr-3">{svc.name}</td>
                       <td className="py-2 pr-3 text-muted-foreground">{svc.owning_team || '—'}</td>
@@ -281,6 +397,14 @@ export function AdminServicesPage() {
                       </td>
                       <td className="py-2 text-right">
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Manage SLAs for ${svc.name}`}
+                            onClick={() => setSlaServiceId(slaServiceId === svc.id ? null : svc.id)}
+                          >
+                            <Gauge className="h-3.5 w-3.5" />
+                          </Button>
                           <Button variant="ghost" size="icon" aria-label={`Edit ${svc.name}`} onClick={() => startEdit(svc)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
@@ -295,8 +419,16 @@ export function AdminServicesPage() {
                         </div>
                       </td>
                     </tr>
-                  ),
-                )}
+                  )}
+                  {slaServiceId === svc.id && (
+                    <tr className="border-b border-border">
+                      <td colSpan={7} className="py-3">
+                        <ServiceSLAEditor serviceId={svc.id} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>

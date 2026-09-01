@@ -7,7 +7,7 @@ import { useAuth } from '@/auth/useAuth'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
-import { SeverityBadge, StatusBadge } from '@/components/sev/badges'
+import { SeverityBadge, SLABadge, StatusBadge } from '@/components/sev/badges'
 import { StatusTransitionControl } from '@/components/sev/StatusTransitionControl'
 import { LifecyclePanel } from '@/components/sev/LifecyclePanel'
 import { DetailsPanel } from '@/components/sev/DetailsPanel'
@@ -66,6 +66,7 @@ export function SevDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           <SeverityBadge level={record.severity_level} />
           <StatusBadge status={record.status} />
+          <SLABadge status={record.sla_status?.overall} />
           {record.sensitive && (
             <Badge variant="destructive" className="gap-1">
               <EyeOff className="h-3 w-3" /> Sensitive

@@ -170,8 +170,15 @@ type SEV struct {
 	MTTMSeconds           *int64
 	MTTRSeconds           *int64
 	DTTMSeconds           *int64
-	Locked                bool
-	Sensitive             bool
+	// RTPCSeconds is Resolution to Postmortem Complete — the same "point A to
+	// point B" shape as DTTMSeconds above (postmortem_completed_at −
+	// resolved_at), not "from StartedAt" like MTTD/MTTM/MTTR (Phase 12
+	// follow-up: an SLA target teams want on the postmortem tail, not just
+	// incident response). Measured from ResolvedAt, not MitigatedAt — the
+	// postmortem clock starts once the incident itself is resolved.
+	RTPCSeconds *int64
+	Locked      bool
+	Sensitive   bool
 	// AIDisabled opts this specific SEV out of all AI plugin dispatch
 	// (proactive and user-triggered), independent of the global per-plugin
 	// enabled/trigger flags. See docs/requirements.md §11.3.
@@ -417,6 +424,25 @@ type Service struct {
 	Active             bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+// ServiceSLA defines the target response times for one service at one
+// severity level (1-4) — docs/roadmap.md Phase 12. A nil target field means
+// that metric has no SLA configured for this service/severity; EvaluateSLA
+// (internal/sev/sla.go) treats it as not applicable rather than an instant
+// breach.
+type ServiceSLA struct {
+	ID                int64
+	ServiceID         string
+	SeverityLevel     int16
+	MTTDTargetSeconds *int64
+	MTTMTargetSeconds *int64
+	MTTRTargetSeconds *int64
+	// RTPCTargetSeconds targets RTPCSeconds (Resolution to Postmortem
+	// Complete) on SEV — see that field's doc comment.
+	RTPCTargetSeconds *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // User is a registered user who authenticates with email and password.

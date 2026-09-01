@@ -104,6 +104,42 @@ message SEVResponse {
   // Not sensitive (raw IDs are already exposed elsewhere), so it's on the
   // main response rather than gated.
   string slack_channel_id = 39;
+  // sla_status is this SEV's live SLA breach status (docs/roadmap.md
+  // Phase 12), derived on every read against the most-strict SLA target
+  // across its affected_services at severity_level — never trusted from
+  // storage, the same discipline TaskResponse.overdue already applies to
+  // task due dates. Absent (zero value) when no attached service has any
+  // SLA target configured at this SEV's severity level.
+  SLAStatus sla_status = 40;
+  // rtpc_seconds is Resolution to Postmortem Complete
+  // (postmortem_completed_at − resolved_at) — the same point-A-to-point-B
+  // shape as dttm_seconds above, not "from started_at" like
+  // mttd/mttm/mttr_seconds. Added as a Phase 12 follow-up SLA target for the
+  // postmortem tail.
+  int64 rtpc_seconds = 41;
+}
+
+// SLAStatus is the live per-metric SLA breach status for one SEV, resolved
+// from the most-strict target across its affected services (see
+// ConfigService's ServiceSLA RPCs below for how targets are set).
+message SLAStatus {
+  // Each status string is one of "ok", "at_risk", "breached",
+  // "not_applicable" (internal/sev.SLAMetricStatus).
+  string mttd = 1;
+  string mttm = 2;
+  string mttr = 3;
+  // overall is the worst of mttd/mttm/mttr/rtpc — what a summary badge
+  // should show.
+  string overall = 4;
+  // The resolved target seconds per metric, 0 when not_applicable — so a UI
+  // can show "target: 5m" alongside the status without a second lookup.
+  int64 mttd_target_seconds = 5;
+  int64 mttm_target_seconds = 6;
+  int64 mttr_target_seconds = 7;
+  // rtpc is Resolution to Postmortem Complete — measured from resolved_at,
+  // not started_at like mttd/mttm/mttr above (see SEVResponse.rtpc_seconds).
+  string rtpc = 8;
+  int64 rtpc_target_seconds = 9;
 }
 
 message CreateSEVRequest {

@@ -723,6 +723,154 @@
         ]
       }
     },
+    "/v1/config/services/{serviceId}/sla": {
+      "get": {
+        "summary": "ListServiceSLAs returns every configured severity row (0-4) for one\nservice — what the admin editor renders as its 4-row table.",
+        "operationId": "ConfigService_ListServiceSLAs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListServiceSLAsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{serviceId}/sla/{severityLevel}": {
+      "get": {
+        "summary": "--- Per-service, per-severity-level SLA targets (docs/roadmap.md\nPhase 12) --- readable by any authenticated user (Viewer+), same floor\nas GetService/ListServices — the resolved numbers are already exposed to\nany Viewer via SEVResponse.sla_status, so gating the raw config any\ntighter would protect nothing. Mutations (Upsert/Delete) are Admin-only,\nmatching UpdateService/DeleteService.",
+        "operationId": "ConfigService_GetServiceSLA",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceSLAResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "operationId": "ConfigService_DeleteServiceSLA",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "put": {
+        "operationId": "ConfigService_UpsertServiceSLA",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceSLAResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpsertServiceSLABody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
     "/v1/config/users": {
       "get": {
         "summary": "ListUsers is Admin-only; the directory includes email addresses.",
@@ -1017,6 +1165,28 @@
           "additionalProperties": {
             "type": "string"
           }
+        }
+      }
+    },
+    "ConfigServiceUpsertServiceSLABody": {
+      "type": "object",
+      "properties": {
+        "mttdTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "A field left at 0 clears that metric's target (full-replace, like\nUpdateRetentionConfigRequest — not a sparse patch)."
+        },
+        "mttmTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttrTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "rtpcTargetSeconds": {
+          "type": "string",
+          "format": "int64"
         }
       }
     },
@@ -1387,6 +1557,18 @@
         }
       }
     },
+    "v1ListServiceSLAsResponse": {
+      "type": "object",
+      "properties": {
+        "slas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ServiceSLAResponse"
+          }
+        }
+      }
+    },
     "v1ListServicesResponse": {
       "type": "object",
       "properties": {
@@ -1511,6 +1693,44 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "v1ServiceSLAResponse": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "mttdTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "Target seconds per metric; 0 means unset (no SLA for that metric at this\nseverity level)."
+        },
+        "mttmTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttrTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rtpcTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "rtpc_target_seconds targets Resolution to Postmortem Complete — see\nSEVResponse.rtpc_seconds."
         }
       }
     },

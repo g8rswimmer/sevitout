@@ -237,6 +237,10 @@ export interface SEVResponse {
   mttm_seconds?: string
   mttr_seconds?: string
   dttm_seconds?: string
+  // rtpc_seconds is Resolution to Postmortem Complete
+  // (postmortem_completed_at − resolved_at) — the same point-A-to-point-B
+  // shape as dttm_seconds above, not "from started_at" like the three above it.
+  rtpc_seconds?: string
   locked?: boolean
   sensitive?: boolean
   created_at: string
@@ -247,6 +251,33 @@ export interface SEVResponse {
   // this SEV (Roadmap Phase 10e) — absent for SEVs created before this
   // shipped. Gates RolesPanel's per-role "Add to chat" button.
   slack_channel_id?: string
+  // sla_status is this SEV's live SLA breach status (Roadmap Phase 12),
+  // derived server-side on every read — never computed here. Absent when no
+  // attached service has any SLA target configured at this SEV's severity
+  // level.
+  sla_status?: SLAStatus
+}
+
+/** internal/sev.SLAMetricStatus's four values, per metric. "not_applicable"
+ * means no target is configured (or no baseline timestamp yet) — render
+ * nothing for it, the same as "ok". */
+export type SLAMetricStatus = 'ok' | 'at_risk' | 'breached' | 'not_applicable'
+
+export interface SLAStatus {
+  mttd?: SLAMetricStatus
+  mttm?: SLAMetricStatus
+  mttr?: SLAMetricStatus
+  // overall is the worst of mttd/mttm/mttr/rtpc — what a summary badge shows.
+  overall?: SLAMetricStatus
+  // Resolved target seconds per metric (the most-strict value across the
+  // SEV's affected services); absent when not_applicable.
+  mttd_target_seconds?: string
+  mttm_target_seconds?: string
+  mttr_target_seconds?: string
+  // rtpc is measured from resolved_at, not started_at — see
+  // SEVResponse.rtpc_seconds.
+  rtpc?: SLAMetricStatus
+  rtpc_target_seconds?: string
 }
 
 export interface ListSEVsResponse {
@@ -805,6 +836,36 @@ export interface UpdateServiceRequest {
   pagerduty_service_id?: string
   tags?: Record<string, string>
   active?: boolean
+}
+
+/** One severity level's SLA targets for one service (Roadmap Phase 12).
+ * Target fields are absent/0 when unset — protojson omits a proto3 int64
+ * zero value, per this file's header comment. */
+export interface ServiceSLAResponse {
+  service_id: string
+  severity_level: number
+  mttd_target_seconds?: string
+  mttm_target_seconds?: string
+  mttr_target_seconds?: string
+  created_at: string
+  updated_at: string
+  // rtpc_target_seconds targets Resolution to Postmortem Complete — see
+  // SEVResponse.rtpc_seconds.
+  rtpc_target_seconds?: string
+}
+
+export interface ListServiceSLAsResponse {
+  slas?: ServiceSLAResponse[]
+}
+
+/** Full-replace, like UpdateRetentionConfigRequest — omitting a field
+ * clears that metric's target rather than leaving it untouched. */
+export interface UpsertServiceSLARequest {
+  severity_level: number
+  mttd_target_seconds?: number
+  mttm_target_seconds?: number
+  mttr_target_seconds?: number
+  rtpc_target_seconds?: number
 }
 
 export interface UserResponse {

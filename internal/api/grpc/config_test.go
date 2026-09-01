@@ -24,6 +24,7 @@ import (
 type testConfigServer struct {
 	server       *grpchandler.ConfigServer
 	services     *memory.ServiceStore
+	serviceSLAs  *memory.ServiceSLAStore
 	users        *memory.UserStore
 	oncall       *memory.OnCallStore
 	integrations *memory.IntegrationConfigStore
@@ -33,6 +34,7 @@ type testConfigServer struct {
 
 func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	services := memory.NewServiceStore()
+	serviceSLAs := memory.NewServiceSLAStore()
 	users := memory.NewUserStore()
 	oncall := memory.NewOnCallStore()
 	integrations := memory.NewIntegrationConfigStore()
@@ -40,10 +42,11 @@ func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	aiPlugins := memory.NewAIPluginStore()
 	return &testConfigServer{
 		server: grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
-			Services: services, Users: users, OnCall: oncall, Integrations: integrations,
+			Services: services, ServiceSLAs: serviceSLAs, Users: users, OnCall: oncall, Integrations: integrations,
 			Retention: retention, AIPlugins: aiPlugins, Crypto: enc,
 		}),
 		services:     services,
+		serviceSLAs:  serviceSLAs,
 		users:        users,
 		oncall:       oncall,
 		integrations: integrations,
@@ -1190,5 +1193,159 @@ func TestListRetentionConfig(t *testing.T) {
 	}
 	if len(resp.GetConfigs()) != 4 {
 		t.Errorf("want 4 severity levels, got %d", len(resp.GetConfigs()))
+	}
+}
+
+// ── Per-service SLA targets (docs/roadmap.md Phase 12) ──────────────────────
+
+func TestUpsertServiceSLA_Valid(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+
+	resp, err := ts.server.UpsertServiceSLA(ctx, &pb.UpsertServiceSLARequest{
+		ServiceId: "checkout", SeverityLevel: 1, MttdTargetSeconds: 300, MttrTargetSeconds: 3600, RtpcTargetSeconds: 86400,
+	})
+	if err != nil {
+		t.Fatalf("UpsertServiceSLA: %v", err)
+	}
+	if resp.GetMttdTargetSeconds() != 300 || resp.GetMttrTargetSeconds() != 3600 {
+		t.Errorf("got %+v, want mttd=300 mttr=3600", resp)
+	}
+	if resp.GetMttmTargetSeconds() != 0 {
+		t.Errorf("MttmTargetSeconds = %d, want 0 (never set)", resp.GetMttmTargetSeconds())
+	}
+	if resp.GetRtpcTargetSeconds() != 86400 {
+		t.Errorf("RtpcTargetSeconds = %d, want 86400", resp.GetRtpcTargetSeconds())
+	}
+
+	got, err := ts.server.GetServiceSLA(ctx, &pb.GetServiceSLARequest{ServiceId: "checkout", SeverityLevel: 1})
+	if err != nil {
+		t.Fatalf("GetServiceSLA: %v", err)
+	}
+	if got.GetMttdTargetSeconds() != 300 {
+		t.Errorf("persisted MttdTargetSeconds = %d, want 300", got.GetMttdTargetSeconds())
+	}
+	if got.GetRtpcTargetSeconds() != 86400 {
+		t.Errorf("persisted RtpcTargetSeconds = %d, want 86400", got.GetRtpcTargetSeconds())
+	}
+}
+
+func TestUpsertServiceSLA_UnknownService(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	_, err := ts.server.UpsertServiceSLA(context.Background(), &pb.UpsertServiceSLARequest{
+		ServiceId: "does-not-exist", SeverityLevel: 1, MttdTargetSeconds: 300,
+	})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+func TestUpsertServiceSLA_InvalidSeverityLevel(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	mustCreateService(t, ts, "checkout", "Checkout")
+	_, err := ts.server.UpsertServiceSLA(context.Background(), &pb.UpsertServiceSLARequest{
+		ServiceId: "checkout", SeverityLevel: 9, MttdTargetSeconds: 300,
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestUpsertServiceSLA_ZeroFieldClearsTarget(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+
+	if _, err := ts.server.UpsertServiceSLA(ctx, &pb.UpsertServiceSLARequest{
+		ServiceId: "checkout", SeverityLevel: 1, MttdTargetSeconds: 300,
+	}); err != nil {
+		t.Fatalf("UpsertServiceSLA: %v", err)
+	}
+	// Full-replace, like UpdateRetentionConfigRequest: omitting the field on
+	// the second call clears it rather than preserving the prior value.
+	resp, err := ts.server.UpsertServiceSLA(ctx, &pb.UpsertServiceSLARequest{
+		ServiceId: "checkout", SeverityLevel: 1, MttrTargetSeconds: 1800,
+	})
+	if err != nil {
+		t.Fatalf("UpsertServiceSLA: %v", err)
+	}
+	if resp.GetMttdTargetSeconds() != 0 {
+		t.Errorf("MttdTargetSeconds = %d, want 0 (cleared by the full-replace)", resp.GetMttdTargetSeconds())
+	}
+	if resp.GetMttrTargetSeconds() != 1800 {
+		t.Errorf("MttrTargetSeconds = %d, want 1800", resp.GetMttrTargetSeconds())
+	}
+}
+
+func TestGetServiceSLA_NotFound(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	mustCreateService(t, ts, "checkout", "Checkout")
+	_, err := ts.server.GetServiceSLA(context.Background(), &pb.GetServiceSLARequest{ServiceId: "checkout", SeverityLevel: 2})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+func TestDeleteServiceSLA_Valid(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+	if _, err := ts.server.UpsertServiceSLA(ctx, &pb.UpsertServiceSLARequest{
+		ServiceId: "checkout", SeverityLevel: 1, MttdTargetSeconds: 300,
+	}); err != nil {
+		t.Fatalf("UpsertServiceSLA: %v", err)
+	}
+
+	if _, err := ts.server.DeleteServiceSLA(ctx, &pb.DeleteServiceSLARequest{ServiceId: "checkout", SeverityLevel: 1}); err != nil {
+		t.Fatalf("DeleteServiceSLA: %v", err)
+	}
+	if _, err := ts.server.GetServiceSLA(ctx, &pb.GetServiceSLARequest{ServiceId: "checkout", SeverityLevel: 1}); grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound after delete, got %v", grpcCode(err))
+	}
+}
+
+func TestDeleteServiceSLA_NotFound(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	mustCreateService(t, ts, "checkout", "Checkout")
+	_, err := ts.server.DeleteServiceSLA(context.Background(), &pb.DeleteServiceSLARequest{ServiceId: "checkout", SeverityLevel: 1})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+func TestListServiceSLAs_ReturnsOnlyConfiguredSeverityLevels(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+	if _, err := ts.server.UpsertServiceSLA(ctx, &pb.UpsertServiceSLARequest{
+		ServiceId: "checkout", SeverityLevel: 1, MttdTargetSeconds: 300,
+	}); err != nil {
+		t.Fatalf("UpsertServiceSLA: %v", err)
+	}
+	if _, err := ts.server.UpsertServiceSLA(ctx, &pb.UpsertServiceSLARequest{
+		ServiceId: "checkout", SeverityLevel: 3, MttdTargetSeconds: 900,
+	}); err != nil {
+		t.Fatalf("UpsertServiceSLA: %v", err)
+	}
+
+	resp, err := ts.server.ListServiceSLAs(ctx, &pb.ListServiceSLAsRequest{ServiceId: "checkout"})
+	if err != nil {
+		t.Fatalf("ListServiceSLAs: %v", err)
+	}
+	if len(resp.GetSlas()) != 2 {
+		t.Fatalf("want 2 configured severity levels, got %d", len(resp.GetSlas()))
+	}
+	if resp.GetSlas()[0].GetSeverityLevel() != 1 || resp.GetSlas()[1].GetSeverityLevel() != 3 {
+		t.Errorf("want ascending severity order [1, 3], got [%d, %d]",
+			resp.GetSlas()[0].GetSeverityLevel(), resp.GetSlas()[1].GetSeverityLevel())
+	}
+}
+
+func TestListServiceSLAs_MissingServiceID(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	_, err := ts.server.ListServiceSLAs(context.Background(), &pb.ListServiceSLAsRequest{})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
 	}
 }

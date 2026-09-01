@@ -112,6 +112,18 @@ type Service struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ServiceSla struct {
+	ID                int64              `json:"id"`
+	ServiceID         string             `json:"service_id"`
+	SeverityLevel     int16              `json:"severity_level"`
+	MttdTargetSeconds *int64             `json:"mttd_target_seconds"`
+	MttmTargetSeconds *int64             `json:"mttm_target_seconds"`
+	MttrTargetSeconds *int64             `json:"mttr_target_seconds"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	RtpcTargetSeconds *int64             `json:"rtpc_target_seconds"`
+}
+
 type Sev struct {
 	ID                    string             `json:"id"`
 	Title                 string             `json:"title"`
@@ -153,6 +165,7 @@ type Sev struct {
 	RootCauseReferenceUrl *string            `json:"root_cause_reference_url"`
 	Query                 *string            `json:"query"`
 	SlackChannelID        *string            `json:"slack_channel_id"`
+	RtpcSeconds           *int64             `json:"rtpc_seconds"`
 }
 
 type SevAccess struct {

@@ -184,6 +184,7 @@ func main() {
 		History:     stores.StatusHistory,
 		Roles:       stores.Role,
 		Services:    stores.Service,
+		ServiceSLAs: stores.ServiceSLA,
 		Postmortems: stores.Postmortem,
 		Links:       stores.SEVLink,
 		Access:      stores.SEVAccess,
@@ -230,6 +231,7 @@ func main() {
 	searchServer := grpchandler.NewSearchServer(stores.SEV, stores.Role, stores.Announcement)
 	configServer := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
 		Services:     stores.Service,
+		ServiceSLAs:  stores.ServiceSLA,
 		Users:        stores.User,
 		OnCall:       stores.OnCall,
 		Integrations: stores.IntegrationConfig,
@@ -458,6 +460,7 @@ type Stores struct {
 	User              store.UserStore
 	Role              store.RoleStore
 	Service           store.ServiceStore
+	ServiceSLA        store.ServiceSLAStore
 	Postmortem        store.PostmortemStore
 	Announcement      store.AnnouncementStore
 	Chat              store.ChatStore
@@ -506,6 +509,7 @@ func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, er
 			User:              memory.NewUserStore(),
 			Role:              memory.NewRoleStore(),
 			Service:           memory.NewServiceStore(),
+			ServiceSLA:        memory.NewServiceSLAStore(),
 			Postmortem:        memory.NewPostmortemStore(),
 			Announcement:      memory.NewAnnouncementStore(),
 			Chat:              memory.NewChatStore(),
@@ -533,6 +537,7 @@ func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, er
 		User:              postgres.NewUserStore(pool),
 		Role:              postgres.NewRoleStore(pool),
 		Service:           postgres.NewServiceStore(pool),
+		ServiceSLA:        postgres.NewServiceSLAStore(pool),
 		Postmortem:        postgres.NewPostmortemStore(pool),
 		Announcement:      postgres.NewAnnouncementStore(pool),
 		Chat:              postgres.NewChatStore(pool),

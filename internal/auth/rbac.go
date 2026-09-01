@@ -89,11 +89,19 @@ var rpcMinRole = map[string]store.OrgRole{
 	// Config service — service registry and on-call rotations are readable
 	// by any authenticated user (referenced elsewhere in the UI); everything
 	// else is Admin-only per docs/requirements.md §18.
-	"/sevitout.v1.ConfigService/CreateService":        store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetService":           store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/UpdateService":        store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteService":        store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListServices":         store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/CreateService": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetService":    store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpdateService": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteService": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListServices":  store.OrgRoleViewer,
+	// Per-service SLA targets (docs/roadmap.md Phase 12) — reads sit at the
+	// same Viewer floor as GetService/ListServices, since the resolved
+	// numbers are already exposed to any Viewer via SEVResponse.sla_status;
+	// mutations match UpdateService/DeleteService's Admin floor.
+	"/sevitout.v1.ConfigService/GetServiceSLA":        store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpsertServiceSLA":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteServiceSLA":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListServiceSLAs":      store.OrgRoleViewer,
 	"/sevitout.v1.ConfigService/ListUsers":            store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/UpdateUserRole":       store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/DeactivateUser":       store.OrgRoleAdmin,
