@@ -36,6 +36,7 @@ import type {
   ListRolesResponse,
   ListSEVsParams,
   ListSEVsResponse,
+  ListServiceSLAsResponse,
   ListServicesResponse,
   ListTasksResponse,
   ListUserDirectoryResponse,
@@ -51,6 +52,7 @@ import type {
   SearchSEVsParams,
   SearchSEVsResponse,
   ServiceResponse,
+  ServiceSLAResponse,
   ShareLinkResponse,
   SharedSEVResponse,
   TaskResponse,
@@ -68,6 +70,7 @@ import type {
   UpdateServiceRequest,
   UpdateUserRoleRequest,
   UpsertIntegrationConfigRequest,
+  UpsertServiceSLARequest,
   UserResponse,
   WhoAmIResponse,
 } from '@/types/api'
@@ -428,6 +431,17 @@ export const api = {
           method: 'PUT',
           body: JSON.stringify(req),
         }),
+    },
+    // Per-service, per-severity-level SLA targets (Roadmap Phase 12).
+    serviceSLA: {
+      list: (serviceId: string) => request<ListServiceSLAsResponse>(`/v1/config/services/${serviceId}/sla`),
+      upsert: (serviceId: string, severityLevel: number, req: UpsertServiceSLARequest) =>
+        request<ServiceSLAResponse>(`/v1/config/services/${serviceId}/sla/${severityLevel}`, {
+          method: 'PUT',
+          body: JSON.stringify(req),
+        }),
+      delete: (serviceId: string, severityLevel: number) =>
+        request<void>(`/v1/config/services/${serviceId}/sla/${severityLevel}`, { method: 'DELETE' }),
     },
     aiPlugins: {
       list: () => request<ListAIPluginsResponse>('/v1/config/ai-plugins'),

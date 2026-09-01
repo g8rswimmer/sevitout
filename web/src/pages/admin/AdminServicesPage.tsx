@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Gauge, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
 import { recordToTagRows, tagRowsToRecord, TagRowsEditor, type TagRow } from '@/components/sev/TagRowsEditor'
+import { ServiceSLAEditor } from '@/components/admin/ServiceSLAEditor'
 import type { ServiceResponse } from '@/types/api'
 
 interface ServiceForm {
@@ -45,6 +46,11 @@ export function AdminServicesPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<ServiceForm>(() => toForm())
   const [editError, setEditError] = useState<string | null>(null)
+
+  // Roadmap Phase 12: at most one service's SLA editor is expanded at a
+  // time, independent of editingId (name/description edit and SLA editing
+  // are separate concerns, not mutually exclusive).
+  const [slaServiceId, setSlaServiceId] = useState<string | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'services'] })
 
@@ -194,9 +200,10 @@ export function AdminServicesPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.map((svc) =>
-                  editingId === svc.id ? (
-                    <tr key={svc.id} className="border-b border-border align-top">
+                {list.map((svc) => (
+                  <Fragment key={svc.id}>
+                  {editingId === svc.id ? (
+                    <tr className="border-b border-border align-top">
                       <td colSpan={7} className="py-3">
                         <div className="flex flex-col gap-3">
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -260,7 +267,7 @@ export function AdminServicesPage() {
                       </td>
                     </tr>
                   ) : (
-                    <tr key={svc.id} className="border-b border-border">
+                    <tr className="border-b border-border">
                       <td className="py-2 pr-3 font-mono text-xs">{svc.id}</td>
                       <td className="py-2 pr-3">{svc.name}</td>
                       <td className="py-2 pr-3 text-muted-foreground">{svc.owning_team || '—'}</td>
@@ -281,6 +288,14 @@ export function AdminServicesPage() {
                       </td>
                       <td className="py-2 text-right">
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Manage SLAs for ${svc.name}`}
+                            onClick={() => setSlaServiceId(slaServiceId === svc.id ? null : svc.id)}
+                          >
+                            <Gauge className="h-3.5 w-3.5" />
+                          </Button>
                           <Button variant="ghost" size="icon" aria-label={`Edit ${svc.name}`} onClick={() => startEdit(svc)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
@@ -295,8 +310,16 @@ export function AdminServicesPage() {
                         </div>
                       </td>
                     </tr>
-                  ),
-                )}
+                  )}
+                  {slaServiceId === svc.id && (
+                    <tr className="border-b border-border">
+                      <td colSpan={7} className="py-3">
+                        <ServiceSLAEditor serviceId={svc.id} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>

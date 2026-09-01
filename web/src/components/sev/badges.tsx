@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { severityVariant } from '@/components/ui/badge'
 import {
@@ -7,6 +8,7 @@ import {
   SEV_STATUS_LABELS,
   type KnownExternalSystem,
   type SEVStatus,
+  type SLAMetricStatus,
 } from '@/types/api'
 
 export function SeverityBadge({ level }: { level: number }) {
@@ -15,6 +17,30 @@ export function SeverityBadge({ level }: { level: number }) {
 
 export function StatusBadge({ status }: { status: SEVStatus }) {
   return <Badge className={SEV_STATUS_BADGE_CLASS[status]}>{SEV_STATUS_LABELS[status]}</Badge>
+}
+
+/** Renders nothing for 'ok'/'not_applicable'/undefined — a badge should only
+ * ever draw attention to a problem, never confirm the absence of one.
+ * Mirrors TasksPanel.tsx's Overdue badge (destructive + AlertTriangle);
+ * 'at_risk' gets its own amber treatment since it's a live warning about a
+ * still-open SEV, not yet the harder "breached" fact StatusBadge's own
+ * status colors otherwise reserve red for. */
+export function SLABadge({ status, label = 'SLA' }: { status?: SLAMetricStatus; label?: string }) {
+  if (status === 'breached') {
+    return (
+      <Badge variant="destructive" className="gap-1">
+        <AlertTriangle className="h-3 w-3" /> {label} breached
+      </Badge>
+    )
+  }
+  if (status === 'at_risk') {
+    return (
+      <Badge className="gap-1 border-transparent bg-amber-500 text-white dark:bg-amber-600">
+        <AlertTriangle className="h-3 w-3" /> {label} at risk
+      </Badge>
+    )
+  }
+  return null
 }
 
 function isKnownExternalSystem(system: string): system is KnownExternalSystem {

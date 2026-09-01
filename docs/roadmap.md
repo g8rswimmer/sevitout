@@ -872,7 +872,7 @@ but doesn't hard-block on it.
 
 ## Phase 12 — Per-service SLA targets and breach indicators
 
-**Status**: not started
+**Status**: ✅ shipped, see [`demo/service-sla-breach-indicators.md`](../demo/service-sla-breach-indicators.md)
 
 SEVs compute MTTD/MTTM/MTTR (`internal/sev/metrics.go`) but nothing defines what
 those numbers *should* be, and there's no way to tell at a glance whether a SEV is

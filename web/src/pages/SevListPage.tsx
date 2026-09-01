@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { SeverityBadge, StatusBadge } from '@/components/sev/badges'
+import { SeverityBadge, SLABadge, StatusBadge } from '@/components/sev/badges'
 import { formatDateTime, formatDurationSeconds } from '@/lib/format'
 import {
   QUICK_VIEW_LABELS,
@@ -253,6 +253,7 @@ export function SevListPage() {
                     <Link to={`/sevs/${sev.id}`} className="flex min-w-0 items-center gap-3">
                       <SeverityBadge level={sev.severity_level} />
                       <StatusBadge status={sev.status} />
+                      <SLABadge status={sev.sla_status?.overall} />
                       <span className="truncate font-medium hover:underline">{sev.title}</span>
                     </Link>
                     <div className="flex shrink-0 items-center gap-4 text-xs text-muted-foreground">
