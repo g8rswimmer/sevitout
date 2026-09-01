@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
 import { recordToTagRows, tagRowsToRecord, TagRowsEditor, type TagRow } from '@/components/sev/TagRowsEditor'
 import { ColumnHeader, ServiceSLAEditor } from '@/components/admin/ServiceSLAEditor'
-import { emptySLARowForm, minutesToSeconds, SEVERITY_LEVELS, slaRowFormHasAnyValue, type SLARowForm } from '@/lib/slaTargets'
+import { emptySLARowForm, hoursToSeconds, SEVERITY_LEVELS, slaRowFormHasAnyValue, type SLARowForm } from '@/lib/slaTargets'
 import { METRIC_DEFINITIONS } from '@/lib/metricDefinitions'
 import type { ServiceResponse } from '@/types/api'
 
@@ -93,10 +93,10 @@ export function AdminServicesPage() {
           const form = createSlaFormFor(level)
           return api.config.serviceSLA.upsert(svc.id, level, {
             severity_level: level,
-            mttd_target_seconds: minutesToSeconds(form.mttd),
-            mttm_target_seconds: minutesToSeconds(form.mttm),
-            mttr_target_seconds: minutesToSeconds(form.mttr),
-            rtpc_target_seconds: minutesToSeconds(form.rtpc),
+            mttd_target_seconds: hoursToSeconds(form.mttd),
+            mttm_target_seconds: hoursToSeconds(form.mttm),
+            mttr_target_seconds: hoursToSeconds(form.mttr),
+            rtpc_target_seconds: hoursToSeconds(form.rtpc),
           })
         }),
       )
@@ -203,7 +203,7 @@ export function AdminServicesPage() {
             <div className="flex flex-col gap-1.5">
               <Label>SLA targets (optional)</Label>
               <p className="text-xs text-muted-foreground">
-                Target response times per severity level, in minutes. Leave a field blank to skip it — targets can
+                Target response times per severity level, in whole hours. Leave a field blank to skip it — targets can
                 always be added or changed later from this service's "Manage SLAs" action.
               </p>
               <div className="overflow-x-auto">
@@ -227,7 +227,7 @@ export function AdminServicesPage() {
                             <Input
                               type="number"
                               min={0}
-                              aria-label={`New service MTTD target minutes for SEV-${level}`}
+                              aria-label={`New service MTTD target hours for SEV-${level}`}
                               value={form.mttd}
                               onChange={(e) => setCreateSlaFormFor(level, { ...form, mttd: e.target.value })}
                               className="w-24"
@@ -237,7 +237,7 @@ export function AdminServicesPage() {
                             <Input
                               type="number"
                               min={0}
-                              aria-label={`New service MTTM target minutes for SEV-${level}`}
+                              aria-label={`New service MTTM target hours for SEV-${level}`}
                               value={form.mttm}
                               onChange={(e) => setCreateSlaFormFor(level, { ...form, mttm: e.target.value })}
                               className="w-24"
@@ -247,7 +247,7 @@ export function AdminServicesPage() {
                             <Input
                               type="number"
                               min={0}
-                              aria-label={`New service MTTR target minutes for SEV-${level}`}
+                              aria-label={`New service MTTR target hours for SEV-${level}`}
                               value={form.mttr}
                               onChange={(e) => setCreateSlaFormFor(level, { ...form, mttr: e.target.value })}
                               className="w-24"
@@ -257,7 +257,7 @@ export function AdminServicesPage() {
                             <Input
                               type="number"
                               min={0}
-                              aria-label={`New service RTPC target minutes for SEV-${level}`}
+                              aria-label={`New service RTPC target hours for SEV-${level}`}
                               value={form.rtpc}
                               onChange={(e) => setCreateSlaFormFor(level, { ...form, rtpc: e.target.value })}
                               className="w-24"

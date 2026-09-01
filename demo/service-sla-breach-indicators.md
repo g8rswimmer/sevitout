@@ -34,7 +34,8 @@ and UI.
 - **Admin UI**: `AdminServicesPage.tsx` gets a per-service "Manage SLAs" action
   (the new gauge icon) that expands a 4-row table — one per severity level — built
   directly on `AdminRetentionPage.tsx`'s own per-severity-level table pattern.
-  Targets are entered in minutes and converted to/from seconds at the API boundary.
+  Targets are entered in hours and converted to/from seconds at the API boundary
+  (see Follow-up #4 below — this started as minutes, then changed).
 - **SEV UI indicators**: a new `SLABadge` component (`components/sev/badges.tsx`),
   modeled on `TasksPanel.tsx`'s existing "Overdue" badge — renders nothing for
   `ok`/`not_applicable`, an amber "at risk" badge for `at_risk`, a destructive "SLA
@@ -243,7 +244,7 @@ New/updated coverage:
   `ok`/`not_applicable`/undefined, an "at risk" badge, a "breached" badge, and
   defaults its label to "SLA".
 - `web/src/pages/admin/AdminServicesPage.test.tsx`: opening the SLA editor and
-  saving a target converts minutes to seconds correctly in the request body; every
+  saving a target converts hours to seconds correctly in the request body; every
   target column's info icon exposes the right metric definition text (present
   whether or not it's currently hovered — no `title` attribute involved anymore);
   an RTPC target saves correctly; and a new service can have an SLA target set
@@ -282,6 +283,43 @@ database migrates cleanly through 18 with no behavior change.
 branch before this fix needs to run it again** — `docker compose up migrate` or
 `make migrate` — to pick up migration 18 and repair their database; no manual
 SQL is required.
+
+## Follow-up #4, same phase: the tooltip fix from Follow-up #2 didn't actually work, plus hours instead of minutes
+
+Two more rounds of feedback:
+
+- **The Follow-up #2 tooltip fix was incomplete.** Removing `title` did kill the
+  duplicate native tooltip, but the styled tooltip itself was still invisible on
+  every SLA-target column header — the real bug. `InfoTooltip` positions its popup
+  with `position: absolute; bottom-full` (opening *upward*, above the icon), and
+  every column-header caller sits inside `ServiceSLAEditor.tsx`/
+  `AdminServicesPage.tsx`'s `overflow-x-auto` table wrapper. **Verified directly in
+  headless Chrome** (screenshotted several isolated repros, not just reasoned
+  about): a popup opening upward out of a `<table>` inside such a wrapper gets
+  clipped at the wrapper's top edge — and, surprisingly, adding an explicit
+  `overflow-y: visible` override on the wrapper (the textbook fix for the
+  "overflow-x-auto implicitly computes overflow-y: auto" CSS gotcha) **did not
+  help**; the clipping is specific to a `<table>` descendant of a scrollable
+  wrapper, not the general case (a plain, non-table element with the same
+  `overflow-x-auto` wrapper and the same override rendered its popup correctly).
+  The actual fix: `InfoTooltip` now takes a `side?: 'top' | 'bottom'` prop
+  (default `'top'`, unchanged for `LifecyclePanel.tsx`'s metric labels, which
+  have their value directly underneath — opening downward there would cover it).
+  `ServiceSLAEditor.tsx`'s `ColumnHeader` passes `side="bottom"`: opening
+  downward never needs to escape the scrollable wrapper's box in either
+  direction, so the table-specific clipping quirk never applies. Re-verified in
+  headless Chrome with the exact real component markup and classes.
+- **SLA targets are entered and displayed in hours, not minutes.** "48 hours" is
+  far easier to reason about than "2880 minutes," and no SLA in practice needs
+  finer-than-hour precision. `web/src/lib/slaTargets.ts`'s `minutesToSeconds` is
+  now `hoursToSeconds` (`n * 3600`, was `n * 60`); `ServiceSLAEditor.tsx`'s
+  `toForm` converts stored seconds back to hours the same way. Both SLA tables'
+  column headers read "MTTD target (hrs)" (was "(min)"), and every input's
+  `aria-label` says "hours" instead of "minutes." **No backend or wire-format
+  change** — `*_target_seconds` stays the API/DB representation in both
+  directions; only the admin UI's input/display unit changed, so this is
+  backward-compatible with any target already stored under the old minutes-entry
+  UI (which was always just seconds under the hood).
 
 ## Known limitations
 

@@ -80,7 +80,7 @@ describe('AdminServicesPage', () => {
       }
       if (url === '/v1/config/services/payments/sla/1' && method === 'PUT') {
         return Promise.resolve(
-          jsonResponse({ service_id: 'payments', severity_level: 1, mttd_target_seconds: '300', created_at: 'now', updated_at: 'now' }),
+          jsonResponse({ service_id: 'payments', severity_level: 1, mttd_target_seconds: '18000', created_at: 'now', updated_at: 'now' }),
         )
       }
       return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
@@ -93,7 +93,7 @@ describe('AdminServicesPage', () => {
     await user.click(screen.getByRole('button', { name: /new service/i }))
     await user.type(screen.getByLabelText('ID (slug)'), 'payments')
     await user.type(screen.getByLabelText('Name'), 'Payments Service')
-    await user.type(screen.getByLabelText('New service MTTD target minutes for SEV-1'), '5')
+    await user.type(screen.getByLabelText('New service MTTD target hours for SEV-1'), '5')
     // A blank row (SEV-2) must not trigger an UpsertServiceSLA call at all.
     await user.click(screen.getByRole('button', { name: /^create$/i }))
 
@@ -106,7 +106,7 @@ describe('AdminServicesPage', () => {
     const slaCall = vi
       .mocked(fetch)
       .mock.calls.find(([url, init]) => String(url) === '/v1/config/services/payments/sla/1' && init?.method === 'PUT')!
-    expect(JSON.parse(String(slaCall[1]!.body))).toMatchObject({ severity_level: 1, mttd_target_seconds: 300 })
+    expect(JSON.parse(String(slaCall[1]!.body))).toMatchObject({ severity_level: 1, mttd_target_seconds: 18000 })
 
     const sla2Call = vi
       .mocked(fetch)
@@ -147,7 +147,7 @@ describe('AdminServicesPage', () => {
     expect(JSON.parse(String(call[1]!.body))).toMatchObject({ owning_team: 'Core' })
   })
 
-  it('opens the SLA editor and saves a target in minutes as seconds', async () => {
+  it('opens the SLA editor and saves a target in hours as seconds', async () => {
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
@@ -158,7 +158,7 @@ describe('AdminServicesPage', () => {
           jsonResponse({
             service_id: 'checkout',
             severity_level: 1,
-            mttd_target_seconds: '300',
+            mttd_target_seconds: '18000',
             created_at: 'now',
             updated_at: 'now',
           }),
@@ -172,7 +172,7 @@ describe('AdminServicesPage', () => {
 
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /manage slas for checkout/i }))
-    const mttdInput = await screen.findByLabelText('MTTD target minutes for SEV-1')
+    const mttdInput = await screen.findByLabelText('MTTD target hours for SEV-1')
     await user.type(mttdInput, '5')
     const saveButtons = screen.getAllByRole('button', { name: /^save$/i })
     await user.click(saveButtons[0])
@@ -186,7 +186,7 @@ describe('AdminServicesPage', () => {
     const call = vi
       .mocked(fetch)
       .mock.calls.find(([url, init]) => String(url) === '/v1/config/services/checkout/sla/1' && init?.method === 'PUT')!
-    expect(JSON.parse(String(call[1]!.body))).toMatchObject({ severity_level: 1, mttd_target_seconds: 300 })
+    expect(JSON.parse(String(call[1]!.body))).toMatchObject({ severity_level: 1, mttd_target_seconds: 18000 })
   })
 
   it('shows metric definitions on hover and saves an RTPC target', async () => {
@@ -221,8 +221,8 @@ describe('AdminServicesPage', () => {
     expect((await screen.findAllByText(/Mean Time to Detect/i)).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Resolution to Postmortem Complete/i).length).toBeGreaterThan(0)
 
-    const rtpcInput = screen.getByLabelText('RTPC target minutes for SEV-1')
-    await user.type(rtpcInput, '1440')
+    const rtpcInput = screen.getByLabelText('RTPC target hours for SEV-1')
+    await user.type(rtpcInput, '24')
     const saveButtons = screen.getAllByRole('button', { name: /^save$/i })
     await user.click(saveButtons[0])
 
