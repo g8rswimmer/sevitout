@@ -34,6 +34,11 @@ type ReportServiceClient interface {
 	// detects this response type and writes GetData() as the HTTP body with
 	// GetContentType() as Content-Type instead of JSON-encoding it.
 	ExportSEVs(ctx context.Context, in *ExportSEVsRequest, opts ...grpc.CallOption) (*httpbody.HttpBody, error)
+	// GetServiceMetrics aggregates SEVs into per-(service, severity level)
+	// rollups over a trailing window: SEV count, average MTTD/MTTM/MTTR, and
+	// an SLA compliance breakdown (docs/roadmap.md Phase 13 — the aggregate
+	// counterpart to Phase 12's per-SEV live sla_status on SEVResponse).
+	GetServiceMetrics(ctx context.Context, in *GetServiceMetricsRequest, opts ...grpc.CallOption) (*ServiceMetricsResponse, error)
 }
 
 type reportServiceClient struct {
@@ -71,6 +76,15 @@ func (c *reportServiceClient) ExportSEVs(ctx context.Context, in *ExportSEVsRequ
 	return out, nil
 }
 
+func (c *reportServiceClient) GetServiceMetrics(ctx context.Context, in *GetServiceMetricsRequest, opts ...grpc.CallOption) (*ServiceMetricsResponse, error) {
+	out := new(ServiceMetricsResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ReportService/GetServiceMetrics", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ReportServiceServer is the server API for ReportService service.
 // All implementations must embed UnimplementedReportServiceServer
 // for forward compatibility
@@ -86,6 +100,11 @@ type ReportServiceServer interface {
 	// detects this response type and writes GetData() as the HTTP body with
 	// GetContentType() as Content-Type instead of JSON-encoding it.
 	ExportSEVs(context.Context, *ExportSEVsRequest) (*httpbody.HttpBody, error)
+	// GetServiceMetrics aggregates SEVs into per-(service, severity level)
+	// rollups over a trailing window: SEV count, average MTTD/MTTM/MTTR, and
+	// an SLA compliance breakdown (docs/roadmap.md Phase 13 — the aggregate
+	// counterpart to Phase 12's per-SEV live sla_status on SEVResponse).
+	GetServiceMetrics(context.Context, *GetServiceMetricsRequest) (*ServiceMetricsResponse, error)
 	mustEmbedUnimplementedReportServiceServer()
 }
 
@@ -101,6 +120,9 @@ func (UnimplementedReportServiceServer) GetSEVTrends(context.Context, *GetSEVTre
 }
 func (UnimplementedReportServiceServer) ExportSEVs(context.Context, *ExportSEVsRequest) (*httpbody.HttpBody, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ExportSEVs not implemented")
+}
+func (UnimplementedReportServiceServer) GetServiceMetrics(context.Context, *GetServiceMetricsRequest) (*ServiceMetricsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetServiceMetrics not implemented")
 }
 func (UnimplementedReportServiceServer) mustEmbedUnimplementedReportServiceServer() {}
 
@@ -169,6 +191,24 @@ func _ReportService_ExportSEVs_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ReportService_GetServiceMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetServiceMetricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReportServiceServer).GetServiceMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ReportService/GetServiceMetrics",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReportServiceServer).GetServiceMetrics(ctx, req.(*GetServiceMetricsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ReportService_ServiceDesc is the grpc.ServiceDesc for ReportService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -187,6 +227,10 @@ var ReportService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExportSEVs",
 			Handler:    _ReportService_ExportSEVs_Handler,
+		},
+		{
+			MethodName: "GetServiceMetrics",
+			Handler:    _ReportService_GetServiceMetrics_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

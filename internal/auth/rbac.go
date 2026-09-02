@@ -81,6 +81,7 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.ReportService/GetDashboardMetrics": store.OrgRoleViewer,
 	"/sevitout.v1.ReportService/GetSEVTrends":        store.OrgRoleViewer,
 	"/sevitout.v1.ReportService/ExportSEVs":          store.OrgRoleViewer,
+	"/sevitout.v1.ReportService/GetServiceMetrics":   store.OrgRoleViewer,
 	// Share service — creating/revoking a public link is scoped the same as
 	// unlocking a completed SEV (§10.1, §14.1): IC or Admin. The public view
 	// itself (GET /s/{token}) isn't a gRPC method at all — see share.proto.

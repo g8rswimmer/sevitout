@@ -19,17 +19,20 @@ type testReportServer struct {
 	sevs        *memory.SEVStore
 	postmortems *memory.PostmortemStore
 	tasks       *memory.TaskStore
+	serviceSLAs *memory.ServiceSLAStore
 }
 
 func newTestReportServer() *testReportServer {
 	sevs := memory.NewSEVStore()
 	postmortems := memory.NewPostmortemStore()
 	tasks := memory.NewTaskStore()
+	serviceSLAs := memory.NewServiceSLAStore()
 	return &testReportServer{
-		server:      grpchandler.NewReportServer(sevs, postmortems, tasks),
+		server:      grpchandler.NewReportServer(sevs, postmortems, tasks, serviceSLAs),
 		sevs:        sevs,
 		postmortems: postmortems,
 		tasks:       tasks,
+		serviceSLAs: serviceSLAs,
 	}
 }
 
@@ -356,6 +359,179 @@ func TestExportSEVs_EmptyResult(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Fatalf("want header row only, got %d rows", len(rows))
+	}
+}
+
+// ── GetServiceMetrics ────────────────────────────────────────────────────────
+
+func TestGetServiceMetrics_MultipleServicesAndSeverities(t *testing.T) {
+	ts := newTestReportServer()
+	now := time.Now()
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "A", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -5)),
+	})
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "B", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -6)),
+	})
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "C", SeverityLevel: 2, Status: store.SEVStatusOpen,
+		AffectedServices: []string{"payments-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -7)),
+	})
+
+	resp, err := ts.server.GetServiceMetrics(context.Background(), &pb.GetServiceMetricsRequest{})
+	if err != nil {
+		t.Fatalf("GetServiceMetrics: %v", err)
+	}
+	if resp.GetWindowDays() != 30 {
+		t.Errorf("window_days = %d, want default 30", resp.GetWindowDays())
+	}
+
+	got := map[string]int32{}
+	for _, m := range resp.GetServiceLevelMetrics() {
+		got[fmt.Sprintf("%s:%d", m.GetServiceId(), m.GetSeverityLevel())] = m.GetSevCount()
+	}
+	if got["checkout-api:1"] != 2 {
+		t.Errorf("checkout-api SEV-1 count = %d, want 2", got["checkout-api:1"])
+	}
+	if got["payments-api:2"] != 1 {
+		t.Errorf("payments-api SEV-2 count = %d, want 1", got["payments-api:2"])
+	}
+}
+
+func TestGetServiceMetrics_PartialMetricsDontSkewAverages(t *testing.T) {
+	ts := newTestReportServer()
+	now := time.Now()
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "A", SeverityLevel: 1, Status: store.SEVStatusResolved,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -1)),
+		MTTDSeconds: ptrInt64(100), MTTMSeconds: ptrInt64(200), MTTRSeconds: ptrInt64(300),
+	})
+	// No MTTM yet (still in progress past detection) — must not pull the
+	// group's average MTTM toward 0, and must not be excluded from the
+	// MTTD/MTTR averages it does have.
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "B", SeverityLevel: 1, Status: store.SEVStatusInvestigating,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -2)),
+		MTTDSeconds: ptrInt64(300), MTTRSeconds: ptrInt64(900),
+	})
+
+	resp, err := ts.server.GetServiceMetrics(context.Background(), &pb.GetServiceMetricsRequest{})
+	if err != nil {
+		t.Fatalf("GetServiceMetrics: %v", err)
+	}
+	if len(resp.GetServiceLevelMetrics()) != 1 {
+		t.Fatalf("want 1 group, got %d", len(resp.GetServiceLevelMetrics()))
+	}
+	m := resp.GetServiceLevelMetrics()[0]
+	if m.GetAvgMttdSeconds() != 200 {
+		t.Errorf("avg_mttd_seconds = %d, want 200 ((100+300)/2)", m.GetAvgMttdSeconds())
+	}
+	if m.GetAvgMttmSeconds() != 200 {
+		t.Errorf("avg_mttm_seconds = %d, want 200 (only A has MTTM, not skewed by B's nil)", m.GetAvgMttmSeconds())
+	}
+	if m.GetAvgMttrSeconds() != 600 {
+		t.Errorf("avg_mttr_seconds = %d, want 600 ((300+900)/2)", m.GetAvgMttrSeconds())
+	}
+}
+
+func TestGetServiceMetrics_NoSLAConfiguredLandsInNotApplicable(t *testing.T) {
+	ts := newTestReportServer()
+	now := time.Now()
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "A", SeverityLevel: 3, Status: store.SEVStatusOpen,
+		AffectedServices: []string{"notification-service"}, StartedAt: ptrTime(now.AddDate(0, 0, -1)),
+	})
+	// No ServiceSLA row upserted for notification-service/SEV-3 at all.
+
+	resp, err := ts.server.GetServiceMetrics(context.Background(), &pb.GetServiceMetricsRequest{})
+	if err != nil {
+		t.Fatalf("GetServiceMetrics: %v", err)
+	}
+	if len(resp.GetServiceLevelMetrics()) != 1 {
+		t.Fatalf("want 1 group, got %d", len(resp.GetServiceLevelMetrics()))
+	}
+	m := resp.GetServiceLevelMetrics()[0]
+	if m.GetSlaNotApplicableCount() != 1 {
+		t.Errorf("sla_not_applicable_count = %d, want 1", m.GetSlaNotApplicableCount())
+	}
+	if m.GetCompliancePct() != 0 {
+		t.Errorf("compliance_pct = %v, want 0 (not a real 0%% — every SEV is not_applicable)", m.GetCompliancePct())
+	}
+}
+
+func TestGetServiceMetrics_ComplianceBreakdown(t *testing.T) {
+	ts := newTestReportServer()
+	now := time.Now()
+	if err := ts.serviceSLAs.Upsert(context.Background(), &store.ServiceSLA{
+		ServiceID: "checkout-api", SeverityLevel: 1, MTTRTargetSeconds: ptrInt64(3600),
+	}); err != nil {
+		t.Fatalf("Upsert ServiceSLA: %v", err)
+	}
+	// Under target: on track.
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "A", SeverityLevel: 1, Status: store.SEVStatusResolved,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -1)),
+		MTTRSeconds: ptrInt64(1800),
+	})
+	// Over target: breached.
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "B", SeverityLevel: 1, Status: store.SEVStatusResolved,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -2)),
+		MTTRSeconds: ptrInt64(7200),
+	})
+
+	resp, err := ts.server.GetServiceMetrics(context.Background(), &pb.GetServiceMetricsRequest{})
+	if err != nil {
+		t.Fatalf("GetServiceMetrics: %v", err)
+	}
+	if len(resp.GetServiceLevelMetrics()) != 1 {
+		t.Fatalf("want 1 group, got %d", len(resp.GetServiceLevelMetrics()))
+	}
+	m := resp.GetServiceLevelMetrics()[0]
+	if m.GetSlaOkCount() != 1 || m.GetSlaBreachedCount() != 1 {
+		t.Errorf("ok/breached = %d/%d, want 1/1", m.GetSlaOkCount(), m.GetSlaBreachedCount())
+	}
+	if m.GetCompliancePct() != 0.5 {
+		t.Errorf("compliance_pct = %v, want 0.5", m.GetCompliancePct())
+	}
+}
+
+func TestGetServiceMetrics_WindowCutoffBoundary(t *testing.T) {
+	ts := newTestReportServer()
+	now := time.Now()
+	// Well inside a 30-day window.
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "in-window", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -10)),
+	})
+	// Just outside a 30-day window.
+	mustCreateSEV(t, ts.sevs, &store.SEV{
+		Title: "out-of-window", SeverityLevel: 1, Status: store.SEVStatusOpen,
+		AffectedServices: []string{"checkout-api"}, StartedAt: ptrTime(now.AddDate(0, 0, -40)),
+	})
+
+	resp, err := ts.server.GetServiceMetrics(context.Background(), &pb.GetServiceMetricsRequest{WindowDays: 30})
+	if err != nil {
+		t.Fatalf("GetServiceMetrics: %v", err)
+	}
+	if len(resp.GetServiceLevelMetrics()) != 1 {
+		t.Fatalf("want 1 group, got %d", len(resp.GetServiceLevelMetrics()))
+	}
+	if got := resp.GetServiceLevelMetrics()[0].GetSevCount(); got != 1 {
+		t.Errorf("sev_count = %d, want 1 (out-of-window SEV excluded)", got)
+	}
+}
+
+func TestGetServiceMetrics_UnrecognizedWindowDefaultsTo30(t *testing.T) {
+	ts := newTestReportServer()
+	resp, err := ts.server.GetServiceMetrics(context.Background(), &pb.GetServiceMetricsRequest{WindowDays: 45})
+	if err != nil {
+		t.Fatalf("GetServiceMetrics: %v", err)
+	}
+	if resp.GetWindowDays() != 30 {
+		t.Errorf("window_days = %d, want 30 (45 isn't one of 30/60/90/180)", resp.GetWindowDays())
 	}
 }
 

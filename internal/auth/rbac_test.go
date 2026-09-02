@@ -96,6 +96,7 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleViewer, "/sevitout.v1.ReportService/GetDashboardMetrics", true},
 		{store.OrgRoleViewer, "/sevitout.v1.ReportService/GetSEVTrends", true},
 		{store.OrgRoleViewer, "/sevitout.v1.ReportService/ExportSEVs", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ReportService/GetServiceMetrics", true},
 
 		// Share service — creating/revoking a link needs Incident Commander
 		{store.OrgRoleViewer, "/sevitout.v1.ShareService/CreateShareLink", false},

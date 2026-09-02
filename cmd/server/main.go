@@ -194,7 +194,7 @@ func main() {
 		AIDispatch:  aiDispatcher,
 	})
 	sevAccessServer := grpchandler.NewSEVAccessServer(stores.SEVAccess, stores.SEV, stores.Audit)
-	reportServer := grpchandler.NewReportServer(stores.SEV, stores.Postmortem, stores.Task)
+	reportServer := grpchandler.NewReportServer(stores.SEV, stores.Postmortem, stores.Task, stores.ServiceSLA)
 	shareServer := grpchandler.NewShareServer(grpchandler.ShareServerParams{
 		Shares: stores.Share,
 		SEVs:   stores.SEV,

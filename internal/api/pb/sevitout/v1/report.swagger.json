@@ -38,6 +38,49 @@
         ]
       }
     },
+    "/v1/reports/service-metrics": {
+      "get": {
+        "summary": "GetServiceMetrics aggregates SEVs into per-(service, severity level)\nrollups over a trailing window: SEV count, average MTTD/MTTM/MTTR, and\nan SLA compliance breakdown (docs/roadmap.md Phase 13 — the aggregate\ncounterpart to Phase 12's per-SEV live sla_status on SEVResponse).",
+        "operationId": "ReportService_GetServiceMetrics",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceMetricsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "windowDays",
+            "description": "window_days is one of: 30, 60, 90, 180. Defaults to 30 when unset or 0\n— validated in the handler, not here.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "serviceIds",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "ReportService"
+        ]
+      }
+    },
     "/v1/reports/trends": {
       "get": {
         "summary": "GetSEVTrends surfaces recurring failure patterns: SEVs sharing the same\naffected service and root cause category (§17's \"recurring incident\nflag\").",
@@ -307,6 +350,74 @@
         "count": {
           "type": "integer",
           "format": "int32"
+        }
+      }
+    },
+    "v1ServiceLevelMetrics": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "sevCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "avgMttdSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "avg_mttd_seconds/avg_mttm_seconds/avg_mttr_seconds average only the\nSEVs in this group with that metric already computed (nil-safe, same\ndiscipline as MTTRTrend) — 0 when none have it yet."
+        },
+        "avgMttmSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "avgMttrSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "slaOkCount": {
+          "type": "integer",
+          "format": "int32",
+          "description": "sla_*_count bucket this group's SEVs by their live SLAEvaluation.Overall\n(internal/sev/sla.go) — sla_not_applicable_count covers both \"no SLA\nconfigured for this service+severity\" and \"no baseline timestamp yet\"."
+        },
+        "slaAtRiskCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "slaBreachedCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "slaNotApplicableCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "compliancePct": {
+          "type": "number",
+          "format": "double",
+          "description": "compliance_pct is sla_ok_count / (sla_ok_count + sla_at_risk_count +\nsla_breached_count), 0 when that denominator is 0 (every SEV in the\ngroup is sla_not_applicable — not a real 0% compliance claim)."
+        }
+      }
+    },
+    "v1ServiceMetricsResponse": {
+      "type": "object",
+      "properties": {
+        "serviceLevelMetrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ServiceLevelMetrics"
+          }
+        },
+        "windowDays": {
+          "type": "integer",
+          "format": "int32",
+          "description": "window_days echoes back the resolved window (after defaulting), same\ndefensive pattern MTTRTrend.window_days uses."
         }
       }
     }
