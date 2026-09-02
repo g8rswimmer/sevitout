@@ -47,6 +47,8 @@ export function LevelingCriteriaEditor({ serviceId }: { serviceId: string }) {
       invalidate()
       setForms((f) => ({ ...f, [level]: '' }))
     },
+    onError: (err, level) =>
+      setErrors((e) => ({ ...e, [level]: err instanceof ApiError ? err.message : 'Failed to clear' })),
   })
 
   function textFor(level: number): string {

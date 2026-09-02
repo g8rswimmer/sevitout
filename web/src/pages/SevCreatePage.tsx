@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -26,6 +27,11 @@ const EMPTY_DETECTION: DetectionFieldsValue = {
 
 export function SevCreatePage() {
   const navigate = useNavigate()
+
+  // Owned here (rather than by LevelingCriteriaPanel) per convention — see
+  // that component's doc comment. Shares a cache entry with
+  // ServiceChipEditor's own ['services'] query.
+  const registry = useQuery({ queryKey: ['services'], queryFn: api.services.list })
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -105,7 +111,11 @@ export function SevCreatePage() {
               <ServiceChipEditor services={affectedServices} onChange={setAffectedServices} />
             </div>
 
-            <LevelingCriteriaPanel severityLevel={severityLevel} serviceIds={affectedServices} />
+            <LevelingCriteriaPanel
+              severityLevel={severityLevel}
+              serviceIds={affectedServices}
+              services={registry.data?.services ?? []}
+            />
           </CardContent>
         </Card>
 

@@ -9,7 +9,7 @@ VALUES ($1, $2, $3, NOW(), NOW())
 ON CONFLICT (service_id, severity_level) DO UPDATE SET
     criteria   = EXCLUDED.criteria,
     updated_at = NOW()
-RETURNING id;
+RETURNING id, created_at, updated_at;
 
 -- name: DeleteServiceLevelingCriteria :exec
 DELETE FROM service_leveling_criteria
