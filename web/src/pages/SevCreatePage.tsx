@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ServiceChipEditor } from '@/components/sev/ServiceChipEditor'
+import { LevelingCriteriaPanel } from '@/components/sev/LevelingCriteriaPanel'
 import { TagRowsEditor, tagRowsToRecord, type TagRow } from '@/components/sev/TagRowsEditor'
 import { DetectionFields, type DetectionFieldsValue } from '@/components/sev/DetectionFields'
 import { DateTimeField } from '@/components/sev/DateTimeField'
@@ -103,6 +104,8 @@ export function SevCreatePage() {
               <Label>Affected services</Label>
               <ServiceChipEditor services={affectedServices} onChange={setAffectedServices} />
             </div>
+
+            <LevelingCriteriaPanel severityLevel={severityLevel} serviceIds={affectedServices} />
           </CardContent>
         </Card>
 

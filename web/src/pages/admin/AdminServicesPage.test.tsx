@@ -238,6 +238,89 @@ describe('AdminServicesPage', () => {
     expect(JSON.parse(String(call[1]!.body))).toMatchObject({ severity_level: 1, rtpc_target_seconds: 86400 })
   })
 
+  it('opens the leveling criteria editor and saves guidance text', async () => {
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url === '/v1/config/services' && method === 'GET') return Promise.resolve(jsonResponse({ services: [CHECKOUT] }))
+      if (url === '/v1/config/services/checkout/leveling-criteria' && method === 'GET')
+        return Promise.resolve(jsonResponse({ criteria: [] }))
+      if (url === '/v1/config/services/checkout/leveling-criteria/1' && method === 'PUT') {
+        return Promise.resolve(
+          jsonResponse({
+            service_id: 'checkout',
+            severity_level: 1,
+            criteria: '>50% of checkout traffic failing',
+            created_at: 'now',
+            updated_at: 'now',
+          }),
+        )
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+
+    renderWithProviders(<AdminServicesPage />)
+    await screen.findByText('Checkout')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /leveling criteria for checkout/i }))
+    const textarea = await screen.findByLabelText('Leveling criteria for SEV-1')
+    await user.type(textarea, '>50% of checkout traffic failing')
+    const saveButtons = screen.getAllByRole('button', { name: /^save$/i })
+    await user.click(saveButtons[0])
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([url, init]) => String(url) === '/v1/config/services/checkout/leveling-criteria/1' && init?.method === 'PUT',
+        )
+      expect(call).toBeDefined()
+    })
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([url, init]) => String(url) === '/v1/config/services/checkout/leveling-criteria/1' && init?.method === 'PUT',
+      )!
+    expect(JSON.parse(String(call[1]!.body))).toMatchObject({
+      severity_level: 1,
+      criteria: '>50% of checkout traffic failing',
+    })
+  })
+
+  it('shows a Clear button and clears saved leveling criteria', async () => {
+    let criteria = [
+      { service_id: 'checkout', severity_level: 1, criteria: 'existing guidance', created_at: 'now', updated_at: 'now' },
+    ]
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url === '/v1/config/services' && method === 'GET') return Promise.resolve(jsonResponse({ services: [CHECKOUT] }))
+      if (url === '/v1/config/services/checkout/leveling-criteria' && method === 'GET')
+        return Promise.resolve(jsonResponse({ criteria }))
+      if (url === '/v1/config/services/checkout/leveling-criteria/1' && method === 'DELETE') {
+        criteria = []
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
+    })
+
+    renderWithProviders(<AdminServicesPage />)
+    await screen.findByText('Checkout')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /leveling criteria for checkout/i }))
+    await screen.findByDisplayValue('existing guidance')
+    await user.click(screen.getByRole('button', { name: /^clear$/i }))
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        '/v1/config/services/checkout/leveling-criteria/1',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    )
+  })
+
   it('deletes a service directly (no confirmation step)', async () => {
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = String(input)

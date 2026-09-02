@@ -905,6 +905,31 @@ export interface UpsertServiceSLARequest {
   rtpc_target_seconds?: number
 }
 
+/** One severity level's SEV leveling guidance for one service (Roadmap
+ * Phase 14) — free-text, advisory only, never enforced or validated
+ * against. Unlike ServiceSLAResponse's target fields, `criteria` is a plain
+ * string (not a proto3 int64), so there's no zero-omission quirk here. */
+export interface LevelingCriteriaResponse {
+  service_id: string
+  severity_level: number
+  criteria: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ListLevelingCriteriaResponse {
+  criteria?: LevelingCriteriaResponse[]
+}
+
+export interface ListLevelingCriteriaForServicesResponse {
+  criteria?: LevelingCriteriaResponse[]
+}
+
+export interface UpsertLevelingCriteriaRequest {
+  severity_level: number
+  criteria: string
+}
+
 export interface UserResponse {
   id: string
   email: string

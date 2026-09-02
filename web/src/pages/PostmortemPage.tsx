@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
+import { LevelingCriteriaPanel } from '@/components/sev/LevelingCriteriaPanel'
 import { PostmortemEditor } from '@/components/postmortem/PostmortemEditor'
 import { PostmortemStatusControl } from '@/components/postmortem/PostmortemStatusControl'
 import { UnlockDialog } from '@/components/postmortem/UnlockDialog'
@@ -178,6 +179,12 @@ export function PostmortemPage() {
         </div>
         <PostmortemStatusControl sevId={sevId} postmortem={postmortem} canTransition={canTransition} />
       </div>
+
+      {(record.affected_services?.length ?? 0) > 0 && (
+        <Section title="Leveling criteria reference">
+          <LevelingCriteriaPanel severityLevel={record.severity_level} serviceIds={record.affected_services ?? []} />
+        </Section>
+      )}
 
       <AIDraftPanel sevId={sevId} canTrigger={canEdit} onApply={handleApplyDraft} />
 

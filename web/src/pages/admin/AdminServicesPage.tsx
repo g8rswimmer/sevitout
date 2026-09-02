@@ -1,6 +1,6 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Gauge, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Gauge, ListChecks, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
 import { recordToTagRows, tagRowsToRecord, TagRowsEditor, type TagRow } from '@/components/sev/TagRowsEditor'
 import { ColumnHeader, ServiceSLAEditor } from '@/components/admin/ServiceSLAEditor'
+import { LevelingCriteriaEditor } from '@/components/admin/LevelingCriteriaEditor'
 import { emptySLARowForm, hoursToSeconds, SEVERITY_LEVELS, slaRowFormHasAnyValue, type SLARowForm } from '@/lib/slaTargets'
 import { METRIC_DEFINITIONS } from '@/lib/metricDefinitions'
 import type { ServiceResponse } from '@/types/api'
@@ -57,6 +58,12 @@ export function AdminServicesPage() {
   // time, independent of editingId (name/description edit and SLA editing
   // are separate concerns, not mutually exclusive).
   const [slaServiceId, setSlaServiceId] = useState<string | null>(null)
+
+  // Roadmap Phase 14: likewise independent of slaServiceId/editingId — the
+  // SLA-target panel and the leveling-criteria panel can both be open for
+  // the same (or different) service at once, since they're separate
+  // concerns with no interaction between them.
+  const [criteriaServiceId, setCriteriaServiceId] = useState<string | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'services'] })
 
@@ -405,6 +412,14 @@ export function AdminServicesPage() {
                           >
                             <Gauge className="h-3.5 w-3.5" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Leveling criteria for ${svc.name}`}
+                            onClick={() => setCriteriaServiceId(criteriaServiceId === svc.id ? null : svc.id)}
+                          >
+                            <ListChecks className="h-3.5 w-3.5" />
+                          </Button>
                           <Button variant="ghost" size="icon" aria-label={`Edit ${svc.name}`} onClick={() => startEdit(svc)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
@@ -424,6 +439,13 @@ export function AdminServicesPage() {
                     <tr className="border-b border-border">
                       <td colSpan={7} className="py-3">
                         <ServiceSLAEditor serviceId={svc.id} />
+                      </td>
+                    </tr>
+                  )}
+                  {criteriaServiceId === svc.id && (
+                    <tr className="border-b border-border">
+                      <td colSpan={7} className="py-3">
+                        <LevelingCriteriaEditor serviceId={svc.id} />
                       </td>
                     </tr>
                   )}

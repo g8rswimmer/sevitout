@@ -6,7 +6,7 @@ import { PostmortemPage } from '@/pages/PostmortemPage'
 import { tokenStorage } from '@/lib/api'
 import { renderWithProviders } from '@/test/utils'
 import { MockWebSocket } from '@/test/mockWebSocket'
-import type { AIOutputResponse, OrgRole, PostmortemResponse, SEVResponse, WhoAmIResponse } from '@/types/api'
+import type { AIOutputResponse, LevelingCriteriaResponse, OrgRole, PostmortemResponse, SEVResponse, WhoAmIResponse } from '@/types/api'
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -48,6 +48,7 @@ function mockFetchFor(opts: {
   whoAmI: WhoAmIResponse
   aiOutputs?: AIOutputResponse[]
   hasPlugins?: boolean
+  levelingCriteria?: LevelingCriteriaResponse[]
 }) {
   let pm = opts.pm
   vi.stubGlobal(
@@ -74,6 +75,9 @@ function mockFetchFor(opts: {
       if (url === `/v1/sevs/${SEV_ID}/ai/outputs`) return Promise.resolve(jsonResponse({ outputs: opts.aiOutputs ?? [] }))
       if (url === '/v1/ai/plugins')
         return Promise.resolve(jsonResponse(opts.hasPlugins ? { plugins: [{ id: '1', name: 'p', provider: 'anthropic' }] } : {}))
+      if (url === '/v1/config/services') return Promise.resolve(jsonResponse({}))
+      if (url.startsWith('/v1/config/leveling-criteria'))
+        return Promise.resolve(jsonResponse({ criteria: opts.levelingCriteria ?? [] }))
       return Promise.reject(new Error(`unexpected fetch: ${method} ${url}`))
     }),
   )
@@ -332,5 +336,46 @@ describe('PostmortemPage', () => {
 
     window.dispatchEvent(new Event('afterprint'))
     expect(document.title).toBe(originalTitle)
+  })
+
+  it('shows a read-only leveling criteria reference using the SEV\'s own severity and services', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor({
+      sev: makeSev({ affected_services: ['checkout'] }),
+      pm: makePostmortem(),
+      whoAmI: me('viewer'),
+      levelingCriteria: [
+        {
+          service_id: 'checkout',
+          severity_level: 1,
+          criteria: '>50% of checkout traffic failing',
+          created_at: 'now',
+          updated_at: 'now',
+        },
+      ],
+    })
+    renderPage()
+
+    expect(await screen.findByText('Leveling criteria reference')).toBeInTheDocument()
+    expect(await screen.findByText(/>50% of checkout traffic failing/)).toBeInTheDocument()
+
+    // Purely a reference — no edit affordance anywhere in this panel.
+    expect(screen.queryByRole('textbox', { name: /leveling criteria/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^save$/i, hidden: true })).not.toBeInTheDocument()
+
+    const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url).startsWith('/v1/config/leveling-criteria'))!
+    const requestedUrl = new URL(String(call[0]), 'http://localhost')
+    expect(requestedUrl.searchParams.getAll('service_ids')).toEqual(['checkout'])
+    expect(requestedUrl.searchParams.get('severity_level')).toBe('1')
+  })
+
+  it('omits the leveling criteria section when the SEV has no affected services', async () => {
+    tokenStorage.set('tok')
+    mockFetchFor({ sev: makeSev(), pm: makePostmortem(), whoAmI: me('viewer') })
+    renderPage()
+
+    await screen.findByRole('heading', { name: /postmortem/i })
+    expect(screen.queryByText('Leveling criteria reference')).not.toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).startsWith('/v1/config/leveling-criteria'))).toBe(false)
   })
 })
