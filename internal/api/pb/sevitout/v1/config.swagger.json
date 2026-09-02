@@ -325,6 +325,48 @@
         ]
       }
     },
+    "/v1/config/leveling-criteria": {
+      "get": {
+        "summary": "ListLevelingCriteriaForServices is the batch lookup the SEV creation\nform and postmortem page use: every configured row across a SEV's\n(possibly multiple) affected services, at one severity level, no\nreduction — see ServiceLevelingCriteriaStore.ListForServices. Spans\nmultiple services, so it sits at a top-level path rather than nested\nunder one service.",
+        "operationId": "ConfigService_ListLevelingCriteriaForServices",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListLevelingCriteriaForServicesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceIds",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "severityLevel",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
     "/v1/config/oncall": {
       "get": {
         "summary": "ListOnCallRotations is readable by any authenticated user (Viewer+) so\nthe UI can show who is currently on-call.",
@@ -715,6 +757,154 @@
             "required": true,
             "schema": {
               "$ref": "#/definitions/ConfigServiceUpdateServiceBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{serviceId}/leveling-criteria": {
+      "get": {
+        "summary": "ListLevelingCriteria returns every configured severity row (0-4) for one\nservice — what the admin editor renders as its 4-row table.",
+        "operationId": "ConfigService_ListLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListLevelingCriteriaResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{serviceId}/leveling-criteria/{severityLevel}": {
+      "get": {
+        "summary": "--- Per-service SEV leveling criteria (docs/roadmap.md Phase 14) ---\nfree-text guidance for what qualifies as one severity level for one\nservice — purely advisory, never enforced or validated against. Reads\nsit at the same Viewer floor as GetServiceSLA/ListServiceSLAs, since\nthis is exactly what the SEV creation form and postmortem page need for\nany authenticated user opening or reviewing a SEV. Mutations are\nAdmin-only, matching UpsertServiceSLA/DeleteServiceSLA.",
+        "operationId": "ConfigService_GetLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1LevelingCriteriaResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "operationId": "ConfigService_DeleteLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "put": {
+        "operationId": "ConfigService_UpsertLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1LevelingCriteriaResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpsertLevelingCriteriaBody"
             }
           }
         ],
@@ -1168,6 +1358,14 @@
         }
       }
     },
+    "ConfigServiceUpsertLevelingCriteriaBody": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "string"
+        }
+      }
+    },
     "ConfigServiceUpsertServiceSLABody": {
       "type": "object",
       "properties": {
@@ -1497,6 +1695,29 @@
         }
       }
     },
+    "v1LevelingCriteriaResponse": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "criteria": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
     "v1ListAIPluginsResponse": {
       "type": "object",
       "properties": {
@@ -1529,6 +1750,30 @@
           "items": {
             "type": "object",
             "$ref": "#/definitions/v1IntegrationConfigResponse"
+          }
+        }
+      }
+    },
+    "v1ListLevelingCriteriaForServicesResponse": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1LevelingCriteriaResponse"
+          }
+        }
+      }
+    },
+    "v1ListLevelingCriteriaResponse": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1LevelingCriteriaResponse"
           }
         }
       }

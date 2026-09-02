@@ -129,6 +129,27 @@ type ServiceSLAStore interface {
 	ListForServices(ctx context.Context, serviceIDs []string, severityLevel int16) ([]*ServiceSLA, error)
 }
 
+// ServiceLevelingCriteriaStore manages per-service, per-severity-level SEV
+// leveling guidance (docs/roadmap.md Phase 14) — advisory text only, never
+// evaluated (contrast ServiceSLAStore, whose rows EvaluateSLA reduces).
+type ServiceLevelingCriteriaStore interface {
+	// Upsert creates or replaces the criteria row for (ServiceID, SeverityLevel).
+	Upsert(ctx context.Context, c *ServiceLevelingCriteria) error
+	Get(ctx context.Context, serviceID string, severityLevel int16) (*ServiceLevelingCriteria, error)
+	Delete(ctx context.Context, serviceID string, severityLevel int16) error
+	// ListByService returns every configured severity row for one service
+	// (0-4 rows), ordered by severity level — used by the admin editor.
+	ListByService(ctx context.Context, serviceID string) ([]*ServiceLevelingCriteria, error)
+	// ListForServices returns the configured rows for a set of service IDs at
+	// one severity level, one row per service that has one — no reduction
+	// (contrast ServiceSLAStore.ListForServices, which feeds MostStrictSLA's
+	// min-across-services reduction). The SEV creation form and postmortem
+	// page list every matching service's guidance side-by-side rather than
+	// collapsing to a single value, since there's nothing to reduce guidance
+	// text to.
+	ListForServices(ctx context.Context, serviceIDs []string, severityLevel int16) ([]*ServiceLevelingCriteria, error)
+}
+
 // OnCallStore manages on-call rotation definitions and manual overrides.
 type OnCallStore interface {
 	Create(ctx context.Context, rotation *OnCallRotation) error

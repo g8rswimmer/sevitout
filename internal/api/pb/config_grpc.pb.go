@@ -46,6 +46,26 @@ type ConfigServiceClient interface {
 	// ListServiceSLAs returns every configured severity row (0-4) for one
 	// service — what the admin editor renders as its 4-row table.
 	ListServiceSLAs(ctx context.Context, in *ListServiceSLAsRequest, opts ...grpc.CallOption) (*ListServiceSLAsResponse, error)
+	// --- Per-service SEV leveling criteria (docs/roadmap.md Phase 14) ---
+	// free-text guidance for what qualifies as one severity level for one
+	// service — purely advisory, never enforced or validated against. Reads
+	// sit at the same Viewer floor as GetServiceSLA/ListServiceSLAs, since
+	// this is exactly what the SEV creation form and postmortem page need for
+	// any authenticated user opening or reviewing a SEV. Mutations are
+	// Admin-only, matching UpsertServiceSLA/DeleteServiceSLA.
+	GetLevelingCriteria(ctx context.Context, in *GetLevelingCriteriaRequest, opts ...grpc.CallOption) (*LevelingCriteriaResponse, error)
+	UpsertLevelingCriteria(ctx context.Context, in *UpsertLevelingCriteriaRequest, opts ...grpc.CallOption) (*LevelingCriteriaResponse, error)
+	DeleteLevelingCriteria(ctx context.Context, in *DeleteLevelingCriteriaRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// ListLevelingCriteria returns every configured severity row (0-4) for one
+	// service — what the admin editor renders as its 4-row table.
+	ListLevelingCriteria(ctx context.Context, in *ListLevelingCriteriaRequest, opts ...grpc.CallOption) (*ListLevelingCriteriaResponse, error)
+	// ListLevelingCriteriaForServices is the batch lookup the SEV creation
+	// form and postmortem page use: every configured row across a SEV's
+	// (possibly multiple) affected services, at one severity level, no
+	// reduction — see ServiceLevelingCriteriaStore.ListForServices. Spans
+	// multiple services, so it sits at a top-level path rather than nested
+	// under one service.
+	ListLevelingCriteriaForServices(ctx context.Context, in *ListLevelingCriteriaForServicesRequest, opts ...grpc.CallOption) (*ListLevelingCriteriaForServicesResponse, error)
 	// ListUsers is Admin-only; the directory includes email addresses.
 	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
 	UpdateUserRole(ctx context.Context, in *UpdateUserRoleRequest, opts ...grpc.CallOption) (*UserResponse, error)
@@ -191,6 +211,51 @@ func (c *configServiceClient) DeleteServiceSLA(ctx context.Context, in *DeleteSe
 func (c *configServiceClient) ListServiceSLAs(ctx context.Context, in *ListServiceSLAsRequest, opts ...grpc.CallOption) (*ListServiceSLAsResponse, error) {
 	out := new(ListServiceSLAsResponse)
 	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListServiceSLAs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) GetLevelingCriteria(ctx context.Context, in *GetLevelingCriteriaRequest, opts ...grpc.CallOption) (*LevelingCriteriaResponse, error) {
+	out := new(LevelingCriteriaResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/GetLevelingCriteria", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpsertLevelingCriteria(ctx context.Context, in *UpsertLevelingCriteriaRequest, opts ...grpc.CallOption) (*LevelingCriteriaResponse, error) {
+	out := new(LevelingCriteriaResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/UpsertLevelingCriteria", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) DeleteLevelingCriteria(ctx context.Context, in *DeleteLevelingCriteriaRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/DeleteLevelingCriteria", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ListLevelingCriteria(ctx context.Context, in *ListLevelingCriteriaRequest, opts ...grpc.CallOption) (*ListLevelingCriteriaResponse, error) {
+	out := new(ListLevelingCriteriaResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListLevelingCriteria", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ListLevelingCriteriaForServices(ctx context.Context, in *ListLevelingCriteriaForServicesRequest, opts ...grpc.CallOption) (*ListLevelingCriteriaForServicesResponse, error) {
+	out := new(ListLevelingCriteriaForServicesResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListLevelingCriteriaForServices", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +496,26 @@ type ConfigServiceServer interface {
 	// ListServiceSLAs returns every configured severity row (0-4) for one
 	// service — what the admin editor renders as its 4-row table.
 	ListServiceSLAs(context.Context, *ListServiceSLAsRequest) (*ListServiceSLAsResponse, error)
+	// --- Per-service SEV leveling criteria (docs/roadmap.md Phase 14) ---
+	// free-text guidance for what qualifies as one severity level for one
+	// service — purely advisory, never enforced or validated against. Reads
+	// sit at the same Viewer floor as GetServiceSLA/ListServiceSLAs, since
+	// this is exactly what the SEV creation form and postmortem page need for
+	// any authenticated user opening or reviewing a SEV. Mutations are
+	// Admin-only, matching UpsertServiceSLA/DeleteServiceSLA.
+	GetLevelingCriteria(context.Context, *GetLevelingCriteriaRequest) (*LevelingCriteriaResponse, error)
+	UpsertLevelingCriteria(context.Context, *UpsertLevelingCriteriaRequest) (*LevelingCriteriaResponse, error)
+	DeleteLevelingCriteria(context.Context, *DeleteLevelingCriteriaRequest) (*emptypb.Empty, error)
+	// ListLevelingCriteria returns every configured severity row (0-4) for one
+	// service — what the admin editor renders as its 4-row table.
+	ListLevelingCriteria(context.Context, *ListLevelingCriteriaRequest) (*ListLevelingCriteriaResponse, error)
+	// ListLevelingCriteriaForServices is the batch lookup the SEV creation
+	// form and postmortem page use: every configured row across a SEV's
+	// (possibly multiple) affected services, at one severity level, no
+	// reduction — see ServiceLevelingCriteriaStore.ListForServices. Spans
+	// multiple services, so it sits at a top-level path rather than nested
+	// under one service.
+	ListLevelingCriteriaForServices(context.Context, *ListLevelingCriteriaForServicesRequest) (*ListLevelingCriteriaForServicesResponse, error)
 	// ListUsers is Admin-only; the directory includes email addresses.
 	ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error)
 	UpdateUserRole(context.Context, *UpdateUserRoleRequest) (*UserResponse, error)
@@ -524,6 +609,21 @@ func (UnimplementedConfigServiceServer) DeleteServiceSLA(context.Context, *Delet
 }
 func (UnimplementedConfigServiceServer) ListServiceSLAs(context.Context, *ListServiceSLAsRequest) (*ListServiceSLAsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListServiceSLAs not implemented")
+}
+func (UnimplementedConfigServiceServer) GetLevelingCriteria(context.Context, *GetLevelingCriteriaRequest) (*LevelingCriteriaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetLevelingCriteria not implemented")
+}
+func (UnimplementedConfigServiceServer) UpsertLevelingCriteria(context.Context, *UpsertLevelingCriteriaRequest) (*LevelingCriteriaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpsertLevelingCriteria not implemented")
+}
+func (UnimplementedConfigServiceServer) DeleteLevelingCriteria(context.Context, *DeleteLevelingCriteriaRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteLevelingCriteria not implemented")
+}
+func (UnimplementedConfigServiceServer) ListLevelingCriteria(context.Context, *ListLevelingCriteriaRequest) (*ListLevelingCriteriaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLevelingCriteria not implemented")
+}
+func (UnimplementedConfigServiceServer) ListLevelingCriteriaForServices(context.Context, *ListLevelingCriteriaForServicesRequest) (*ListLevelingCriteriaForServicesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLevelingCriteriaForServices not implemented")
 }
 func (UnimplementedConfigServiceServer) ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListUsers not implemented")
@@ -765,6 +865,96 @@ func _ConfigService_ListServiceSLAs_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConfigServiceServer).ListServiceSLAs(ctx, req.(*ListServiceSLAsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_GetLevelingCriteria_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLevelingCriteriaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetLevelingCriteria(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/GetLevelingCriteria",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetLevelingCriteria(ctx, req.(*GetLevelingCriteriaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpsertLevelingCriteria_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertLevelingCriteriaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpsertLevelingCriteria(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/UpsertLevelingCriteria",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpsertLevelingCriteria(ctx, req.(*UpsertLevelingCriteriaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_DeleteLevelingCriteria_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteLevelingCriteriaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).DeleteLevelingCriteria(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/DeleteLevelingCriteria",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).DeleteLevelingCriteria(ctx, req.(*DeleteLevelingCriteriaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ListLevelingCriteria_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLevelingCriteriaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListLevelingCriteria(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/ListLevelingCriteria",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListLevelingCriteria(ctx, req.(*ListLevelingCriteriaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ListLevelingCriteriaForServices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLevelingCriteriaForServicesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListLevelingCriteriaForServices(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/ListLevelingCriteriaForServices",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListLevelingCriteriaForServices(ctx, req.(*ListLevelingCriteriaForServicesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1225,6 +1415,26 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListServiceSLAs",
 			Handler:    _ConfigService_ListServiceSLAs_Handler,
+		},
+		{
+			MethodName: "GetLevelingCriteria",
+			Handler:    _ConfigService_GetLevelingCriteria_Handler,
+		},
+		{
+			MethodName: "UpsertLevelingCriteria",
+			Handler:    _ConfigService_UpsertLevelingCriteria_Handler,
+		},
+		{
+			MethodName: "DeleteLevelingCriteria",
+			Handler:    _ConfigService_DeleteLevelingCriteria_Handler,
+		},
+		{
+			MethodName: "ListLevelingCriteria",
+			Handler:    _ConfigService_ListLevelingCriteria_Handler,
+		},
+		{
+			MethodName: "ListLevelingCriteriaForServices",
+			Handler:    _ConfigService_ListLevelingCriteriaForServices_Handler,
 		},
 		{
 			MethodName: "ListUsers",

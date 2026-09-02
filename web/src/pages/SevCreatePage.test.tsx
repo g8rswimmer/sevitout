@@ -119,6 +119,48 @@ describe('SevCreatePage', () => {
     }
   })
 
+  it('refetches leveling criteria when severity or affected services change', async () => {
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = String(input)
+      if (url.startsWith('/v1/config/services')) return Promise.resolve(jsonResponse({}))
+      if (url.startsWith('/v1/config/leveling-criteria')) return Promise.resolve(jsonResponse({ criteria: [] }))
+      return Promise.resolve(jsonResponse({ id: 'SEV-2026-0042' }))
+    })
+
+    renderWithProviders(<SevCreatePage />)
+    const user = userEvent.setup()
+
+    // No services selected yet — the panel makes no request at all.
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).startsWith('/v1/config/leveling-criteria'))).toBe(false)
+
+    const serviceInput = screen.getByPlaceholderText(/type a service name/i)
+    await user.type(serviceInput, 'checkout{enter}')
+
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url).startsWith('/v1/config/leveling-criteria'))
+      expect(call).toBeDefined()
+    })
+    let call = vi.mocked(fetch).mock.calls.find(([url]) => String(url).startsWith('/v1/config/leveling-criteria'))!
+    let requestedUrl = new URL(String(call[0]), 'http://localhost')
+    expect(requestedUrl.searchParams.getAll('service_ids')).toEqual(['checkout'])
+    expect(requestedUrl.searchParams.get('severity_level')).toBe('3') // default severity
+
+    await user.selectOptions(screen.getByLabelText('Severity level'), '1')
+
+    await waitFor(() => {
+      const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith('/v1/config/leveling-criteria'))
+      expect(calls.some(([url]) => new URL(String(url), 'http://localhost').searchParams.get('severity_level') === '1')).toBe(
+        true,
+      )
+    })
+    call = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).startsWith('/v1/config/leveling-criteria'))
+      .find(([url]) => new URL(String(url), 'http://localhost').searchParams.get('severity_level') === '1')!
+    requestedUrl = new URL(String(call[0]), 'http://localhost')
+    expect(requestedUrl.searchParams.getAll('service_ids')).toEqual(['checkout'])
+  })
+
   it('shows the server error message when creation fails', async () => {
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)

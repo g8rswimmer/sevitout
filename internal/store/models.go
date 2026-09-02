@@ -445,6 +445,24 @@ type ServiceSLA struct {
 	UpdatedAt         time.Time
 }
 
+// ServiceLevelingCriteria is free-text guidance for what qualifies as one
+// severity level for one service (docs/roadmap.md Phase 14) — e.g. "SEV-1
+// for checkout: >50% of checkout traffic failing." Purely advisory: no
+// domain logic reads or evaluates this (contrast ServiceSLA, which
+// internal/sev/sla.go's EvaluateSLA dereferences on every SEV read).
+// Surfaced to a human on SEV creation (SevCreatePage.tsx, to help pick the
+// right level) and again, read-only, on the postmortem page
+// (PostmortemPage.tsx, to help confirm the level chosen was correct) — never
+// enforced or validated against.
+type ServiceLevelingCriteria struct {
+	ID            int64
+	ServiceID     string
+	SeverityLevel int16
+	Criteria      string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // User is a registered user who authenticates with email and password.
 type User struct {
 	ID           string

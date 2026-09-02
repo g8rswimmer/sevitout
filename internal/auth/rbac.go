@@ -99,19 +99,29 @@ var rpcMinRole = map[string]store.OrgRole{
 	// same Viewer floor as GetService/ListServices, since the resolved
 	// numbers are already exposed to any Viewer via SEVResponse.sla_status;
 	// mutations match UpdateService/DeleteService's Admin floor.
-	"/sevitout.v1.ConfigService/GetServiceSLA":        store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/UpsertServiceSLA":     store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteServiceSLA":     store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListServiceSLAs":      store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/ListUsers":            store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/UpdateUserRole":       store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeactivateUser":       store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ReactivateUser":       store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/CreateOnCallRotation": store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetOnCallRotation":    store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/UpdateOnCallRotation": store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteOnCallRotation": store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListOnCallRotations":  store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/GetServiceSLA":    store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpsertServiceSLA": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteServiceSLA": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListServiceSLAs":  store.OrgRoleViewer,
+	// Per-service SEV leveling criteria (docs/roadmap.md Phase 14) — advisory
+	// text, never enforced. Reads sit at the same Viewer floor as
+	// GetServiceSLA/ListServiceSLAs (needed by the SEV creation form and
+	// postmortem page for any authenticated user); mutations match
+	// UpsertServiceSLA/DeleteServiceSLA's Admin floor.
+	"/sevitout.v1.ConfigService/GetLevelingCriteria":             store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpsertLevelingCriteria":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteLevelingCriteria":          store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListLevelingCriteria":            store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/ListLevelingCriteriaForServices": store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/ListUsers":                       store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateUserRole":                  store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeactivateUser":                  store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ReactivateUser":                  store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateOnCallRotation":            store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetOnCallRotation":               store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpdateOnCallRotation":            store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteOnCallRotation":            store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListOnCallRotations":             store.OrgRoleViewer,
 	// GetIntegrationCatalog is a pure static-schema read (no store access,
 	// nothing per-integration sensitive) but stays Admin-only for
 	// consistency with the rest of this integration-config group.

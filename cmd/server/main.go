@@ -230,15 +230,16 @@ func main() {
 	})
 	searchServer := grpchandler.NewSearchServer(stores.SEV, stores.Role, stores.Announcement)
 	configServer := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
-		Services:     stores.Service,
-		ServiceSLAs:  stores.ServiceSLA,
-		Users:        stores.User,
-		OnCall:       stores.OnCall,
-		Integrations: stores.IntegrationConfig,
-		Retention:    stores.RetentionConfig,
-		AIPlugins:    stores.AIPlugin,
-		Crypto:       encryptor,
-		RateLimits:   aiDispatcher,
+		Services:         stores.Service,
+		ServiceSLAs:      stores.ServiceSLA,
+		LevelingCriteria: stores.LevelingCriteria,
+		Users:            stores.User,
+		OnCall:           stores.OnCall,
+		Integrations:     stores.IntegrationConfig,
+		Retention:        stores.RetentionConfig,
+		AIPlugins:        stores.AIPlugin,
+		Crypto:           encryptor,
+		RateLimits:       aiDispatcher,
 		Refreshers: []grpchandler.IntegrationCredentialsRefresher{
 			pagerdutyResolver, githubResolver, jiraResolver,
 		},
@@ -461,6 +462,7 @@ type Stores struct {
 	Role              store.RoleStore
 	Service           store.ServiceStore
 	ServiceSLA        store.ServiceSLAStore
+	LevelingCriteria  store.ServiceLevelingCriteriaStore
 	Postmortem        store.PostmortemStore
 	Announcement      store.AnnouncementStore
 	Chat              store.ChatStore
@@ -510,6 +512,7 @@ func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, er
 			Role:              memory.NewRoleStore(),
 			Service:           memory.NewServiceStore(),
 			ServiceSLA:        memory.NewServiceSLAStore(),
+			LevelingCriteria:  memory.NewServiceLevelingCriteriaStore(),
 			Postmortem:        memory.NewPostmortemStore(),
 			Announcement:      memory.NewAnnouncementStore(),
 			Chat:              memory.NewChatStore(),
@@ -538,6 +541,7 @@ func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, er
 		Role:              postgres.NewRoleStore(pool),
 		Service:           postgres.NewServiceStore(pool),
 		ServiceSLA:        postgres.NewServiceSLAStore(pool),
+		LevelingCriteria:  postgres.NewServiceLevelingCriteriaStore(pool),
 		Postmortem:        postgres.NewPostmortemStore(pool),
 		Announcement:      postgres.NewAnnouncementStore(pool),
 		Chat:              postgres.NewChatStore(pool),

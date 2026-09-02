@@ -1254,7 +1254,7 @@ immediately. Independent of Phases 8-11's integration work.
 
 ## Phase 14 — Per-service SEV leveling criteria
 
-**Status**: 📋 planned, not yet implemented
+**Status**: ✅ shipped, see [`demo/per-service-leveling-criteria.md`](../demo/per-service-leveling-criteria.md)
 
 SEVs use the SEV-1 through SEV-4 taxonomy with generic, org-wide descriptions
 (`docs/requirements.md` §3: "Total outage or data loss," "Significant

@@ -20,6 +20,7 @@ import type {
   GrantAccessRequest,
   IntegrationConfigResponse,
   IntegrationsHealthResponse,
+  LevelingCriteriaResponse,
   LinkSEVsRequest,
   LinkTaskRequest,
   ListAccessResponse,
@@ -29,6 +30,8 @@ import type {
   ListChatEntriesResponse,
   ListEnabledIntegrationsResponse,
   ListIntegrationConfigsResponse,
+  ListLevelingCriteriaForServicesResponse,
+  ListLevelingCriteriaResponse,
   ListLinkedSEVsResponse,
   ListOnCallRotationsResponse,
   ListPluginsResponse,
@@ -71,6 +74,7 @@ import type {
   UpdateServiceRequest,
   UpdateUserRoleRequest,
   UpsertIntegrationConfigRequest,
+  UpsertLevelingCriteriaRequest,
   UpsertServiceSLARequest,
   UserResponse,
   WhoAmIResponse,
@@ -445,6 +449,26 @@ export const api = {
         }),
       delete: (serviceId: string, severityLevel: number) =>
         request<void>(`/v1/config/services/${serviceId}/sla/${severityLevel}`, { method: 'DELETE' }),
+    },
+    // Per-service SEV leveling criteria (Roadmap Phase 14) — advisory
+    // guidance text, never enforced.
+    levelingCriteria: {
+      list: (serviceId: string) =>
+        request<ListLevelingCriteriaResponse>(`/v1/config/services/${serviceId}/leveling-criteria`),
+      upsert: (serviceId: string, severityLevel: number, req: UpsertLevelingCriteriaRequest) =>
+        request<LevelingCriteriaResponse>(`/v1/config/services/${serviceId}/leveling-criteria/${severityLevel}`, {
+          method: 'PUT',
+          body: JSON.stringify(req),
+        }),
+      delete: (serviceId: string, severityLevel: number) =>
+        request<void>(`/v1/config/services/${serviceId}/leveling-criteria/${severityLevel}`, { method: 'DELETE' }),
+      // listForServices spans multiple services (no single service_id in the
+      // path) — grpc-gateway maps the repeated service_ids field to repeated
+      // query params, same as reports.serviceMetrics above.
+      listForServices: (serviceIds: string[], severityLevel: number) =>
+        request<ListLevelingCriteriaForServicesResponse>(
+          `/v1/config/leveling-criteria${buildQuery({ service_ids: serviceIds, severity_level: severityLevel })}`,
+        ),
     },
     aiPlugins: {
       list: () => request<ListAIPluginsResponse>('/v1/config/ai-plugins'),

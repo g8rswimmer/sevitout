@@ -79,6 +79,48 @@ service ConfigService {
     };
   }
 
+  // --- Per-service SEV leveling criteria (docs/roadmap.md Phase 14) ---
+  // free-text guidance for what qualifies as one severity level for one
+  // service — purely advisory, never enforced or validated against. Reads
+  // sit at the same Viewer floor as GetServiceSLA/ListServiceSLAs, since
+  // this is exactly what the SEV creation form and postmortem page need for
+  // any authenticated user opening or reviewing a SEV. Mutations are
+  // Admin-only, matching UpsertServiceSLA/DeleteServiceSLA.
+  rpc GetLevelingCriteria(GetLevelingCriteriaRequest) returns (LevelingCriteriaResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/services/{service_id}/leveling-criteria/{severity_level}"
+    };
+  }
+  rpc UpsertLevelingCriteria(UpsertLevelingCriteriaRequest) returns (LevelingCriteriaResponse) {
+    option (google.api.http) = {
+      put: "/v1/config/services/{service_id}/leveling-criteria/{severity_level}"
+      body: "*"
+    };
+  }
+  rpc DeleteLevelingCriteria(DeleteLevelingCriteriaRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/config/services/{service_id}/leveling-criteria/{severity_level}"
+    };
+  }
+  // ListLevelingCriteria returns every configured severity row (0-4) for one
+  // service — what the admin editor renders as its 4-row table.
+  rpc ListLevelingCriteria(ListLevelingCriteriaRequest) returns (ListLevelingCriteriaResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/services/{service_id}/leveling-criteria"
+    };
+  }
+  // ListLevelingCriteriaForServices is the batch lookup the SEV creation
+  // form and postmortem page use: every configured row across a SEV's
+  // (possibly multiple) affected services, at one severity level, no
+  // reduction — see ServiceLevelingCriteriaStore.ListForServices. Spans
+  // multiple services, so it sits at a top-level path rather than nested
+  // under one service.
+  rpc ListLevelingCriteriaForServices(ListLevelingCriteriaForServicesRequest) returns (ListLevelingCriteriaForServicesResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/leveling-criteria"
+    };
+  }
+
   // --- User management (§18.2, §14) ---
 
   // ListUsers is Admin-only; the directory includes email addresses.
@@ -363,6 +405,49 @@ message ListServiceSLAsRequest {
 
 message ListServiceSLAsResponse {
   repeated ServiceSLAResponse slas = 1;
+}
+
+// ── Per-service SEV leveling criteria (docs/roadmap.md Phase 14) ───────────
+
+message LevelingCriteriaResponse {
+  string service_id = 1;
+  int32 severity_level = 2;
+  string criteria = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message GetLevelingCriteriaRequest {
+  string service_id = 1;
+  int32 severity_level = 2;
+}
+
+message UpsertLevelingCriteriaRequest {
+  string service_id = 1;
+  int32 severity_level = 2;
+  string criteria = 3;
+}
+
+message DeleteLevelingCriteriaRequest {
+  string service_id = 1;
+  int32 severity_level = 2;
+}
+
+message ListLevelingCriteriaRequest {
+  string service_id = 1;
+}
+
+message ListLevelingCriteriaResponse {
+  repeated LevelingCriteriaResponse criteria = 1;
+}
+
+message ListLevelingCriteriaForServicesRequest {
+  repeated string service_ids = 1;
+  int32 severity_level = 2;
+}
+
+message ListLevelingCriteriaForServicesResponse {
+  repeated LevelingCriteriaResponse criteria = 1;
 }
 
 // ── User management ──────────────────────────────────────────────────────────

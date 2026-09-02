@@ -58,6 +58,7 @@ type ConfigServer struct {
 	pb.UnimplementedConfigServiceServer
 	services             store.ServiceStore
 	serviceSLAs          store.ServiceSLAStore
+	levelingCriteria     store.ServiceLevelingCriteriaStore
 	users                store.UserStore
 	oncall               store.OnCallStore
 	integrations         store.IntegrationConfigStore
@@ -79,6 +80,7 @@ type ConfigServer struct {
 type ConfigServerParams struct {
 	Services             store.ServiceStore
 	ServiceSLAs          store.ServiceSLAStore
+	LevelingCriteria     store.ServiceLevelingCriteriaStore
 	Users                store.UserStore
 	OnCall               store.OnCallStore
 	Integrations         store.IntegrationConfigStore
@@ -94,6 +96,7 @@ func NewConfigServer(p ConfigServerParams) *ConfigServer {
 	return &ConfigServer{
 		services:             p.Services,
 		serviceSLAs:          p.ServiceSLAs,
+		levelingCriteria:     p.LevelingCriteria,
 		users:                p.Users,
 		oncall:               p.OnCall,
 		integrations:         p.Integrations,
