@@ -1252,6 +1252,330 @@ immediately. Independent of Phases 8-11's integration work.
 
 ---
 
+## Phase 14 — Per-service SEV leveling criteria
+
+**Status**: 📋 planned, not yet implemented
+
+SEVs use the SEV-1 through SEV-4 taxonomy with generic, org-wide descriptions
+(`docs/requirements.md` §3: "Total outage or data loss," "Significant
+degradation," etc.), but what those descriptions mean in practice varies by
+service — a payments service's SEV-1 bar (say, ">50% of checkout traffic
+failing") looks nothing like an internal admin tool's. Phase 12/13 built SLA
+targets and compliance reporting that key off whatever severity level a SEV
+is assigned (`internal/sev/sla.go`'s `MostStrictSLA`/`EvaluateSLA`,
+`ServiceSLAResponse`), so picking the *right* level for a given service
+matters — an incident leveled too low silently gets a looser SLA target than
+it should, one leveled too high gets held to a bar it never needed. This
+phase adds a second, independent per-(service, severity) table holding
+free-text guidance authored by team leads, surfaced next to the severity
+picker on SEV creation and again, read-only, on the postmortem page so the
+assigned level can be sanity-checked against the service's own criteria
+during writeup. **This is guidance only and is never validated or
+enforced** — nothing blocks opening or transitioning a SEV based on it; see
+"Also considered and explicitly deferred" below.
+
+It deliberately does not extend `service_slas` (Phase 12): that table holds
+numeric operational thresholds evaluated by `sla.go` on every SEV read,
+owned by the same lifecycle as breach computation; this table holds
+descriptive text authored and read by humans, never evaluated by any domain
+logic, and its own row's lifecycle (create/edit/delete guidance) has nothing
+to do with whether an SLA target exists for that same (service, severity)
+pair. Sharing a table would couple two concerns that should be free to
+change independently — e.g. deleting a criteria row should never risk
+touching an SLA row's `updated_at` or vice versa.
+
+**14a. Backend: schema + store**
+
+- New table `service_leveling_criteria` (migration
+  `000019_service_leveling_criteria.{up,down}.sql`, the next free migration
+  number after `000018_rtpc_column_rename_repair`): `id BIGSERIAL PK`,
+  `service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE`,
+  `severity_level SMALLINT NOT NULL CHECK (severity_level BETWEEN 1 AND 4)`,
+  `criteria TEXT NOT NULL`, `created_at`/`updated_at TIMESTAMPTZ NOT NULL
+  DEFAULT NOW()`, `UNIQUE (service_id, severity_level)` — same granularity
+  and constraint shape as `service_slas` (`migrations/000016_service_sla.up.sql`),
+  but one free-text column instead of four numeric target columns. Also add
+  `CREATE INDEX IF NOT EXISTS idx_service_leveling_criteria_service_id ON
+  service_leveling_criteria(service_id)`, matching
+  `idx_service_slas_service_id`. Down: `DROP TABLE IF EXISTS
+  service_leveling_criteria;`. `criteria` is `NOT NULL` rather than
+  nullable-with-empty-meaning-unset (unlike `service_slas`'s nullable target
+  columns) — a row only exists when there's something to say; "no guidance
+  configured" is simply "no row," enforced by the handler rejecting an
+  empty/whitespace-only `criteria` on upsert (14b) rather than by the schema
+  allowing an empty-string row to sit alongside "no row" as a second way to
+  mean the same thing.
+- New `store.ServiceLevelingCriteria` struct in `internal/store/models.go`,
+  alongside `ServiceSLA` (`internal/store/models.go:429-446`), with a doc
+  comment in the same style — cite this phase, state plainly that this is
+  advisory text never read by any evaluation logic (unlike `ServiceSLA`,
+  which `EvaluateSLA` dereferences), and cross-reference the two consuming
+  frontend surfaces (`SevCreatePage.tsx`, `PostmortemPage.tsx`) so a future
+  reader doesn't go looking for a `sla.go`-style consumer that doesn't
+  exist.
+- New `store.ServiceLevelingCriteriaStore` interface in
+  `internal/store/store.go`, next to `ServiceSLAStore`
+  (`internal/store/store.go:116-130`): `Upsert`, `Get`, `Delete`,
+  `ListByService(ctx, serviceID string) ([]*ServiceLevelingCriteria, error)`
+  (admin editor, 0-4 rows ordered by severity level), and
+  `ListForServices(ctx, serviceIDs []string, severityLevel int16)
+  ([]*ServiceLevelingCriteria, error)` — a **no-reduction** batch read
+  (contrast `ServiceSLAStore.ListForServices`, which feeds `MostStrictSLA`'s
+  min-across-services reduction), since guidance text for multiple services
+  is just listed side-by-side, never collapsed to one value. No
+  `internal/sev`-side reduction helper is needed at all — this store method
+  alone is sufficient for both frontend consumers.
+- In-memory fake `internal/store/memory/service_leveling_criteria.go`,
+  copying `internal/store/memory/service_sla.go`'s shape exactly: a
+  `{serviceID, severityLevel}` map key, `sync.RWMutex`, `atomic.Int64` ID
+  sequence, `Upsert` preserving the existing row's `ID`/`CreatedAt` on
+  update, `ListByService` iterating severity levels 1-4 in order,
+  `ListForServices` iterating the given `serviceIDs` in order and skipping
+  any with no row (never a nil element in the returned slice). Postgres
+  implementation `internal/store/postgres/service_leveling_criteria.go` +
+  sqlc queries in `internal/store/sql/service_leveling_criteria.sql`,
+  mirroring `service_sla.go`/`service_slas.sql`'s `-- name: X
+  :one/:many/:exec` convention 1:1, with `criteria` replacing the four
+  `*_target_seconds` columns and upsert via `ON CONFLICT (service_id,
+  severity_level) DO UPDATE SET criteria = EXCLUDED.criteria, updated_at =
+  NOW() RETURNING id`. Run `make generate` (sqlc) after adding the `.sql`
+  file.
+
+**14b. Backend: API surface**
+
+- `proto/sevitout/v1/config.proto`: new RPC block, "Per-service SEV leveling
+  criteria (docs/roadmap.md Phase 14)," inserted right after the SLA block
+  (`config.proto:52-79`), following that block's own RBAC-comment
+  convention (`:52-57`): reads Viewer+ (same reasoning as
+  `GetServiceSLA`/`ListServiceSLAs` — exactly what `SevCreatePage.tsx`/
+  `PostmortemPage.tsx` need for any authenticated user opening or reviewing
+  a SEV), writes Admin-only. RPCs: `GetLevelingCriteria`/
+  `UpsertLevelingCriteria`/`DeleteLevelingCriteria`/`ListLevelingCriteria`
+  at `/v1/config/services/{service_id}/leveling-criteria[/{severity_level}]`
+  (GET/PUT/DELETE/GET, mirroring the SLA block's URL shape exactly), plus
+  `ListLevelingCriteriaForServices` at a top-level `/v1/config/leveling-criteria`
+  (GET, `repeated string service_ids` + `severity_level` query params —
+  grpc-gateway maps a repeated field to repeated query params automatically)
+  since it spans multiple services rather than nesting under one. Messages
+  (`LevelingCriteriaResponse{service_id, severity_level, criteria,
+  created_at, updated_at}` plus one request message per RPC) placed next to
+  the `ServiceSLA*` block (`:322-366`). Run `make proto` after editing to
+  regenerate `internal/api/pb`.
+- New sibling handler file `internal/api/grpc/config_leveling_criteria.go`
+  (alongside `config_service_sla.go`, 139 lines), following its exact
+  shape: `GetLevelingCriteria`/`UpsertLevelingCriteria` (validates
+  `service_id` non-empty, severity level via the existing
+  `validateSeverityLevel` helper in `internal/api/grpc/config_retention.go:74`,
+  confirms the referenced service exists via `s.services.Get` before
+  upserting — same "an orphaned row could never be resolved" reasoning
+  `UpsertServiceSLA` gives, plus rejects an empty/whitespace-only `criteria`
+  with `codes.InvalidArgument`, since clearing existing guidance is
+  `DeleteLevelingCriteria`'s job, not an empty upsert's, matching the
+  `criteria TEXT NOT NULL` schema decision in 14a)/`DeleteLevelingCriteria`/
+  `ListLevelingCriteria` (mirror `GetServiceSLA`/`UpsertServiceSLA`/
+  `DeleteServiceSLA`/`ListServiceSLAs`'s `store.ErrNotFound` →
+  `codes.NotFound` mapping and `internalError(ctx, ...)` fallback 1:1) plus
+  a new `ListLevelingCriteriaForServices` (no service-existence check
+  needed — purely a read, silently omits any service ID with no configured
+  row) and a `levelingCriteriaToProto` helper mirroring
+  `serviceSLAToProto`.
+- `ConfigServer` struct and `ConfigServerParams`
+  (`internal/api/grpc/config.go:57-70,79-89`) each get a new field:
+  `levelingCriteria`/`LevelingCriteria store.ServiceLevelingCriteriaStore`,
+  positioned right after the existing `serviceSLAs`/`ServiceSLAs` fields.
+- RBAC additions in `internal/auth/rbac.go`, immediately after the existing
+  `ServiceSLA` block (`internal/auth/rbac.go:102-105`), same comment style:
+  `GetLevelingCriteria`/`ListLevelingCriteria`/
+  `ListLevelingCriteriaForServices` → `store.OrgRoleViewer`,
+  `UpsertLevelingCriteria`/`DeleteLevelingCriteria` → `store.OrgRoleAdmin`.
+- Server wiring in `cmd/server/main.go`: `Stores` struct gets
+  `LevelingCriteria store.ServiceLevelingCriteriaStore` next to the
+  existing `ServiceSLA` field (`:463`); memory instantiation
+  `memory.NewServiceLevelingCriteriaStore()` next to
+  `memory.NewServiceSLAStore()` (`:512`); Postgres instantiation
+  `postgres.NewServiceLevelingCriteriaStore(pool)` next to
+  `postgres.NewServiceSLAStore(pool)` (`:540`); passed into
+  `NewConfigServer`'s params next to `ServiceSLAs: stores.ServiceSLA`.
+  **Unlike Phase 12's `ServiceSLAStore`, this store is *not* also wired
+  into `NewSEVServer` or `NewReportServer`** — `SEVResponse` gains no new
+  field and `ReportService` computes nothing from this table; both frontend
+  consumers (14d) call `ConfigService` RPCs directly, since there is no
+  server-side evaluation step analogous to `EvaluateSLA` that would need
+  this data attached to a SEV read.
+
+**14c. Frontend: admin editor UI**
+
+- `web/src/lib/api.ts`: add `api.config.levelingCriteria.{list, upsert,
+  delete, listForServices}`, mirroring `api.config.serviceSLA.*`
+  (`web/src/lib/api.ts:439-448`) — `listForServices(serviceIds: string[],
+  severityLevel: number)` builds the repeated-query-param GET request
+  against `/v1/config/leveling-criteria`.
+- `web/src/types/api.ts`: add `LevelingCriteriaResponse`,
+  `ListLevelingCriteriaResponse`, `UpsertLevelingCriteriaRequest`,
+  `ListLevelingCriteriaForServicesResponse`, matching the proto shape —
+  none of these fields are proto3 int64 (unlike `ServiceSLAResponse`'s
+  `*_target_seconds`), so there's no string-vs-number serialization quirk
+  to account for here.
+- New `web/src/components/admin/LevelingCriteriaEditor.tsx`, built directly
+  on `ServiceSLAEditor.tsx`'s structure (`web/src/components/admin/ServiceSLAEditor.tsx`):
+  same `useQuery`/per-row `forms`/`errors` state keyed by severity level,
+  same `upsertMutation`/`clearMutation` pair (`clearMutation` calling
+  `delete`, shown only when a row already has a saved value) — but each
+  `SEVERITY_LEVELS` row renders a single `<Textarea aria-label={`Leveling
+  criteria for SEV-${level}`}>` bound to a plain string instead of
+  `ServiceSLAEditor`'s four numeric `<Input>` columns, so no
+  `hoursToSeconds`-style unit conversion is needed. Reuse `SEVERITY_LEVELS`
+  from `@/lib/slaTargets.ts` directly rather than duplicating the same
+  `[1, 2, 3, 4]` constant in a new file — its current doc comment ties it
+  rhetorically to SLA forms, but the value itself is generic; leave a
+  one-line note in the new file explaining the reuse. Intro text above the
+  table (mirroring `ServiceSLAEditor.tsx`'s helper paragraph) should say
+  plainly that this is guidance shown on SEV creation and the postmortem
+  page, and is never enforced.
+- `web/src/pages/admin/AdminServicesPage.tsx`: add a second per-row icon
+  button next to the existing "Manage SLAs" `Gauge` button (`:404-407`
+  region) — e.g. a `NotebookText`/`ListChecks` icon from `lucide-react`,
+  `aria-label={`Leveling criteria for ${svc.name}`}` — toggling a second,
+  independent `criteriaServiceId` state (parallel to the existing
+  `slaServiceId` at `:59`, same "separate concerns, not mutually exclusive"
+  comment already there for `slaServiceId` vs `editingId`). When toggled,
+  render `<LevelingCriteriaEditor serviceId={svc.id} />` in a second
+  expandable `<tr colSpan={7}>` following the existing conditional-row
+  pattern. Two independent sibling icon toggles is the recommended shape
+  over inventing a tab strip inside one expanded row — there's no existing
+  precedent in this codebase for tabs within an expanded admin-table row,
+  whereas a second parallel toggle is a same-page, zero-new-pattern change,
+  and both panels being independently and simultaneously openable costs
+  nothing.
+
+**14d. Frontend: SEV-creation-form + postmortem-page surfacing**
+
+- New shared read-only `web/src/components/sev/LevelingCriteriaPanel.tsx`,
+  taking `{ severityLevel: number; serviceIds: string[] }`. Fetches via
+  `useQuery({ queryKey: ['levelingCriteria', serviceIds, severityLevel],
+  queryFn: () => api.config.levelingCriteria.listForServices(serviceIds,
+  severityLevel), enabled: serviceIds.length > 0 })`. Renders nothing when
+  `serviceIds` is empty (no services picked/attached yet — nothing to show
+  guidance for); once populated, one small block per returned row (service
+  name — resolved the same way `ServiceChipEditor.tsx` already does, via
+  the service registry query it fetches — plus the `criteria` text); a
+  quiet "No leveling criteria configured for the selected service(s) at
+  SEV-{level}" note when the query succeeds but returns zero rows, so an
+  empty result reads as "nothing configured" rather than looking broken.
+  Built as one shared component (not duplicated per page) since both call
+  sites need identical fetch/empty-state/render logic and only differ in
+  which props they pass — consistent with this codebase's existing
+  shared-component convention (`SLABadge`, `ServiceChipEditor`).
+- `web/src/pages/SevCreatePage.tsx`: render `<LevelingCriteriaPanel
+  severityLevel={severityLevel} serviceIds={affectedServices} />` directly
+  below the "Affected services" field (`:102-105`), inside the same `Card`,
+  so it re-queries live as the reporter changes either the severity
+  `<Select>` (`:87-95`) or the `ServiceChipEditor` selection — the goal is
+  to help pick the right level *while filling out the form*, not after
+  submission.
+- `web/src/pages/PostmortemPage.tsx`: render it as a new read-only
+  `<Section title="Leveling criteria reference">` placed before the
+  existing `<AIDraftPanel sevId={sevId} ... />` (`:182`), passing
+  `severityLevel={record.severity_level}` and
+  `serviceIds={record.affected_services ?? []}` from the SEV record already
+  fetched by this page's `sev` `useQuery`. Purely informational here — no
+  edit affordance, no call to action, nothing gating
+  `PostmortemStatusControl`'s transitions — consistent with the confirmed
+  "guidance only, never enforced" decision; it exists to help whoever is
+  writing the postmortem visually compare "here's what SEV-{level} is
+  supposed to mean for this service" against what actually happened, not to
+  block anything.
+
+**14e. Tests + demo doc**
+
+- Go: `internal/store/memory/memory_test.go` additions —
+  `TestServiceLevelingCriteriaStore` mirroring `TestServiceSLAStore`
+  (`internal/store/memory/memory_test.go:1145`): Upsert/Get/Delete/
+  ListByService/ListForServices, including ListForServices skipping a
+  service ID with no row and preserving the given ID order.
+  `internal/api/grpc/config_test.go` additions mirroring the existing
+  `TestUpsertServiceSLA_*`/`TestGetServiceSLA_*`/`TestDeleteServiceSLA_*`/
+  `TestListServiceSLAs_*` functions (`config_test.go:1201-1345`):
+  `TestUpsertLevelingCriteria_Valid`, `_UnknownService`,
+  `_InvalidSeverityLevel`, `_EmptyCriteriaRejected` (this feature's analog
+  to `TestUpsertServiceSLA_ZeroFieldClearsTarget`, but the opposite outcome
+  — an empty submission is rejected outright rather than treated as "clear
+  this field," per 14b's schema/handler decision), `TestGetLevelingCriteria_NotFound`,
+  `TestDeleteLevelingCriteria_Valid`/`_NotFound`,
+  `TestListLevelingCriteria_ReturnsOnlyConfiguredSeverityLevels`,
+  `TestListLevelingCriteriaForServices_SkipsUnconfiguredServices`; RBAC
+  floor coverage for all five RPCs (Viewer can read, Admin required to
+  write, matching this file's existing RBAC-floor test pattern for the
+  `ServiceSLA` RPCs).
+- Frontend: `web/src/pages/admin/AdminServicesPage.test.tsx` additions
+  covering the new "Leveling criteria" toggle and inline
+  `LevelingCriteriaEditor` render/save/clear flow, mirroring this file's
+  existing `ServiceSLAEditor`-related assertions. New
+  `LevelingCriteriaPanel.test.tsx` covering the empty (`serviceIds=[]`),
+  populated (multi-service), and zero-rows-returned render states.
+  `SevCreatePage.test.tsx` additions asserting the panel refetches when
+  severity or affected-services state changes; `PostmortemPage.test.tsx`
+  additions asserting the panel renders using the SEV's own
+  severity/affected-services and never renders any edit control.
+- `demo/per-service-leveling-criteria.md` (existing template: What was
+  built / Prerequisites / Walkthrough / Known limitations). Known
+  limitations to state: exactly the same `AffectedServices`-entry-that-
+  doesn't-resolve-to-a-real-`Service.ID` gap Phase 12/13 already accept
+  (`ServiceChipEditor.tsx:9-12`'s free-text entries are silently excluded
+  from `ListLevelingCriteriaForServices`, same as they're excluded from
+  `ServiceStore.Get` lookups elsewhere); the guidance is explicitly never
+  validated against the chosen severity — a SEV can be opened, transitioned,
+  and resolved at any level regardless of what the criteria panel shows, by
+  design.
+
+**Also considered and explicitly deferred**:
+
+- **Enforcing or validating the chosen severity against configured
+  criteria** (e.g. a warning or a required override reason when a SEV's
+  level looks inconsistent with the service's own text) — explicitly not
+  wanted; this phase is guidance surfaced to a human, not a gate.
+  Automating a judgment call this qualitative and context-dependent is also
+  a poor fit for hard validation regardless.
+- **An org-wide default/fallback criteria set** for services with no rows
+  configured — out of scope; no configured criteria simply means the panel
+  shows nothing (or its "no criteria configured" note), same posture Phase
+  12 took for services with no SLA row.
+- **Versioning/history of criteria changes** (e.g. seeing that "checkout"'s
+  SEV-1 bar changed from ">30%" to ">50%" last quarter) — `Upsert` is a
+  destructive full-replace with no audit trail beyond the row's own
+  `updated_at`; a real history/diff view is a reasonable future addition if
+  criteria start changing often enough to matter, but adds real schema
+  complexity (either an append-only log table or reusing the existing audit
+  log) that isn't justified yet.
+- **AI-assisted "does this look like the right level" suggestion** — a
+  natural future tie-in to the existing AI plugin system
+  (`internal/ai`/`internal/api/grpc/config_ai.go`, which already drives
+  postmortem draft suggestions via `AIDraftPanel`), comparing a SEV's
+  actual impact description against its service's configured criteria text
+  and flagging a likely mismatch. Deliberately out of scope here — this
+  phase only builds the raw guidance data and its two display surfaces;
+  wiring an AI plugin action on top of it is a separate, later phase that
+  can be scoped once this data actually exists to point one at.
+
+**Estimate**: ~3-4.25 days (14a ~0.5-0.75 day, 14b ~0.75-1 day, 14c
+~0.5-0.75 day, 14d ~0.75-1 day, 14e ~0.5-0.75 day) — smaller than Phase 12
+since there's no evaluation/reduction domain logic to write (no
+`sla.go`-equivalent) and no response-shape change to `SEVResponse`, just a
+new table, a straightforward CRUD+batch-read API surface, an admin editor
+built by copying an existing pattern, and two read-only display surfaces.
+**Depends on**: nothing — like Phase 12, it only needs the existing
+`Service` registry (`ServiceStore`/`services` table) and the
+`ConfigServer`/`AdminServicesPage.tsx` wiring, both already in place
+independent of Phase 12/13's work. It shares no table, no store interface,
+and no domain logic with `service_slas`/`sla.go` — the two phases are
+thematically related (both are per-service, per-severity-level
+configuration reached from the same admin page) and conventionally
+sequenced near each other in this document for that reason, but neither is
+a hard prerequisite for the other; Phase 14 could equally have shipped
+before Phase 12, or in parallel with Phase 13.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -1271,6 +1595,7 @@ immediately. Independent of Phases 8-11's integration work.
 | 11 | Integration-aware SEV UI (hide unconfigured actions, self-join Slack, creator invite) | 10 | 3.5-4.5 days |
 | 12 | Per-service SLA targets and breach indicators | — | 4.5-6 days |
 | 13 | Per-service SLA compliance reporting | 12 (except 13a's UX mockup) | 3.5-5.25 days |
+| 14 | Per-service SEV leveling criteria (guidance, not enforced) | — | 3-4.25 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -1300,7 +1625,12 @@ ship strictly after Phase 12. 13a is a deliberate exception — a UX mockup
 built against fixture data, with no dependency on Phase 12 or any other
 step — so it can be done first, or even in parallel with Phase 12, to get
 the table/selector design reviewed before the backend contract is locked
-in.
+in. Phase 14 is likewise independent of every phase above it, including
+12/13 — it reuses the same `Service` registry and admin-page pattern as
+Phase 12's SLA editor, but shares no table or evaluation logic with
+`service_slas`/`sla.go`, so it can be sequenced whenever the leveling-
+guidance need becomes a priority, independently of where Phase 12/13
+stand.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
