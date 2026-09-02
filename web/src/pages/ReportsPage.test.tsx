@@ -66,7 +66,9 @@ describe('ReportsPage', () => {
 
     expect(await screen.findByText('75%')).toBeInTheDocument()
     // "Checkout"/"Payments" each appear twice — once resolved in the
-    // heatmap, once resolved in the recurring-patterns table.
+    // heatmap, once resolved in the recurring-patterns table. The SLA
+    // compliance table's service filter (Phase 13a) also resolves these
+    // names, but only inside its closed-by-default dropdown popover.
     expect((await screen.findAllByText('Checkout')).length).toBe(2)
     expect(screen.getAllByText('Payments').length).toBe(1)
     // The heatmap cell for checkout/SEV-1 shows the count.
