@@ -311,6 +311,43 @@ export interface ServiceLevelFrequency {
   count: number
 }
 
+// ServiceLevelMetrics is one (service, severity level) rollup over a
+// GetServiceMetrics reporting window (Phase 13) — the aggregate
+// counterpart to SEVResponse.sla_status's per-SEV live status (Phase 12).
+// int64 proto fields (avg_*_seconds) arrive as strings, same convention as
+// MTTRTrend.average_mttr_seconds above. Every numeric field below except
+// service_id/severity_level/sev_count is optional for the same reason
+// MTTRTrend.sample_size is: protojson (cmd/server/main.go's marshaler has
+// no EmitUnpopulated) omits a proto3 scalar field entirely from the JSON
+// body when it's the type's zero value, so a group with e.g. zero breached
+// SEVs simply has no "sla_breached_count" key at all, not a present `0` —
+// live-verified against a real server, not assumed. Consumers must
+// coalesce with `?? 0` (see ServiceSLAComplianceTable.tsx's ComplianceCell),
+// same as MTTRTrendChart.tsx already does for average_mttr_seconds.
+export interface ServiceLevelMetrics {
+  service_id: string
+  severity_level: number
+  sev_count: number
+  avg_mttd_seconds?: string
+  avg_mttm_seconds?: string
+  avg_mttr_seconds?: string
+  sla_ok_count?: number
+  sla_at_risk_count?: number
+  sla_breached_count?: number
+  sla_not_applicable_count?: number
+  // ok / (ok + at_risk + breached), 0 when that denominator is 0 — i.e.
+  // every SEV in the group is sla_not_applicable, not a real 0% compliance
+  // claim. See ServiceSLAComplianceTable.tsx's ComplianceCell.
+  compliance_pct?: number
+}
+
+export interface ServiceMetricsResponse {
+  service_level_metrics?: ServiceLevelMetrics[]
+  // window_days echoes back the resolved window (after server-side
+  // defaulting) — same defensive pattern MTTRTrend.window_days uses.
+  window_days: number
+}
+
 export interface DashboardMetricsResponse {
   active_by_level?: ActiveSEVCount[]
   mttr_trends?: MTTRTrend[]

@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/g8rswimmer/sevitout/internal/api/pb"
+	"github.com/g8rswimmer/sevitout/internal/sev"
 	"github.com/g8rswimmer/sevitout/internal/store"
 )
 
@@ -29,17 +30,23 @@ const reportFanoutLimit = 10000
 // specifies for the dashboard's MTTR trend.
 var mttrTrendWindows = []int{7, 30, 90}
 
+// serviceMetricsWindowDays are the trailing-window choices
+// GetServiceMetrics accepts (docs/roadmap.md Phase 13); window_days
+// defaults to the first entry when unset or not one of these.
+var serviceMetricsWindowDays = []int32{30, 60, 90, 180}
+
 // ReportServer implements pb.ReportServiceServer.
 type ReportServer struct {
 	pb.UnimplementedReportServiceServer
 	sevs        store.SEVStore
 	postmortems store.PostmortemStore
 	tasks       store.TaskStore
+	serviceSLAs store.ServiceSLAStore
 }
 
 // NewReportServer returns a ReportServer backed by the given stores.
-func NewReportServer(sevs store.SEVStore, postmortems store.PostmortemStore, tasks store.TaskStore) *ReportServer {
-	return &ReportServer{sevs: sevs, postmortems: postmortems, tasks: tasks}
+func NewReportServer(sevs store.SEVStore, postmortems store.PostmortemStore, tasks store.TaskStore, serviceSLAs store.ServiceSLAStore) *ReportServer {
+	return &ReportServer{sevs: sevs, postmortems: postmortems, tasks: tasks, serviceSLAs: serviceSLAs}
 }
 
 func (s *ReportServer) GetDashboardMetrics(ctx context.Context, _ *pb.GetDashboardMetricsRequest) (*pb.DashboardMetricsResponse, error) {
@@ -126,6 +133,187 @@ func (s *ReportServer) ExportSEVs(ctx context.Context, req *pb.ExportSEVsRequest
 		ContentType: "text/csv; charset=utf-8",
 		Data:        csvBytes,
 	}, nil
+}
+
+// GetServiceMetrics aggregates SEVs opened within the trailing window into
+// per-(service, severity level) rollups — docs/roadmap.md Phase 13, the
+// aggregate counterpart to Phase 12's per-SEV sla_status.
+func (s *ReportServer) GetServiceMetrics(ctx context.Context, req *pb.GetServiceMetricsRequest) (*pb.ServiceMetricsResponse, error) {
+	windowDays := resolveWindowDays(req.GetWindowDays())
+	cutoff := time.Now().AddDate(0, 0, -int(windowDays))
+
+	records, err := s.sevs.List(ctx, store.SEVFilter{
+		StartedAfter:     &cutoff,
+		ServiceIDs:       req.GetServiceIds(),
+		ExcludeSensitive: true,
+		Limit:            reportFanoutLimit,
+	})
+	if err != nil {
+		return nil, internalError(ctx, "failed to list SEVs", err)
+	}
+	if len(records) >= reportFanoutLimit {
+		return nil, status.Error(codes.ResourceExhausted, "too many SEVs to compute an exact report; narrow the filter")
+	}
+
+	slaLookup, err := s.buildSLALookup(ctx, records)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.ServiceMetricsResponse{
+		ServiceLevelMetrics: serviceLevelMetrics(records, slaLookup, time.Now()),
+		WindowDays:          windowDays,
+	}, nil
+}
+
+// resolveWindowDays defaults requested to serviceMetricsWindowDays[0] (30)
+// when it isn't one of the accepted values — validation lives here, not in
+// the proto, so an unrecognized value degrades to the default instead of
+// failing the request.
+func resolveWindowDays(requested int32) int32 {
+	for _, d := range serviceMetricsWindowDays {
+		if requested == d {
+			return requested
+		}
+	}
+	return serviceMetricsWindowDays[0]
+}
+
+// buildSLALookup batches the SLA-row lookups serviceLevelMetrics needs: one
+// ServiceSLAStore.ListForServices call per distinct severity level present
+// in records (at most 4 — SEV severity levels are 1-4), regardless of how
+// many SEVs are in the window — an improvement on sevToProtoWithSLA's
+// already-accepted per-SEV tradeoff (sev.go, Phase 12c) rather than a
+// repeat of it.
+func (s *ReportServer) buildSLALookup(ctx context.Context, records []*store.SEV) (map[serviceLevelKey]*store.ServiceSLA, error) {
+	serviceIDsByLevel := make(map[int16]map[string]struct{})
+	for _, r := range records {
+		if len(r.AffectedServices) == 0 {
+			continue
+		}
+		set := serviceIDsByLevel[r.SeverityLevel]
+		if set == nil {
+			set = make(map[string]struct{})
+			serviceIDsByLevel[r.SeverityLevel] = set
+		}
+		for _, svc := range r.AffectedServices {
+			set[svc] = struct{}{}
+		}
+	}
+
+	lookup := make(map[serviceLevelKey]*store.ServiceSLA)
+	for level, set := range serviceIDsByLevel {
+		serviceIDs := make([]string, 0, len(set))
+		for id := range set {
+			serviceIDs = append(serviceIDs, id)
+		}
+		rows, err := s.serviceSLAs.ListForServices(ctx, serviceIDs, level)
+		if err != nil {
+			return nil, internalError(ctx, "failed to list service SLAs", err)
+		}
+		for _, row := range rows {
+			lookup[serviceLevelKey{row.ServiceID, level}] = row
+		}
+	}
+	return lookup, nil
+}
+
+// serviceLevelMetrics groups records by (affected service, severity level)
+// — the same grouping frequencyByServiceAndLevel uses — and reduces each
+// group to a SEV count, nil-safe MTTD/MTTM/MTTR averages (only SEVs with
+// that metric already computed contribute, same discipline as mttrTrends),
+// and an SLA compliance breakdown. Per SEV, sev.EvaluateSLA's Overall status
+// (evaluated against sev.MostStrictSLA of whatever single row slaLookup has
+// for that service+level — an absent entry naturally reduces to "no
+// target", MostStrictSLA's own empty-slice behavior; a nil entry is never
+// passed in, since MostStrictSLA dereferences each row and a nil element
+// would panic) buckets the SEV into ok/at_risk/breached/not_applicable.
+func serviceLevelMetrics(records []*store.SEV, slaLookup map[serviceLevelKey]*store.ServiceSLA, now time.Time) []*pb.ServiceLevelMetrics {
+	type accum struct {
+		count                               int32
+		mttdSum, mttmSum, mttrSum           int64
+		mttdN, mttmN, mttrN                 int32
+		ok, atRisk, breached, notApplicable int32
+	}
+	groups := make(map[serviceLevelKey]*accum)
+
+	for _, r := range records {
+		for _, svc := range r.AffectedServices {
+			key := serviceLevelKey{svc, r.SeverityLevel}
+			a := groups[key]
+			if a == nil {
+				a = &accum{}
+				groups[key] = a
+			}
+			a.count++
+			if r.MTTDSeconds != nil {
+				a.mttdSum += *r.MTTDSeconds
+				a.mttdN++
+			}
+			if r.MTTMSeconds != nil {
+				a.mttmSum += *r.MTTMSeconds
+				a.mttmN++
+			}
+			if r.MTTRSeconds != nil {
+				a.mttrSum += *r.MTTRSeconds
+				a.mttrN++
+			}
+
+			var rows []*store.ServiceSLA
+			if row, ok := slaLookup[key]; ok {
+				rows = []*store.ServiceSLA{row}
+			}
+			switch sev.EvaluateSLA(r, sev.MostStrictSLA(rows), now).Overall {
+			case sev.SLAOnTrack:
+				a.ok++
+			case sev.SLAAtRisk:
+				a.atRisk++
+			case sev.SLABreached:
+				a.breached++
+			default:
+				a.notApplicable++
+			}
+		}
+	}
+
+	keys := make([]serviceLevelKey, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].service != keys[j].service {
+			return keys[i].service < keys[j].service
+		}
+		return keys[i].level < keys[j].level
+	})
+
+	out := make([]*pb.ServiceLevelMetrics, 0, len(keys))
+	for _, k := range keys {
+		a := groups[k]
+		m := &pb.ServiceLevelMetrics{
+			ServiceId:             k.service,
+			SeverityLevel:         int32(k.level),
+			SevCount:              a.count,
+			SlaOkCount:            a.ok,
+			SlaAtRiskCount:        a.atRisk,
+			SlaBreachedCount:      a.breached,
+			SlaNotApplicableCount: a.notApplicable,
+		}
+		if a.mttdN > 0 {
+			m.AvgMttdSeconds = a.mttdSum / int64(a.mttdN)
+		}
+		if a.mttmN > 0 {
+			m.AvgMttmSeconds = a.mttmSum / int64(a.mttmN)
+		}
+		if a.mttrN > 0 {
+			m.AvgMttrSeconds = a.mttrSum / int64(a.mttrN)
+		}
+		if measured := a.ok + a.atRisk + a.breached; measured > 0 {
+			m.CompliancePct = float64(a.ok) / float64(measured)
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // fetchAllSEVs pulls the full SEV set for in-Go aggregation, failing loudly

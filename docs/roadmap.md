@@ -1045,7 +1045,7 @@ tracking becomes a priority.
 
 ## Phase 13 — Per-service SLA compliance reporting
 
-**Status**: 📋 planned, not yet implemented
+**Status**: ✅ shipped, see [`demo/service-sla-compliance-reporting.md`](../demo/service-sla-compliance-reporting.md)
 
 Phase 12 added per-service SLA targets and a live, per-SEV breach indicator
 (`internal/sev/sla.go`'s `MostStrictSLA`/`EvaluateSLA`, `SEVResponse.sla_status`)
@@ -1075,15 +1075,38 @@ depends on them yet.
   with no SLA configured (`not_applicable`), and the table's empty state —
   no backend call, no proto/RPC yet, just a local `useState` fixture in
   place of the eventual `useQuery`.
+- Added after the initial mock review, then revised once more per a second
+  round of feedback: a **Service** and a **Severity** filter, each a
+  button (`"All service"`/`"Severity (N)"`-style summary label) that opens
+  a checkbox-list popover — `MultiSelectDropdown`, a new local component in
+  the same file, no Radix (matching `select.tsx`/`checkbox.tsx`/
+  `dialog.tsx`/`tooltip.tsx`'s existing "plain element over a new
+  dependency" convention: a plain positioned `<div>` under the trigger
+  button, closed on outside click or Escape). Checkbox semantics inside the
+  popover are the same as `SevListPage.tsx`'s existing severity/status
+  filters (empty selection = no filter, otherwise narrow to the checked
+  set) — only the presentation collapsed from an always-visible row into a
+  dropdown, to keep two multi-value filters from crowding the card's header
+  next to the window selector. Each popover also has a "Select all"/"Clear"
+  pair above the checkbox list (a third round of feedback) — "Select all"
+  disables once every option is already checked, "Clear" disables once
+  nothing is, so neither ever offers a no-op. Service options come from the same service
+  registry `ReportsPage.tsx` already fetches for its `serviceName()` lookup
+  (no second fetch); severity options are the fixed SEV-1..4 set. Both
+  filter the fixture rows client-side in this mock (13e wires the service
+  filter into the real request; see there for why severity stays
+  client-side even after that). A distinct "No SEVs match the selected
+  filters" message covers the filtered-to-empty case, separate from the
+  window's own "No SEVs opened in the selected window" empty state.
 - Wire it into `web/src/pages/ReportsPage.tsx` under the same `<Section
   title="SLA Compliance by Service">` wrapper the final version will use, so
   it's reviewable live in the running app (`npm run dev`) rather than as a
   disconnected mock.
 - Walk through it for feedback — column set, severity/compliance formatting,
-  empty state, window-selector interaction — and iterate directly on the
-  fixture-driven component. Once the layout is approved, its exact shape
-  becomes the literal template for 13b's proto message and 13d's
-  `ServiceLevelMetrics` type, rather than the other way around.
+  empty state, window-selector and filter interaction — and iterate
+  directly on the fixture-driven component. Once the layout is approved,
+  its exact shape becomes the literal template for 13b's proto message and
+  13d's `ServiceLevelMetrics` type, rather than the other way around.
 - No dependency on Phase 12 or any other 13-lettered step — it's pure
   frontend against fixture data, so it can start immediately regardless of
   where Phase 12 or the rest of this phase stands.
@@ -1106,19 +1129,24 @@ depends on them yet.
   store.ServiceSLAStore` field (`NewReportServer` gets a fourth param),
   mirroring `SEVServer`'s existing `serviceSLAs` dependency
   (`internal/api/grpc/sev.go`).
-- New `serviceLevelMetrics(records []*store.SEV, slaLookup func(service
-  string, level int16) *store.ServiceSLA, now time.Time)
+- New `serviceLevelMetrics(records []*store.SEV, slaLookup
+  map[serviceLevelKey]*store.ServiceSLA, now time.Time)
   []*pb.ServiceLevelMetrics` next to `frequencyByServiceAndLevel`: groups by
   `serviceLevelKey{service, level}` exactly like that function, but per
   group accumulates SEV count, per-metric sums/sample-counts for
   MTTD/MTTM/MTTR averages (nil-safe — only completed values contribute, same
   discipline as `mttrTrends`), and calls `sev.EvaluateSLA(r,
-  sev.MostStrictSLA([]*store.ServiceSLA{slaLookup(service, level)}), now)`
-  per SEV (a nil row from `slaLookup` is handled by `MostStrictSLA`'s
-  existing empty/nil-tolerant reduction — no new nil-handling needed) to
-  bucket into `ok`/`at_risk`/`breached`/`not_applicable` via `.Overall`.
-  `compliance_pct` is `ok / (ok + at_risk + breached)`, `0` when that
-  denominator is `0`.
+  sev.MostStrictSLA(rows), now)` per SEV, where `rows` is a 1-element slice
+  containing `slaLookup[key]` **only when that key is present** — and empty
+  otherwise. **Correction from an earlier draft of this section**: `rows`
+  must never contain a nil element. `sev.MostStrictSLA` dereferences every
+  row it's given, so passing `[]*store.ServiceSLA{slaLookup(service,
+  level)}` when the lookup misses (nil) would panic, not degrade gracefully
+  — there is no "nil-tolerant reduction" for a nil *element*, only for an
+  *empty slice* (a missing service simply not participating). Bucket the
+  per-SEV result into `ok`/`at_risk`/`breached`/`not_applicable` via
+  `.Overall`. `compliance_pct` is `ok / (ok + at_risk + breached)`, `0` when
+  that denominator is `0`.
 - Handler builds `slaLookup` efficiently: collect the distinct severity
   levels present in the filtered SEV set (≤4), call
   `serviceSLAs.ListForServices(ctx, serviceIDsAtThatLevel, level)` once per
@@ -1154,8 +1182,16 @@ depends on them yet.
 
 - `ServiceSLAComplianceTable.tsx` (built in 13a) swaps its fixture
   `useState` array for `useQuery({ queryKey: ['reports', 'service-metrics',
-  windowDays], queryFn: () => api.reports.serviceMetrics(windowDays) })` —
-  the JSX/columns themselves don't change unless the 13a review asked for
+  windowDays, selectedServiceIds], queryFn: () =>
+  api.reports.serviceMetrics(windowDays, selectedServiceIds.length ?
+  selectedServiceIds : undefined) })` — 13a's service filter now drives the
+  real `service_ids` request field (already planned above in 13b/13d)
+  instead of filtering an already-fetched response, so checking a service
+  narrows what's fetched, not just what's displayed. The severity filter
+  stays client-side exactly as in the 13a mock: a window's response already
+  contains every severity level in one call, and the set is a fixed four,
+  so there's no round-trip to save by adding a server-side filter for it.
+  The JSX/columns themselves don't change unless the 13a review asked for
   it. Table columns (as approved in 13a): Service | Severity | SEV Count |
   Avg MTTD | Avg MTTM | Avg MTTR | Compliance — same `overflow-x-auto` +
   `border-b border-border` table shell `ServiceHeatmap`/
@@ -1178,14 +1214,18 @@ depends on them yet.
   `sla_not_applicable_count`, and the window cutoff boundary (a SEV just
   outside `window_days` excluded); RBAC floor test for `GetServiceMetrics`.
 - Frontend: `ReportsPage.test.tsx` additions for the new section, including
-  a window-switch triggering a refetch with the new `window_days` param.
+  a window-switch triggering a refetch with the new `window_days` param, a
+  service-filter selection triggering a refetch with `service_ids` set, and
+  a severity-filter selection narrowing rendered rows without triggering a
+  refetch.
 - `demo/service-sla-compliance-reporting.md` (existing template: What was
   built / Prerequisites / Walkthrough / Known limitations). Known
   limitations to state: compliance is a point-in-time snapshot over the
   selected window, not a historical trend (a compliance-over-time chart is
   explicitly deferred, see below); an `AffectedServices` entry that doesn't
   resolve to a real `Service.ID` is silently excluded, same accepted gap as
-  Phase 12.
+  Phase 12 — including from the service filter itself, which only lists
+  services present in the registry (`ConfigService.ListServices`).
 
 **Also considered and explicitly deferred**:
 - A time-series compliance trend (e.g. weekly compliance % over the last

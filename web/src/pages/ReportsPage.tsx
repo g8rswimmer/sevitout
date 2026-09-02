@@ -4,6 +4,7 @@ import { api } from '@/lib/api'
 import { Section } from '@/components/sev/Section'
 import { Skeleton } from '@/components/ui/skeleton'
 import { MTTRTrendChart } from '@/components/reports/MTTRTrendChart'
+import { ServiceSLAComplianceTable } from '@/components/reports/ServiceSLAComplianceTable'
 import { ROOT_CAUSE_CATEGORY_LABELS, type RecurringPattern, type RootCauseCategory, type ServiceLevelFrequency } from '@/types/api'
 
 const SEVERITY_LEVELS = [1, 2, 3, 4]
@@ -61,6 +62,14 @@ export function ReportsPage() {
         ) : (
           <RecurringPatternsTable patterns={trends.data?.recurring_patterns ?? []} serviceName={serviceName} />
         )}
+      </Section>
+
+      {/* UX mock (Phase 13a, docs/roadmap.md) — fixture-driven, no backend
+       * call yet. 13e swaps this for a `useQuery` against
+       * `GetServiceMetrics` once 13b/13d ship; this Section wrapper and the
+       * table's column set are meant to carry over unchanged. */}
+      <Section title="SLA Compliance by Service">
+        <ServiceSLAComplianceTable serviceName={serviceName} services={services.data?.services ?? []} />
       </Section>
     </div>
   )

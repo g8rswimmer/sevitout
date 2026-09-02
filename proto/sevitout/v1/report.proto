@@ -34,6 +34,15 @@ service ReportService {
       get: "/v1/sevs/export.csv"
     };
   }
+  // GetServiceMetrics aggregates SEVs into per-(service, severity level)
+  // rollups over a trailing window: SEV count, average MTTD/MTTM/MTTR, and
+  // an SLA compliance breakdown (docs/roadmap.md Phase 13 — the aggregate
+  // counterpart to Phase 12's per-SEV live sla_status on SEVResponse).
+  rpc GetServiceMetrics(GetServiceMetricsRequest) returns (ServiceMetricsResponse) {
+    option (google.api.http) = {
+      get: "/v1/reports/service-metrics"
+    };
+  }
 }
 
 message GetDashboardMetricsRequest {}
@@ -90,4 +99,41 @@ message ExportSEVsRequest {
   string root_cause_category = 4;
   google.protobuf.Timestamp started_after = 5;
   google.protobuf.Timestamp started_before = 6;
+}
+
+message GetServiceMetricsRequest {
+  // window_days is one of: 30, 60, 90, 180. Defaults to 30 when unset or 0
+  // — validated in the handler, not here.
+  int32 window_days = 1;
+  repeated string service_ids = 2;
+}
+
+message ServiceLevelMetrics {
+  string service_id = 1;
+  int32 severity_level = 2;
+  int32 sev_count = 3;
+  // avg_mttd_seconds/avg_mttm_seconds/avg_mttr_seconds average only the
+  // SEVs in this group with that metric already computed (nil-safe, same
+  // discipline as MTTRTrend) — 0 when none have it yet.
+  int64 avg_mttd_seconds = 4;
+  int64 avg_mttm_seconds = 5;
+  int64 avg_mttr_seconds = 6;
+  // sla_*_count bucket this group's SEVs by their live SLAEvaluation.Overall
+  // (internal/sev/sla.go) — sla_not_applicable_count covers both "no SLA
+  // configured for this service+severity" and "no baseline timestamp yet".
+  int32 sla_ok_count = 7;
+  int32 sla_at_risk_count = 8;
+  int32 sla_breached_count = 9;
+  int32 sla_not_applicable_count = 10;
+  // compliance_pct is sla_ok_count / (sla_ok_count + sla_at_risk_count +
+  // sla_breached_count), 0 when that denominator is 0 (every SEV in the
+  // group is sla_not_applicable — not a real 0% compliance claim).
+  double compliance_pct = 11;
+}
+
+message ServiceMetricsResponse {
+  repeated ServiceLevelMetrics service_level_metrics = 1;
+  // window_days echoes back the resolved window (after defaulting), same
+  // defensive pattern MTTRTrend.window_days uses.
+  int32 window_days = 2;
 }
