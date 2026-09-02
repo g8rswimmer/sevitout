@@ -22,19 +22,21 @@ import (
 )
 
 type testConfigServer struct {
-	server       *grpchandler.ConfigServer
-	services     *memory.ServiceStore
-	serviceSLAs  *memory.ServiceSLAStore
-	users        *memory.UserStore
-	oncall       *memory.OnCallStore
-	integrations *memory.IntegrationConfigStore
-	retention    *memory.RetentionConfigStore
-	aiPlugins    *memory.AIPluginStore
+	server           *grpchandler.ConfigServer
+	services         *memory.ServiceStore
+	serviceSLAs      *memory.ServiceSLAStore
+	levelingCriteria *memory.ServiceLevelingCriteriaStore
+	users            *memory.UserStore
+	oncall           *memory.OnCallStore
+	integrations     *memory.IntegrationConfigStore
+	retention        *memory.RetentionConfigStore
+	aiPlugins        *memory.AIPluginStore
 }
 
 func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	services := memory.NewServiceStore()
 	serviceSLAs := memory.NewServiceSLAStore()
+	levelingCriteria := memory.NewServiceLevelingCriteriaStore()
 	users := memory.NewUserStore()
 	oncall := memory.NewOnCallStore()
 	integrations := memory.NewIntegrationConfigStore()
@@ -42,16 +44,17 @@ func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	aiPlugins := memory.NewAIPluginStore()
 	return &testConfigServer{
 		server: grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
-			Services: services, ServiceSLAs: serviceSLAs, Users: users, OnCall: oncall, Integrations: integrations,
+			Services: services, ServiceSLAs: serviceSLAs, LevelingCriteria: levelingCriteria, Users: users, OnCall: oncall, Integrations: integrations,
 			Retention: retention, AIPlugins: aiPlugins, Crypto: enc,
 		}),
-		services:     services,
-		serviceSLAs:  serviceSLAs,
-		users:        users,
-		oncall:       oncall,
-		integrations: integrations,
-		retention:    retention,
-		aiPlugins:    aiPlugins,
+		services:         services,
+		serviceSLAs:      serviceSLAs,
+		levelingCriteria: levelingCriteria,
+		users:            users,
+		oncall:           oncall,
+		integrations:     integrations,
+		retention:        retention,
+		aiPlugins:        aiPlugins,
 	}
 }
 
@@ -1347,5 +1350,166 @@ func TestListServiceSLAs_MissingServiceID(t *testing.T) {
 	_, err := ts.server.ListServiceSLAs(context.Background(), &pb.ListServiceSLAsRequest{})
 	if grpcCode(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+// ── Per-service SEV leveling criteria (docs/roadmap.md Phase 14) ───────────
+
+func TestUpsertLevelingCriteria_Valid(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+
+	resp, err := ts.server.UpsertLevelingCriteria(ctx, &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "checkout", SeverityLevel: 1, Criteria: ">50% of checkout traffic failing",
+	})
+	if err != nil {
+		t.Fatalf("UpsertLevelingCriteria: %v", err)
+	}
+	if resp.GetCriteria() != ">50% of checkout traffic failing" {
+		t.Errorf("Criteria = %q, want %q", resp.GetCriteria(), ">50% of checkout traffic failing")
+	}
+
+	got, err := ts.server.GetLevelingCriteria(ctx, &pb.GetLevelingCriteriaRequest{ServiceId: "checkout", SeverityLevel: 1})
+	if err != nil {
+		t.Fatalf("GetLevelingCriteria: %v", err)
+	}
+	if got.GetCriteria() != ">50% of checkout traffic failing" {
+		t.Errorf("persisted Criteria = %q, want %q", got.GetCriteria(), ">50% of checkout traffic failing")
+	}
+}
+
+func TestUpsertLevelingCriteria_UnknownService(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	_, err := ts.server.UpsertLevelingCriteria(context.Background(), &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "does-not-exist", SeverityLevel: 1, Criteria: "anything",
+	})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+func TestUpsertLevelingCriteria_InvalidSeverityLevel(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	mustCreateService(t, ts, "checkout", "Checkout")
+	_, err := ts.server.UpsertLevelingCriteria(context.Background(), &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "checkout", SeverityLevel: 9, Criteria: "anything",
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestUpsertLevelingCriteria_EmptyCriteriaRejected(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	mustCreateService(t, ts, "checkout", "Checkout")
+
+	// Unlike UpsertServiceSLA's zero-clears-a-field semantics, an empty
+	// criteria submission is rejected outright rather than treated as "clear
+	// this row" — criteria is NOT NULL; clearing existing guidance is
+	// DeleteLevelingCriteria's job.
+	_, err := ts.server.UpsertLevelingCriteria(context.Background(), &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "checkout", SeverityLevel: 1, Criteria: "   ",
+	})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument for whitespace-only criteria, got %v", grpcCode(err))
+	}
+}
+
+func TestGetLevelingCriteria_NotFound(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	mustCreateService(t, ts, "checkout", "Checkout")
+	_, err := ts.server.GetLevelingCriteria(context.Background(), &pb.GetLevelingCriteriaRequest{ServiceId: "checkout", SeverityLevel: 2})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+func TestDeleteLevelingCriteria_Valid(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+	if _, err := ts.server.UpsertLevelingCriteria(ctx, &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "checkout", SeverityLevel: 1, Criteria: "anything",
+	}); err != nil {
+		t.Fatalf("UpsertLevelingCriteria: %v", err)
+	}
+
+	if _, err := ts.server.DeleteLevelingCriteria(ctx, &pb.DeleteLevelingCriteriaRequest{ServiceId: "checkout", SeverityLevel: 1}); err != nil {
+		t.Fatalf("DeleteLevelingCriteria: %v", err)
+	}
+	if _, err := ts.server.GetLevelingCriteria(ctx, &pb.GetLevelingCriteriaRequest{ServiceId: "checkout", SeverityLevel: 1}); grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound after delete, got %v", grpcCode(err))
+	}
+}
+
+func TestDeleteLevelingCriteria_NotFound(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	mustCreateService(t, ts, "checkout", "Checkout")
+	_, err := ts.server.DeleteLevelingCriteria(context.Background(), &pb.DeleteLevelingCriteriaRequest{ServiceId: "checkout", SeverityLevel: 1})
+	if grpcCode(err) != codes.NotFound {
+		t.Errorf("want NotFound, got %v", grpcCode(err))
+	}
+}
+
+func TestListLevelingCriteria_ReturnsOnlyConfiguredSeverityLevels(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+	if _, err := ts.server.UpsertLevelingCriteria(ctx, &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "checkout", SeverityLevel: 1, Criteria: "sev-1 criteria",
+	}); err != nil {
+		t.Fatalf("UpsertLevelingCriteria: %v", err)
+	}
+	if _, err := ts.server.UpsertLevelingCriteria(ctx, &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "checkout", SeverityLevel: 3, Criteria: "sev-3 criteria",
+	}); err != nil {
+		t.Fatalf("UpsertLevelingCriteria: %v", err)
+	}
+
+	resp, err := ts.server.ListLevelingCriteria(ctx, &pb.ListLevelingCriteriaRequest{ServiceId: "checkout"})
+	if err != nil {
+		t.Fatalf("ListLevelingCriteria: %v", err)
+	}
+	if len(resp.GetCriteria()) != 2 {
+		t.Fatalf("want 2 configured severity levels, got %d", len(resp.GetCriteria()))
+	}
+	if resp.GetCriteria()[0].GetSeverityLevel() != 1 || resp.GetCriteria()[1].GetSeverityLevel() != 3 {
+		t.Errorf("want ascending severity order [1, 3], got [%d, %d]",
+			resp.GetCriteria()[0].GetSeverityLevel(), resp.GetCriteria()[1].GetSeverityLevel())
+	}
+}
+
+func TestListLevelingCriteria_MissingServiceID(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	_, err := ts.server.ListLevelingCriteria(context.Background(), &pb.ListLevelingCriteriaRequest{})
+	if grpcCode(err) != codes.InvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", grpcCode(err))
+	}
+}
+
+func TestListLevelingCriteriaForServices_SkipsUnconfiguredServices(t *testing.T) {
+	ts := newTestConfigServer(nil)
+	ctx := context.Background()
+	mustCreateService(t, ts, "checkout", "Checkout")
+	mustCreateService(t, ts, "payments", "Payments")
+	if _, err := ts.server.UpsertLevelingCriteria(ctx, &pb.UpsertLevelingCriteriaRequest{
+		ServiceId: "checkout", SeverityLevel: 1, Criteria: "checkout sev-1 criteria",
+	}); err != nil {
+		t.Fatalf("UpsertLevelingCriteria: %v", err)
+	}
+	// "payments" has no severity-1 row, and "unregistered" isn't even a real
+	// service — both should be silently omitted rather than erroring.
+	resp, err := ts.server.ListLevelingCriteriaForServices(ctx, &pb.ListLevelingCriteriaForServicesRequest{
+		ServiceIds: []string{"checkout", "payments", "unregistered"}, SeverityLevel: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListLevelingCriteriaForServices: %v", err)
+	}
+	if len(resp.GetCriteria()) != 1 {
+		t.Fatalf("want 1 row (only checkout configured at severity 1), got %d", len(resp.GetCriteria()))
+	}
+	if resp.GetCriteria()[0].GetServiceId() != "checkout" {
+		t.Errorf("ServiceId = %q, want checkout", resp.GetCriteria()[0].GetServiceId())
 	}
 }

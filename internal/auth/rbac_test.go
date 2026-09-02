@@ -147,6 +147,18 @@ func TestHasPermission(t *testing.T) {
 		// any Viewer — it returns only a list of type strings.
 		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListEnabledIntegrations", true},
 
+		// Per-service SEV leveling criteria (docs/roadmap.md Phase 14) —
+		// reads open to any Viewer, mutations Admin-only, same shape as
+		// ServiceSLA above.
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/GetLevelingCriteria", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListLevelingCriteria", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListLevelingCriteriaForServices", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/UpsertLevelingCriteria", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/DeleteLevelingCriteria", false},
+		{store.OrgRoleIncidentCommander, "/sevitout.v1.ConfigService/UpsertLevelingCriteria", false},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpsertLevelingCriteria", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/DeleteLevelingCriteria", true},
+
 		// WebSocket subscription (pseudo-method checked manually by internal/api/ws)
 		{store.OrgRoleViewer, "/sevitout.v1.WebSocket/Subscribe", true},
 		{store.OrgRoleResponder, "/sevitout.v1.WebSocket/Subscribe", true},

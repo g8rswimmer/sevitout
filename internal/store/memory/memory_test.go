@@ -11,25 +11,26 @@ import (
 
 // Compile-time interface compliance checks.
 var (
-	_ store.SEVStore               = (*memory.SEVStore)(nil)
-	_ store.StatusHistoryStore     = (*memory.StatusHistoryStore)(nil)
-	_ store.PostmortemStore        = (*memory.PostmortemStore)(nil)
-	_ store.AuditStore             = (*memory.AuditStore)(nil)
-	_ store.AnnouncementStore      = (*memory.AnnouncementStore)(nil)
-	_ store.ChatStore              = (*memory.ChatStore)(nil)
-	_ store.TaskStore              = (*memory.TaskStore)(nil)
-	_ store.SEVLinkStore           = (*memory.SEVLinkStore)(nil)
-	_ store.SLIStore               = (*memory.SLIStore)(nil)
-	_ store.UserStore              = (*memory.UserStore)(nil)
-	_ store.ServiceStore           = (*memory.ServiceStore)(nil)
-	_ store.OnCallStore            = (*memory.OnCallStore)(nil)
-	_ store.AIPluginStore          = (*memory.AIPluginStore)(nil)
-	_ store.IntegrationConfigStore = (*memory.IntegrationConfigStore)(nil)
-	_ store.RetentionConfigStore   = (*memory.RetentionConfigStore)(nil)
-	_ store.ShareStore             = (*memory.ShareStore)(nil)
-	_ store.RoleStore              = (*memory.RoleStore)(nil)
-	_ store.SEVAccessStore         = (*memory.SEVAccessStore)(nil)
-	_ store.ServiceSLAStore        = (*memory.ServiceSLAStore)(nil)
+	_ store.SEVStore                     = (*memory.SEVStore)(nil)
+	_ store.StatusHistoryStore           = (*memory.StatusHistoryStore)(nil)
+	_ store.PostmortemStore              = (*memory.PostmortemStore)(nil)
+	_ store.AuditStore                   = (*memory.AuditStore)(nil)
+	_ store.AnnouncementStore            = (*memory.AnnouncementStore)(nil)
+	_ store.ChatStore                    = (*memory.ChatStore)(nil)
+	_ store.TaskStore                    = (*memory.TaskStore)(nil)
+	_ store.SEVLinkStore                 = (*memory.SEVLinkStore)(nil)
+	_ store.SLIStore                     = (*memory.SLIStore)(nil)
+	_ store.UserStore                    = (*memory.UserStore)(nil)
+	_ store.ServiceStore                 = (*memory.ServiceStore)(nil)
+	_ store.OnCallStore                  = (*memory.OnCallStore)(nil)
+	_ store.AIPluginStore                = (*memory.AIPluginStore)(nil)
+	_ store.IntegrationConfigStore       = (*memory.IntegrationConfigStore)(nil)
+	_ store.RetentionConfigStore         = (*memory.RetentionConfigStore)(nil)
+	_ store.ShareStore                   = (*memory.ShareStore)(nil)
+	_ store.RoleStore                    = (*memory.RoleStore)(nil)
+	_ store.SEVAccessStore               = (*memory.SEVAccessStore)(nil)
+	_ store.ServiceSLAStore              = (*memory.ServiceSLAStore)(nil)
+	_ store.ServiceLevelingCriteriaStore = (*memory.ServiceLevelingCriteriaStore)(nil)
 )
 
 var ctx = context.Background()
@@ -2046,6 +2047,133 @@ func TestSEVAccessStore(t *testing.T) {
 	t.Run("RevokeNotFound", func(t *testing.T) {
 		if err := s.Revoke(ctx, "SEV-2026-0001", 9999); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+}
+
+// ── ServiceLevelingCriteriaStore (docs/roadmap.md Phase 14) ────────────────
+
+func TestServiceLevelingCriteriaStore(t *testing.T) {
+	s := memory.NewServiceLevelingCriteriaStore()
+
+	c := &store.ServiceLevelingCriteria{
+		ServiceID:     "checkout",
+		SeverityLevel: 1,
+		Criteria:      ">50% of checkout traffic failing",
+	}
+
+	t.Run("Upsert (insert)", func(t *testing.T) {
+		if err := s.Upsert(ctx, c); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if c.ID == 0 {
+			t.Fatal("ID should be set on insert")
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		got, err := s.Get(ctx, "checkout", 1)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Criteria != ">50% of checkout traffic failing" {
+			t.Errorf("Criteria = %q, want %q", got.Criteria, ">50% of checkout traffic failing")
+		}
+	})
+
+	t.Run("GetNotFound", func(t *testing.T) {
+		if _, err := s.Get(ctx, "checkout", 2); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound for a different severity level, got %v", err)
+		}
+	})
+
+	t.Run("Upsert (update existing preserves ID)", func(t *testing.T) {
+		existingID := c.ID
+		updated := &store.ServiceLevelingCriteria{
+			ServiceID:     "checkout",
+			SeverityLevel: 1,
+			Criteria:      ">75% of checkout traffic failing",
+		}
+		if err := s.Upsert(ctx, updated); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if updated.ID != existingID {
+			t.Errorf("Upsert should preserve the existing ID, got %d want %d", updated.ID, existingID)
+		}
+		got, _ := s.Get(ctx, "checkout", 1)
+		if got.Criteria != ">75% of checkout traffic failing" {
+			t.Errorf("Criteria = %q, want %q after update", got.Criteria, ">75% of checkout traffic failing")
+		}
+	})
+
+	t.Run("ListByService", func(t *testing.T) {
+		other := &store.ServiceLevelingCriteria{ServiceID: "checkout", SeverityLevel: 2, Criteria: "10-50% of checkout traffic failing"}
+		if err := s.Upsert(ctx, other); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		items, err := s.ListByService(ctx, "checkout")
+		if err != nil {
+			t.Fatalf("ListByService: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2 rows, got %d", len(items))
+		}
+		if items[0].SeverityLevel != 1 || items[1].SeverityLevel != 2 {
+			t.Errorf("want ascending severity order, got %d, %d", items[0].SeverityLevel, items[1].SeverityLevel)
+		}
+	})
+
+	t.Run("ListByService_NoRows", func(t *testing.T) {
+		items, err := s.ListByService(ctx, "unregistered")
+		if err != nil {
+			t.Fatalf("ListByService: %v", err)
+		}
+		if len(items) != 0 {
+			t.Fatalf("want 0 rows, got %d", len(items))
+		}
+	})
+
+	t.Run("ListForServices", func(t *testing.T) {
+		payments := &store.ServiceLevelingCriteria{ServiceID: "payments", SeverityLevel: 1, Criteria: "any payment failure"}
+		if err := s.Upsert(ctx, payments); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		items, err := s.ListForServices(ctx, []string{"checkout", "payments", "unregistered"}, 1)
+		if err != nil {
+			t.Fatalf("ListForServices: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2 rows (checkout + payments at severity 1; unregistered excluded), got %d", len(items))
+		}
+	})
+
+	t.Run("ListForServices_NoNilElements", func(t *testing.T) {
+		// A service ID with no configured row must be skipped, never a nil
+		// element in the returned slice — there's no reduction step here to
+		// protect (unlike ServiceSLAStore.ListForServices/MostStrictSLA), but
+		// the invariant is asserted anyway since callers may range over the
+		// result without a nil check.
+		items, err := s.ListForServices(ctx, []string{"unregistered"}, 1)
+		if err != nil {
+			t.Fatalf("ListForServices: %v", err)
+		}
+		if len(items) != 0 {
+			t.Fatalf("want 0 rows, got %d", len(items))
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, "checkout", 1); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := s.Get(ctx, "checkout", 1); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound after delete, got %v", err)
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		if err := s.Delete(ctx, "checkout", 1); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound on second delete, got %v", err)
 		}
 	})
 }
