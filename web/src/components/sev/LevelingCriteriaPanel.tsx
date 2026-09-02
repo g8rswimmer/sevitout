@@ -1,23 +1,25 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { ServiceResponse } from '@/types/api'
 
 /** Read-only reference panel showing the configured SEV leveling criteria
  * (Roadmap Phase 14) for the given services at the given severity level —
  * advisory guidance only, never enforced or validated against. Shared by
  * SevCreatePage.tsx (to help pick the right level while filling out the
  * form) and PostmortemPage.tsx (to help confirm the level chosen was
- * correct during writeup), same convention as other shared SEV-page
- * components (SLABadge, ServiceChipEditor). Renders nothing when no
- * services are selected/attached — there's nothing to show guidance for. */
+ * correct during writeup). `services` is passed in rather than fetched here
+ * — the page owns the service-registry fetch and threads it down, same
+ * convention ServiceSLAComplianceTable.tsx's `services` prop follows. */
 export function LevelingCriteriaPanel({
   severityLevel,
   serviceIds,
+  services,
 }: {
   severityLevel: number
   serviceIds: string[]
+  services: ServiceResponse[]
 }) {
-  const registry = useQuery({ queryKey: ['services'], queryFn: api.services.list, enabled: serviceIds.length > 0 })
   const criteria = useQuery({
     queryKey: ['levelingCriteria', serviceIds, severityLevel],
     queryFn: () => api.config.levelingCriteria.listForServices(serviceIds, severityLevel),
@@ -38,8 +40,7 @@ export function LevelingCriteriaPanel({
     return null
   }
 
-  const nameFor = (serviceId: string) =>
-    registry.data?.services?.find((svc) => svc.id === serviceId)?.name ?? serviceId
+  const nameFor = (serviceId: string) => services.find((svc) => svc.id === serviceId)?.name ?? serviceId
 
   const rows = criteria.data?.criteria ?? []
 

@@ -48,6 +48,9 @@ export function PostmortemPage() {
 
   const sev = useQuery({ queryKey: ['sevs', 'detail', sevId], queryFn: () => api.sevs.get(sevId) })
   const pm = useQuery({ queryKey: ['postmortems', sevId], queryFn: () => api.postmortems.get(sevId) })
+  // Owned here (rather than by LevelingCriteriaPanel) per convention — see
+  // that component's doc comment.
+  const registry = useQuery({ queryKey: ['services'], queryFn: api.services.list })
 
   const canEdit = hasRole(user?.org_role, 'responder')
   const canTransition = hasRole(user?.org_role, 'incident-commander')
@@ -182,7 +185,11 @@ export function PostmortemPage() {
 
       {(record.affected_services?.length ?? 0) > 0 && (
         <Section title="Leveling criteria reference">
-          <LevelingCriteriaPanel severityLevel={record.severity_level} serviceIds={record.affected_services ?? []} />
+          <LevelingCriteriaPanel
+            severityLevel={record.severity_level}
+            serviceIds={record.affected_services ?? []}
+            services={registry.data?.services ?? []}
+          />
         </Section>
       )}
 

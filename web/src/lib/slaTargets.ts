@@ -1,7 +1,11 @@
-/** Shared shape for one severity level's SLA-target form row — used by both
+/** The 4 severity levels a service can have per-level config for — used by
  * ServiceSLAEditor.tsx (editing an existing service's SLAs) and
  * AdminServicesPage.tsx's "New service" form (setting them at creation
- * time), so the two stay in sync rather than drifting apart. */
+ * time), so the two stay in sync rather than drifting apart. Despite living
+ * in this SLA-specific file, the list itself is generic (just [1, 2, 3, 4]),
+ * so LevelingCriteriaEditor.tsx (Roadmap Phase 14) reuses it too rather than
+ * duplicating it — keep that in mind before folding this into anything
+ * SLA-specific. */
 export const SEVERITY_LEVELS = [1, 2, 3, 4]
 
 export interface SLARowForm {

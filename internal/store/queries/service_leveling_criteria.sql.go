@@ -7,6 +7,8 @@ package queries
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const deleteServiceLevelingCriteria = `-- name: DeleteServiceLevelingCriteria :exec
@@ -127,7 +129,7 @@ VALUES ($1, $2, $3, NOW(), NOW())
 ON CONFLICT (service_id, severity_level) DO UPDATE SET
     criteria   = EXCLUDED.criteria,
     updated_at = NOW()
-RETURNING id
+RETURNING id, created_at, updated_at
 `
 
 type UpsertServiceLevelingCriteriaParams struct {
@@ -136,9 +138,15 @@ type UpsertServiceLevelingCriteriaParams struct {
 	Criteria      string `json:"criteria"`
 }
 
-func (q *Queries) UpsertServiceLevelingCriteria(ctx context.Context, arg UpsertServiceLevelingCriteriaParams) (int64, error) {
+type UpsertServiceLevelingCriteriaRow struct {
+	ID        int64              `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertServiceLevelingCriteria(ctx context.Context, arg UpsertServiceLevelingCriteriaParams) (UpsertServiceLevelingCriteriaRow, error) {
 	row := q.db.QueryRow(ctx, upsertServiceLevelingCriteria, arg.ServiceID, arg.SeverityLevel, arg.Criteria)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i UpsertServiceLevelingCriteriaRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
 }

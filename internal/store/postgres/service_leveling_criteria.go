@@ -29,7 +29,7 @@ func NewServiceLevelingCriteriaStore(pool *pgxpool.Pool) *ServiceLevelingCriteri
 func (s *ServiceLevelingCriteriaStore) Upsert(ctx context.Context, c *store.ServiceLevelingCriteria) error {
 	q := queries.New(s.pool)
 
-	id, err := q.UpsertServiceLevelingCriteria(ctx, queries.UpsertServiceLevelingCriteriaParams{
+	row, err := q.UpsertServiceLevelingCriteria(ctx, queries.UpsertServiceLevelingCriteriaParams{
 		ServiceID:     c.ServiceID,
 		SeverityLevel: c.SeverityLevel,
 		Criteria:      c.Criteria,
@@ -37,7 +37,12 @@ func (s *ServiceLevelingCriteriaStore) Upsert(ctx context.Context, c *store.Serv
 	if err != nil {
 		return fmt.Errorf("postgres service leveling criteria: upsert: %w", err)
 	}
-	c.ID = id
+	// RETURNING created_at/updated_at (rather than just id) so an update
+	// reports the row's real created_at instead of echoing back the
+	// caller's now-timestamp — see queries.sql's ON CONFLICT clause.
+	c.ID = row.ID
+	c.CreatedAt = row.CreatedAt.Time
+	c.UpdatedAt = row.UpdatedAt.Time
 	return nil
 }
 
