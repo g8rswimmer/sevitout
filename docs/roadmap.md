@@ -1045,7 +1045,7 @@ tracking becomes a priority.
 
 ## Phase 13 — Per-service SLA compliance reporting
 
-**Status**: 📋 planned, not yet implemented
+**Status**: ✅ shipped, see [`demo/service-sla-compliance-reporting.md`](../demo/service-sla-compliance-reporting.md)
 
 Phase 12 added per-service SLA targets and a live, per-SEV breach indicator
 (`internal/sev/sla.go`'s `MostStrictSLA`/`EvaluateSLA`, `SEVResponse.sla_status`)
@@ -1129,19 +1129,24 @@ depends on them yet.
   store.ServiceSLAStore` field (`NewReportServer` gets a fourth param),
   mirroring `SEVServer`'s existing `serviceSLAs` dependency
   (`internal/api/grpc/sev.go`).
-- New `serviceLevelMetrics(records []*store.SEV, slaLookup func(service
-  string, level int16) *store.ServiceSLA, now time.Time)
+- New `serviceLevelMetrics(records []*store.SEV, slaLookup
+  map[serviceLevelKey]*store.ServiceSLA, now time.Time)
   []*pb.ServiceLevelMetrics` next to `frequencyByServiceAndLevel`: groups by
   `serviceLevelKey{service, level}` exactly like that function, but per
   group accumulates SEV count, per-metric sums/sample-counts for
   MTTD/MTTM/MTTR averages (nil-safe — only completed values contribute, same
   discipline as `mttrTrends`), and calls `sev.EvaluateSLA(r,
-  sev.MostStrictSLA([]*store.ServiceSLA{slaLookup(service, level)}), now)`
-  per SEV (a nil row from `slaLookup` is handled by `MostStrictSLA`'s
-  existing empty/nil-tolerant reduction — no new nil-handling needed) to
-  bucket into `ok`/`at_risk`/`breached`/`not_applicable` via `.Overall`.
-  `compliance_pct` is `ok / (ok + at_risk + breached)`, `0` when that
-  denominator is `0`.
+  sev.MostStrictSLA(rows), now)` per SEV, where `rows` is a 1-element slice
+  containing `slaLookup[key]` **only when that key is present** — and empty
+  otherwise. **Correction from an earlier draft of this section**: `rows`
+  must never contain a nil element. `sev.MostStrictSLA` dereferences every
+  row it's given, so passing `[]*store.ServiceSLA{slaLookup(service,
+  level)}` when the lookup misses (nil) would panic, not degrade gracefully
+  — there is no "nil-tolerant reduction" for a nil *element*, only for an
+  *empty slice* (a missing service simply not participating). Bucket the
+  per-SEV result into `ok`/`at_risk`/`breached`/`not_applicable` via
+  `.Overall`. `compliance_pct` is `ok / (ok + at_risk + breached)`, `0` when
+  that denominator is `0`.
 - Handler builds `slaLookup` efficiently: collect the distinct severity
   levels present in the filtered SEV set (≤4), call
   `serviceSLAs.ListForServices(ctx, serviceIDsAtThatLevel, level)` once per

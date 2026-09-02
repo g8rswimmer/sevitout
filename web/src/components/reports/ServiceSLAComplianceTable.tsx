@@ -1,264 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Skeleton } from '@/components/ui/skeleton'
 import { formatDurationSeconds } from '@/lib/format'
-import type { ServiceResponse } from '@/types/api'
-
-/**
- * Mirrors the planned `ReportService.GetServiceMetrics` RPC (see
- * docs/roadmap.md Phase 13b) field-for-field. This is a local type, not
- * imported from `types/api.ts`, because that RPC doesn't exist yet — 13d
- * adds the real `ServiceLevelMetrics`/`ServiceMetricsResponse` types once
- * this shape is reviewed and locked in; 13e then swaps `FIXTURES_BY_WINDOW`
- * below for a `useQuery` against the real endpoint without touching the
- * columns or rendering logic.
- */
-interface ServiceLevelMetrics {
-  service_id: string
-  severity_level: number
-  sev_count: number
-  avg_mttd_seconds?: number
-  avg_mttm_seconds?: number
-  avg_mttr_seconds?: number
-  sla_ok_count: number
-  sla_at_risk_count: number
-  sla_breached_count: number
-  sla_not_applicable_count: number
-  /** `ok / (ok + at_risk + breached)`, 0 when that denominator is 0 (i.e.
-   * every SEV in the group was `not_applicable` — no SLA configured for
-   * this service+severity). The 0 in that case is not itself meaningful —
-   * see the render logic below, which shows "No SLA configured" instead of
-   * "0%" so an unconfigured SLA is never confused with a breached one. */
-  compliance_pct: number
-}
+import type { ServiceLevelMetrics, ServiceResponse } from '@/types/api'
 
 const WINDOW_OPTIONS = [30, 60, 90, 180] as const
 type WindowDays = (typeof WINDOW_OPTIONS)[number]
-
-/** Fixture data standing in for `GetServiceMetrics` until 13b/13d ship (see
- * this file's header comment). Keyed per window so the selector genuinely
- * changes what's on screen — not just a decorative control — which is the
- * point of reviewing this as a clickable mock rather than a static image.
- * 180 days is deliberately empty, to make the table's empty state part of
- * the reviewable flow instead of something described only in prose. */
-const FIXTURES_BY_WINDOW: Record<WindowDays, ServiceLevelMetrics[]> = {
-  30: [
-    {
-      service_id: 'checkout-api',
-      severity_level: 1,
-      sev_count: 4,
-      avg_mttd_seconds: 420,
-      avg_mttm_seconds: 1800,
-      avg_mttr_seconds: 5400,
-      sla_ok_count: 3,
-      sla_at_risk_count: 0,
-      sla_breached_count: 1,
-      sla_not_applicable_count: 0,
-      compliance_pct: 0.75,
-    },
-    {
-      service_id: 'checkout-api',
-      severity_level: 2,
-      sev_count: 6,
-      avg_mttd_seconds: 300,
-      avg_mttm_seconds: 1200,
-      avg_mttr_seconds: 3600,
-      sla_ok_count: 5,
-      sla_at_risk_count: 1,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 0,
-      compliance_pct: 5 / 6,
-    },
-    {
-      service_id: 'payments-api',
-      severity_level: 1,
-      sev_count: 2,
-      avg_mttd_seconds: 600,
-      avg_mttm_seconds: 2400,
-      avg_mttr_seconds: 7200,
-      sla_ok_count: 1,
-      sla_at_risk_count: 0,
-      sla_breached_count: 1,
-      sla_not_applicable_count: 0,
-      compliance_pct: 0.5,
-    },
-    {
-      service_id: 'payments-api',
-      severity_level: 3,
-      sev_count: 5,
-      avg_mttd_seconds: 900,
-      avg_mttm_seconds: 3000,
-      avg_mttr_seconds: 5400,
-      sla_ok_count: 5,
-      sla_at_risk_count: 0,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 0,
-      compliance_pct: 1,
-    },
-    {
-      service_id: 'auth-service',
-      severity_level: 2,
-      sev_count: 3,
-      avg_mttd_seconds: 240,
-      avg_mttm_seconds: 900,
-      avg_mttr_seconds: 2700,
-      sla_ok_count: 3,
-      sla_at_risk_count: 0,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 0,
-      compliance_pct: 1,
-    },
-    {
-      service_id: 'notification-service',
-      severity_level: 4,
-      sev_count: 7,
-      avg_mttd_seconds: 1500,
-      avg_mttm_seconds: 4200,
-      avg_mttr_seconds: 9000,
-      sla_ok_count: 0,
-      sla_at_risk_count: 0,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 7,
-      compliance_pct: 0,
-    },
-  ],
-  60: [
-    {
-      service_id: 'checkout-api',
-      severity_level: 1,
-      sev_count: 7,
-      avg_mttd_seconds: 480,
-      avg_mttm_seconds: 2100,
-      avg_mttr_seconds: 6000,
-      sla_ok_count: 5,
-      sla_at_risk_count: 0,
-      sla_breached_count: 2,
-      sla_not_applicable_count: 0,
-      compliance_pct: 5 / 7,
-    },
-    {
-      service_id: 'checkout-api',
-      severity_level: 2,
-      sev_count: 10,
-      avg_mttd_seconds: 330,
-      avg_mttm_seconds: 1260,
-      avg_mttr_seconds: 3900,
-      sla_ok_count: 9,
-      sla_at_risk_count: 1,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 0,
-      compliance_pct: 0.9,
-    },
-    {
-      service_id: 'payments-api',
-      severity_level: 1,
-      sev_count: 3,
-      avg_mttd_seconds: 660,
-      avg_mttm_seconds: 2520,
-      avg_mttr_seconds: 7500,
-      sla_ok_count: 2,
-      sla_at_risk_count: 0,
-      sla_breached_count: 1,
-      sla_not_applicable_count: 0,
-      compliance_pct: 2 / 3,
-    },
-    {
-      service_id: 'auth-service',
-      severity_level: 2,
-      sev_count: 5,
-      avg_mttd_seconds: 260,
-      avg_mttm_seconds: 960,
-      avg_mttr_seconds: 2850,
-      sla_ok_count: 5,
-      sla_at_risk_count: 0,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 0,
-      compliance_pct: 1,
-    },
-    {
-      service_id: 'notification-service',
-      severity_level: 4,
-      sev_count: 11,
-      avg_mttd_seconds: 1620,
-      avg_mttm_seconds: 4500,
-      avg_mttr_seconds: 9600,
-      sla_ok_count: 0,
-      sla_at_risk_count: 0,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 11,
-      compliance_pct: 0,
-    },
-  ],
-  90: [
-    {
-      service_id: 'checkout-api',
-      severity_level: 1,
-      sev_count: 9,
-      avg_mttd_seconds: 510,
-      avg_mttm_seconds: 2250,
-      avg_mttr_seconds: 6300,
-      sla_ok_count: 6,
-      sla_at_risk_count: 1,
-      sla_breached_count: 2,
-      sla_not_applicable_count: 0,
-      compliance_pct: 6 / 9,
-    },
-    {
-      service_id: 'payments-api',
-      severity_level: 1,
-      sev_count: 4,
-      avg_mttd_seconds: 690,
-      avg_mttm_seconds: 2640,
-      avg_mttr_seconds: 7800,
-      sla_ok_count: 3,
-      sla_at_risk_count: 0,
-      sla_breached_count: 1,
-      sla_not_applicable_count: 0,
-      compliance_pct: 0.75,
-    },
-    {
-      service_id: 'payments-api',
-      severity_level: 3,
-      sev_count: 8,
-      avg_mttd_seconds: 930,
-      avg_mttm_seconds: 3120,
-      avg_mttr_seconds: 5700,
-      sla_ok_count: 8,
-      sla_at_risk_count: 0,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 0,
-      compliance_pct: 1,
-    },
-    {
-      service_id: 'auth-service',
-      severity_level: 2,
-      sev_count: 6,
-      avg_mttd_seconds: 270,
-      avg_mttm_seconds: 990,
-      avg_mttr_seconds: 2970,
-      sla_ok_count: 5,
-      sla_at_risk_count: 1,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 0,
-      compliance_pct: 5 / 6,
-    },
-    {
-      service_id: 'notification-service',
-      severity_level: 4,
-      sev_count: 14,
-      avg_mttd_seconds: 1680,
-      avg_mttm_seconds: 4680,
-      avg_mttr_seconds: 9900,
-      sla_ok_count: 0,
-      sla_at_risk_count: 0,
-      sla_breached_count: 0,
-      sla_not_applicable_count: 14,
-      compliance_pct: 0,
-    },
-  ],
-  180: [],
-}
 
 const SEVERITY_LABEL: Record<number, string> = { 1: 'SEV-1', 2: 'SEV-2', 3: 'SEV-3', 4: 'SEV-4' }
 const SEVERITY_LEVELS = [1, 2, 3, 4]
@@ -267,13 +18,16 @@ const SEVERITY_LEVELS = [1, 2, 3, 4]
  * where every SEV was `not_applicable` (no SLA configured) shows that fact
  * in muted text instead of a misleading "0%" — 0% reads as "this service is
  * failing its SLA," which is a different claim than "this service has no
- * SLA to measure against." */
+ * SLA to measure against." Every count/`compliance_pct` is coalesced with
+ * `?? 0` — see ServiceLevelMetrics' doc comment (types/api.ts): protojson
+ * omits a zero-valued field from the JSON body entirely, so e.g. a group
+ * with zero breached SEVs has no "sla_breached_count" key at all. */
 function ComplianceCell({ metrics }: { metrics: ServiceLevelMetrics }) {
-  const measured = metrics.sla_ok_count + metrics.sla_at_risk_count + metrics.sla_breached_count
+  const measured = (metrics.sla_ok_count ?? 0) + (metrics.sla_at_risk_count ?? 0) + (metrics.sla_breached_count ?? 0)
   if (measured === 0) {
     return <span className="text-muted-foreground">No SLA configured</span>
   }
-  return <span>{Math.round(metrics.compliance_pct * 100)}%</span>
+  return <span>{Math.round((metrics.compliance_pct ?? 0) * 100)}%</span>
 }
 
 function WindowSelector({ value, onChange }: { value: WindowDays; onChange: (days: WindowDays) => void }) {
@@ -407,14 +161,12 @@ function MultiSelectDropdown<T extends string | number>({
  * lookup, reused here as the source of the service filter dropdown's
  * options instead of a second fetch.
  *
- * Both filters are local/client-side in this mock. Per Phase 13b/13d,
- * `GetServiceMetricsRequest` already plans a `service_ids` field and
- * `api.reports.serviceMetrics` already plans a `serviceIds` param — 13e
- * wires the service filter's selection into that request instead of
- * filtering the response, once it exists. Severity has no equivalent
- * request field (nor does it need one): a window's response already
- * contains every severity level in one call, so narrowing to a subset is
- * purely a view concern and stays a client-side filter in 13e too. */
+ * The Service filter drives the real `GetServiceMetrics` request's
+ * `service_ids` field — checking a service narrows what's fetched, not just
+ * what's displayed, so it's part of the query key below. Severity stays a
+ * client-side filter over the fetched rows: a window's response already
+ * contains every severity level in one call, and the set is a fixed four,
+ * so there's no round-trip to save by adding a server-side filter for it. */
 export function ServiceSLAComplianceTable({
   serviceName,
   services,
@@ -425,7 +177,12 @@ export function ServiceSLAComplianceTable({
   const [windowDays, setWindowDays] = useState<WindowDays>(30)
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([])
   const [selectedSeverities, setSelectedSeverities] = useState<number[]>([])
-  const rows = FIXTURES_BY_WINDOW[windowDays]
+
+  const metrics = useQuery({
+    queryKey: ['reports', 'service-metrics', windowDays, selectedServiceIds],
+    queryFn: () => api.reports.serviceMetrics(windowDays, selectedServiceIds.length ? selectedServiceIds : undefined),
+  })
+  const rows = metrics.data?.service_level_metrics ?? []
 
   const serviceOptions = useMemo(
     () =>
@@ -437,9 +194,7 @@ export function ServiceSLAComplianceTable({
   const severityOptions = SEVERITY_LEVELS.map((level) => ({ value: level, label: SEVERITY_LABEL[level] }))
 
   const filteredRows = rows.filter(
-    (row) =>
-      (selectedServiceIds.length === 0 || selectedServiceIds.includes(row.service_id)) &&
-      (selectedSeverities.length === 0 || selectedSeverities.includes(row.severity_level)),
+    (row) => selectedSeverities.length === 0 || selectedSeverities.includes(row.severity_level),
   )
 
   return (
@@ -464,7 +219,13 @@ export function ServiceSLAComplianceTable({
         <WindowSelector value={windowDays} onChange={setWindowDays} />
       </div>
 
-      {rows.length === 0 ? (
+      {metrics.isLoading ? (
+        <Skeleton className="h-32 w-full" />
+      ) : metrics.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          Failed to load service metrics: {(metrics.error as Error).message}
+        </p>
+      ) : rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">No SEVs opened in the selected window.</p>
       ) : filteredRows.length === 0 ? (
         <p className="text-sm text-muted-foreground">No SEVs match the selected filters.</p>

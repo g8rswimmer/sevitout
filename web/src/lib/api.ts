@@ -51,6 +51,7 @@ import type {
   SEVTrendsResponse,
   SearchSEVsParams,
   SearchSEVsResponse,
+  ServiceMetricsResponse,
   ServiceResponse,
   ServiceSLAResponse,
   ShareLinkResponse,
@@ -281,6 +282,8 @@ export const api = {
     // Returns raw CSV text (not JSON) — pass straight to
     // lib/download.ts's downloadTextFile.
     exportCSV: (params: ExportSEVsParams = {}) => requestText(`/v1/sevs/export.csv${buildQuery(params)}`),
+    serviceMetrics: (windowDays?: 30 | 60 | 90 | 180, serviceIds?: string[]) =>
+      request<ServiceMetricsResponse>(`/v1/reports/service-metrics${buildQuery({ window_days: windowDays, service_ids: serviceIds })}`),
   },
   shares: {
     create: (sevId: string, req: CreateShareLinkRequest = {}) =>
