@@ -59,6 +59,8 @@ type ConfigServer struct {
 	services             store.ServiceStore
 	serviceSLAs          store.ServiceSLAStore
 	levelingCriteria     store.ServiceLevelingCriteriaStore
+	notificationConfigs  store.NotificationConfigStore
+	escalationConfigs    store.EscalationConfigStore
 	users                store.UserStore
 	oncall               store.OnCallStore
 	integrations         store.IntegrationConfigStore
@@ -81,6 +83,8 @@ type ConfigServerParams struct {
 	Services             store.ServiceStore
 	ServiceSLAs          store.ServiceSLAStore
 	LevelingCriteria     store.ServiceLevelingCriteriaStore
+	NotificationConfigs  store.NotificationConfigStore
+	EscalationConfigs    store.EscalationConfigStore
 	Users                store.UserStore
 	OnCall               store.OnCallStore
 	Integrations         store.IntegrationConfigStore
@@ -97,6 +101,8 @@ func NewConfigServer(p ConfigServerParams) *ConfigServer {
 		services:             p.Services,
 		serviceSLAs:          p.ServiceSLAs,
 		levelingCriteria:     p.LevelingCriteria,
+		notificationConfigs:  p.NotificationConfigs,
+		escalationConfigs:    p.EscalationConfigs,
 		users:                p.Users,
 		oncall:               p.OnCall,
 		integrations:         p.Integrations,

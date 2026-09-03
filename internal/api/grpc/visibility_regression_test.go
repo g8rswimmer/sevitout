@@ -113,7 +113,7 @@ func TestSensitiveSEVSubResourcesHiddenFromCallerWithoutAccess(t *testing.T) {
 		{
 			name: "AnnouncementService.ListAnnouncements",
 			call: func(ctx context.Context) error {
-				s := grpchandler.NewAnnouncementServer(announcements, sevs, access, nil)
+				s := grpchandler.NewAnnouncementServer(announcements, sevs, access, nil, nil)
 				_, err := s.ListAnnouncements(ctx, &pb.ListAnnouncementsRequest{SevId: sevID})
 				return err
 			},

@@ -64,7 +64,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `TRUNCATE TABLE
-		ai_outputs, ai_plugins, audit_log, integration_config,
+		ai_outputs, ai_plugins, audit_log, escalation_config, integration_config,
 		notification_config, oncall_rotations, postmortems, retention_config,
 		services, sev_access, sev_announcements, sev_chat_log,
 		sev_linked_tasks, sev_links, sev_roles, sev_slis, sev_status_history,

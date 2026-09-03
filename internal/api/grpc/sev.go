@@ -48,6 +48,7 @@ type SEVServer struct {
 	unlock      Unlocker
 	publisher   Publisher    // nil when WebSocket support is not wired up
 	aiDispatch  AIDispatcher // nil when no AI plugin is configured
+	notifier    *Notifier    // nil when no notification routing is configured (docs/roadmap.md Phase 15)
 }
 
 // SEVServerParams groups NewSEVServer's dependencies. OnCaller, Publisher,
@@ -68,6 +69,7 @@ type SEVServerParams struct {
 	Unlock      Unlocker
 	Publisher   Publisher
 	AIDispatch  AIDispatcher
+	Notifier    *Notifier
 }
 
 func NewSEVServer(p SEVServerParams) *SEVServer {
@@ -85,6 +87,7 @@ func NewSEVServer(p SEVServerParams) *SEVServer {
 		unlock:      p.Unlock,
 		publisher:   p.Publisher,
 		aiDispatch:  p.AIDispatch,
+		notifier:    p.Notifier,
 	}
 }
 
@@ -328,6 +331,7 @@ func (s *SEVServer) CreateSEV(ctx context.Context, req *pb.CreateSEVRequest) (*p
 		// creation, M11) can immediately look up the on-call role via
 		// RoleService without racing this handler's own writes.
 		publishProto(s.publisher, record.ID, "sev.created", resp)
+		s.notifier.Notify(ctx, NotifyEvent{Type: "sev.created", SEV: record})
 	}
 	// SEV opened proactively triggers AI only for SEV-1/SEV-2 (§11.1);
 	// Dispatcher itself enforces the severity gate against the freshly
@@ -547,6 +551,7 @@ func (s *SEVServer) UpdateSEV(ctx context.Context, req *pb.UpdateSEVRequest) (*p
 	resp := s.sevToProtoWithSLA(ctx, record)
 	if !record.Sensitive {
 		publishProto(s.publisher, record.ID, "sev.updated", resp)
+		s.notifier.Notify(ctx, NotifyEvent{Type: "sev.updated", SEV: record})
 	}
 
 	// §17's "new SEV auto-linked on create": in practice, root cause category
@@ -787,6 +792,13 @@ func (s *SEVServer) TransitionStatus(ctx context.Context, req *pb.TransitionStat
 	resp := s.sevToProtoWithSLA(ctx, record)
 	if !record.Sensitive {
 		publishProto(s.publisher, record.ID, "sev.status_changed", resp)
+		s.notifier.Notify(ctx, NotifyEvent{Type: "sev.status_changed", SEV: record})
+		if toStatus == store.SEVStatusResolved {
+			// A postmortem is auto-seeded on resolve (§11.1) — this is the
+			// point in the lifecycle where writing it up genuinely becomes
+			// due, not an arbitrary later reminder.
+			s.notifier.Notify(ctx, NotifyEvent{Type: "postmortem.due", SEV: record})
+		}
 	}
 	switch toStatus {
 	case store.SEVStatusMitigated:

@@ -159,6 +159,19 @@ func TestHasPermission(t *testing.T) {
 		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpsertLevelingCriteria", true},
 		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/DeleteLevelingCriteria", true},
 
+		// Notifications & Alerting (docs/roadmap.md Phase 15) — reads open to
+		// any Viewer, mutations Admin-only, same shape as ServiceSLA/
+		// LevelingCriteria above.
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListNotificationConfigs", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/UpsertNotificationConfig", false},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/DeleteNotificationConfig", false},
+		{store.OrgRoleIncidentCommander, "/sevitout.v1.ConfigService/UpsertNotificationConfig", false},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpsertNotificationConfig", true},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/DeleteNotificationConfig", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/ListEscalationConfigs", true},
+		{store.OrgRoleViewer, "/sevitout.v1.ConfigService/UpsertEscalationConfig", false},
+		{store.OrgRoleAdmin, "/sevitout.v1.ConfigService/UpsertEscalationConfig", true},
+
 		// WebSocket subscription (pseudo-method checked manually by internal/api/ws)
 		{store.OrgRoleViewer, "/sevitout.v1.WebSocket/Subscribe", true},
 		{store.OrgRoleResponder, "/sevitout.v1.WebSocket/Subscribe", true},

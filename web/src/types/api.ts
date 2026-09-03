@@ -930,6 +930,55 @@ export interface UpsertLevelingCriteriaRequest {
   criteria: string
 }
 
+/** One admin-configured notification routing rule (Roadmap Phase 15): "for
+ * org role X, on event Y, post to channel_type at channel_target." A fixed
+ * broadcast route, not per-user or per-incident personalized delivery.
+ * max_severity_level is absent/0 when unset (every severity matches) — a
+ * plain proto3 int32, not int64, so it serializes as a number, not a string,
+ * unlike ServiceSLAResponse's target-seconds fields. */
+export interface NotificationConfigResponse {
+  role: string
+  event: string
+  channel_type: 'slack' | 'email' | string
+  channel_target: string
+  max_severity_level?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ListNotificationConfigsResponse {
+  configs?: NotificationConfigResponse[]
+}
+
+export interface UpsertNotificationConfigRequest {
+  role: string
+  event: string
+  channel_type: string
+  channel_target: string
+  max_severity_level?: number
+}
+
+/** Per-severity-level escalation threshold (Roadmap Phase 15): "alert if a
+ * SEV has been open past threshold_minutes with no Incident Commander
+ * assigned." All four severity levels always have a row (pre-seeded
+ * disabled), so this is never absent for a valid severity_level. */
+export interface EscalationConfigResponse {
+  severity_level: number
+  threshold_minutes: number
+  enabled: boolean
+  updated_at: string
+}
+
+export interface ListEscalationConfigsResponse {
+  configs?: EscalationConfigResponse[]
+}
+
+export interface UpsertEscalationConfigRequest {
+  severity_level: number
+  threshold_minutes: number
+  enabled: boolean
+}
+
 export interface UserResponse {
   id: string
   email: string

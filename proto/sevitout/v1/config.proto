@@ -121,6 +121,45 @@ service ConfigService {
     };
   }
 
+  // --- Notifications & Alerting (docs/requirements.md §16/§18.5,
+  // docs/roadmap.md Phase 15) --- an admin-configured routing rule set:
+  // "for org role X, on event Y, post to channel_type at channel_target."
+  // A fixed broadcast route, not per-user/per-incident personalization.
+  // Reads sit at the Viewer floor (same reasoning as ServiceSLA/
+  // LevelingCriteria); mutations are Admin-only.
+  rpc UpsertNotificationConfig(UpsertNotificationConfigRequest) returns (NotificationConfigResponse) {
+    option (google.api.http) = {
+      put: "/v1/config/notifications"
+      body: "*"
+    };
+  }
+  rpc DeleteNotificationConfig(DeleteNotificationConfigRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/config/notifications"
+    };
+  }
+  rpc ListNotificationConfigs(google.protobuf.Empty) returns (ListNotificationConfigsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/notifications"
+    };
+  }
+
+  // --- Escalation thresholds (docs/requirements.md §16, docs/roadmap.md
+  // Phase 15) --- per-severity-level "alert if open > N minutes with no
+  // Incident Commander assigned" configuration, scanned by cmd/server's
+  // escalation scanner. Reads/writes floor exactly like RetentionConfig.
+  rpc UpsertEscalationConfig(UpsertEscalationConfigRequest) returns (EscalationConfigResponse) {
+    option (google.api.http) = {
+      put: "/v1/config/escalation/{severity_level}"
+      body: "*"
+    };
+  }
+  rpc ListEscalationConfigs(google.protobuf.Empty) returns (ListEscalationConfigsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/escalation"
+    };
+  }
+
   // --- User management (§18.2, §14) ---
 
   // ListUsers is Admin-only; the directory includes email addresses.
@@ -448,6 +487,57 @@ message ListLevelingCriteriaForServicesRequest {
 
 message ListLevelingCriteriaForServicesResponse {
   repeated LevelingCriteriaResponse criteria = 1;
+}
+
+// ── Notifications & Alerting (docs/roadmap.md Phase 15) ─────────────────────
+
+message NotificationConfigResponse {
+  string role = 1;
+  string event = 2;
+  string channel_type = 3;
+  string channel_target = 4;
+  // max_severity_level restricts this rule to SEVs at this severity level or
+  // more critical (severity 1 is most critical); 0 means unset (every
+  // severity), the same proto3 convention ServiceSLAResponse's target-seconds
+  // fields already use.
+  int32 max_severity_level = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message UpsertNotificationConfigRequest {
+  string role = 1;
+  string event = 2;
+  string channel_type = 3;
+  string channel_target = 4;
+  int32 max_severity_level = 5;
+}
+
+message DeleteNotificationConfigRequest {
+  string role = 1;
+  string event = 2;
+  string channel_type = 3;
+}
+
+message ListNotificationConfigsResponse {
+  repeated NotificationConfigResponse configs = 1;
+}
+
+message EscalationConfigResponse {
+  int32 severity_level = 1;
+  int32 threshold_minutes = 2;
+  bool enabled = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message UpsertEscalationConfigRequest {
+  int32 severity_level = 1;
+  int32 threshold_minutes = 2;
+  bool enabled = 3;
+}
+
+message ListEscalationConfigsResponse {
+  repeated EscalationConfigResponse configs = 1;
 }
 
 // ── User management ──────────────────────────────────────────────────────────

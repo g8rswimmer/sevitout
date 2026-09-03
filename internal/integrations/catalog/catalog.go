@@ -106,6 +106,25 @@ var All = []Integration{
 		},
 	},
 	{
+		// Email backs the Slack/email routing rules configured in
+		// ConfigService's NotificationConfig RPCs (docs/roadmap.md Phase 15).
+		// Only username/password are genuinely secret; host/port/from_address
+		// are plain configuration (like Jira's cloud_id/site_url), so they're
+		// settings, not credentials — matching this file's convention that
+		// every CredentialField is KindSecret and no SettingsField is.
+		Type:  "email",
+		Label: "Email",
+		CredentialFields: []Field{
+			{Key: "smtp_username", Label: "SMTP Username", Kind: KindSecret, Help: "Leave blank for an unauthenticated relay"},
+			{Key: "smtp_password", Label: "SMTP Password", Kind: KindSecret},
+		},
+		SettingsFields: []Field{
+			{Key: "smtp_host", Label: "SMTP Host", Kind: KindText, Required: true},
+			{Key: "smtp_port", Label: "SMTP Port", Kind: KindText, Required: true, Help: "e.g. 587 for STARTTLS"},
+			{Key: "from_address", Label: "From Address", Kind: KindText, Required: true},
+		},
+	},
+	{
 		// Monitoring has no credentials at all — deliberately, per
 		// docs/requirements.md §18.4: it's tool type + base URL only, with
 		// no live health check (nothing to poll) and no new integration

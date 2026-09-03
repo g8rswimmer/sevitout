@@ -29,11 +29,13 @@ import (
 	"github.com/g8rswimmer/sevitout/internal/api/ws"
 	"github.com/g8rswimmer/sevitout/internal/auth"
 	"github.com/g8rswimmer/sevitout/internal/config"
+	"github.com/g8rswimmer/sevitout/internal/integrations/email"
 	"github.com/g8rswimmer/sevitout/internal/integrations/pagerduty"
 	"github.com/g8rswimmer/sevitout/internal/integrations/slack"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/github"
 	"github.com/g8rswimmer/sevitout/internal/integrations/tasktracker/jira"
 	"github.com/g8rswimmer/sevitout/internal/postmortem"
+	"github.com/g8rswimmer/sevitout/internal/sev"
 	"github.com/g8rswimmer/sevitout/internal/share"
 	"github.com/g8rswimmer/sevitout/internal/store"
 	"github.com/g8rswimmer/sevitout/internal/store/crypto"
@@ -177,6 +179,25 @@ func main() {
 	// any single request's) governs its background worker pool. ---
 	aiDispatcher := ai.NewDispatcher(ctx, stores.SEV, stores.StatusHistory, stores.Announcement, stores.AIPlugin, stores.AIOutput, encryptor, wsHub, log, 0)
 
+	// --- Notification dispatcher (docs/roadmap.md Phase 15): routes SEV/
+	// announcement/postmortem lifecycle events and escalation alerts to
+	// admin-configured Slack channels or email addresses. Both factories
+	// build a fresh client per delivery from the datastore's current
+	// integration config, the same "no caching, re-read each time" posture
+	// roleServer's SlackFactory below already uses. A nil result from either
+	// factory is fine — Notifier.Notify degrades to a no-op per channel type
+	// when its factory or the underlying integration isn't configured.
+	notifier := grpchandler.NewNotifier(grpchandler.NotifierParams{
+		Configs:      stores.NotificationConfig,
+		Integrations: stores.IntegrationConfig,
+		Crypto:       encryptor,
+		SlackFactory: func(botToken string) grpchandler.SlackSender { return slack.NewClient(botToken) },
+		EmailFactory: func(config map[string]string) grpchandler.EmailSender {
+			port, _ := strconv.Atoi(config["smtp_port"])
+			return email.NewClient(config["smtp_host"], port, config["smtp_username"], config["smtp_password"], config["from_address"])
+		},
+	})
+
 	// --- gRPC server with auth interceptors ---
 	sevServer := grpchandler.NewSEVServer(grpchandler.SEVServerParams{
 		SEVs:        stores.SEV,
@@ -192,6 +213,7 @@ func main() {
 		Unlock:      unlockSigner,
 		Publisher:   wsHub,
 		AIDispatch:  aiDispatcher,
+		Notifier:    notifier,
 	})
 	sevAccessServer := grpchandler.NewSEVAccessServer(stores.SEVAccess, stores.SEV, stores.Audit)
 	reportServer := grpchandler.NewReportServer(stores.SEV, stores.Postmortem, stores.Task, stores.ServiceSLA)
@@ -220,8 +242,9 @@ func main() {
 		Unlock:      unlockSigner,
 		Publisher:   wsHub,
 		AIDispatch:  aiDispatcher,
+		Notifier:    notifier,
 	})
-	announcementServer := grpchandler.NewAnnouncementServer(stores.Announcement, stores.SEV, stores.SEVAccess, wsHub)
+	announcementServer := grpchandler.NewAnnouncementServer(stores.Announcement, stores.SEV, stores.SEVAccess, wsHub, notifier)
 	chatServer := grpchandler.NewChatServer(stores.Chat, stores.SEV, stores.SEVAccess, wsHub)
 	sevLinkServer := grpchandler.NewSEVLinkServer(stores.SEVLink, stores.SEV, stores.SEVAccess, stores.Audit)
 	taskServer := grpchandler.NewTaskServer(grpchandler.TaskServerParams{
@@ -230,16 +253,18 @@ func main() {
 	})
 	searchServer := grpchandler.NewSearchServer(stores.SEV, stores.Role, stores.Announcement)
 	configServer := grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
-		Services:         stores.Service,
-		ServiceSLAs:      stores.ServiceSLA,
-		LevelingCriteria: stores.LevelingCriteria,
-		Users:            stores.User,
-		OnCall:           stores.OnCall,
-		Integrations:     stores.IntegrationConfig,
-		Retention:        stores.RetentionConfig,
-		AIPlugins:        stores.AIPlugin,
-		Crypto:           encryptor,
-		RateLimits:       aiDispatcher,
+		Services:            stores.Service,
+		ServiceSLAs:         stores.ServiceSLA,
+		LevelingCriteria:    stores.LevelingCriteria,
+		NotificationConfigs: stores.NotificationConfig,
+		EscalationConfigs:   stores.EscalationConfig,
+		Users:               stores.User,
+		OnCall:              stores.OnCall,
+		Integrations:        stores.IntegrationConfig,
+		Retention:           stores.RetentionConfig,
+		AIPlugins:           stores.AIPlugin,
+		Crypto:              encryptor,
+		RateLimits:          aiDispatcher,
 		Refreshers: []grpchandler.IntegrationCredentialsRefresher{
 			pagerdutyResolver, githubResolver, jiraResolver,
 		},
@@ -422,6 +447,12 @@ func main() {
 	// startMetricsRefresher's doc comment.
 	go startMetricsRefresher(ctx, log, stores.SEV, stores.Pool)
 
+	// --- Background escalation scanner (docs/roadmap.md Phase 15): "alert if
+	// a SEV has been open past its severity level's configured threshold
+	// with no Incident Commander assigned" — see startEscalationScanner's
+	// doc comment.
+	go startEscalationScanner(ctx, log, stores.SEV, stores.Role, stores.EscalationConfig, notifier)
+
 	// --- cmux: gRPC and HTTP/1.1 on the same TCP port ---
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -455,26 +486,28 @@ func main() {
 // in-memory fallback, and main threads it into whichever gRPC
 // servers/handlers need a given field.
 type Stores struct {
-	SEV               store.SEVStore
-	Audit             store.AuditStore
-	StatusHistory     store.StatusHistoryStore
-	User              store.UserStore
-	Role              store.RoleStore
-	Service           store.ServiceStore
-	ServiceSLA        store.ServiceSLAStore
-	LevelingCriteria  store.ServiceLevelingCriteriaStore
-	Postmortem        store.PostmortemStore
-	Announcement      store.AnnouncementStore
-	Chat              store.ChatStore
-	SEVLink           store.SEVLinkStore
-	Task              store.TaskStore
-	OnCall            store.OnCallStore
-	IntegrationConfig store.IntegrationConfigStore
-	RetentionConfig   store.RetentionConfigStore
-	AIPlugin          store.AIPluginStore
-	AIOutput          store.AIOutputStore
-	Share             store.ShareStore
-	SEVAccess         store.SEVAccessStore
+	SEV                store.SEVStore
+	Audit              store.AuditStore
+	StatusHistory      store.StatusHistoryStore
+	User               store.UserStore
+	Role               store.RoleStore
+	Service            store.ServiceStore
+	ServiceSLA         store.ServiceSLAStore
+	LevelingCriteria   store.ServiceLevelingCriteriaStore
+	NotificationConfig store.NotificationConfigStore
+	EscalationConfig   store.EscalationConfigStore
+	Postmortem         store.PostmortemStore
+	Announcement       store.AnnouncementStore
+	Chat               store.ChatStore
+	SEVLink            store.SEVLinkStore
+	Task               store.TaskStore
+	OnCall             store.OnCallStore
+	IntegrationConfig  store.IntegrationConfigStore
+	RetentionConfig    store.RetentionConfigStore
+	AIPlugin           store.AIPluginStore
+	AIOutput           store.AIOutputStore
+	Share              store.ShareStore
+	SEVAccess          store.SEVAccessStore
 
 	// Pool is the underlying PostgreSQL connection pool, or nil when running
 	// against the in-memory dev fallback (DATABASE_URL unset). Exposed
@@ -505,26 +538,28 @@ func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, er
 	if dsn == "" {
 		log.Warn("DATABASE_URL not set — using in-memory store (data will not persist)")
 		return &Stores{
-			SEV:               memory.NewSEVStore(),
-			Audit:             memory.NewAuditStore(),
-			StatusHistory:     memory.NewStatusHistoryStore(),
-			User:              memory.NewUserStore(),
-			Role:              memory.NewRoleStore(),
-			Service:           memory.NewServiceStore(),
-			ServiceSLA:        memory.NewServiceSLAStore(),
-			LevelingCriteria:  memory.NewServiceLevelingCriteriaStore(),
-			Postmortem:        memory.NewPostmortemStore(),
-			Announcement:      memory.NewAnnouncementStore(),
-			Chat:              memory.NewChatStore(),
-			SEVLink:           memory.NewSEVLinkStore(),
-			Task:              memory.NewTaskStore(),
-			OnCall:            memory.NewOnCallStore(),
-			IntegrationConfig: memory.NewIntegrationConfigStore(),
-			RetentionConfig:   memory.NewRetentionConfigStore(),
-			AIPlugin:          memory.NewAIPluginStore(),
-			AIOutput:          memory.NewAIOutputStore(),
-			Share:             memory.NewShareStore(),
-			SEVAccess:         memory.NewSEVAccessStore(),
+			SEV:                memory.NewSEVStore(),
+			Audit:              memory.NewAuditStore(),
+			StatusHistory:      memory.NewStatusHistoryStore(),
+			User:               memory.NewUserStore(),
+			Role:               memory.NewRoleStore(),
+			Service:            memory.NewServiceStore(),
+			ServiceSLA:         memory.NewServiceSLAStore(),
+			LevelingCriteria:   memory.NewServiceLevelingCriteriaStore(),
+			NotificationConfig: memory.NewNotificationConfigStore(),
+			EscalationConfig:   memory.NewEscalationConfigStore(),
+			Postmortem:         memory.NewPostmortemStore(),
+			Announcement:       memory.NewAnnouncementStore(),
+			Chat:               memory.NewChatStore(),
+			SEVLink:            memory.NewSEVLinkStore(),
+			Task:               memory.NewTaskStore(),
+			OnCall:             memory.NewOnCallStore(),
+			IntegrationConfig:  memory.NewIntegrationConfigStore(),
+			RetentionConfig:    memory.NewRetentionConfigStore(),
+			AIPlugin:           memory.NewAIPluginStore(),
+			AIOutput:           memory.NewAIOutputStore(),
+			Share:              memory.NewShareStore(),
+			SEVAccess:          memory.NewSEVAccessStore(),
 		}, nil
 	}
 	pool, err := postgres.Open(ctx, dsn)
@@ -533,27 +568,29 @@ func buildStores(ctx context.Context, log *slog.Logger, dsn string) (*Stores, er
 	}
 	log.Info("using postgres store")
 	return &Stores{
-		Pool:              pool,
-		SEV:               postgres.NewSEVStore(pool),
-		Audit:             postgres.NewAuditStore(pool),
-		StatusHistory:     postgres.NewStatusHistoryStore(pool),
-		User:              postgres.NewUserStore(pool),
-		Role:              postgres.NewRoleStore(pool),
-		Service:           postgres.NewServiceStore(pool),
-		ServiceSLA:        postgres.NewServiceSLAStore(pool),
-		LevelingCriteria:  postgres.NewServiceLevelingCriteriaStore(pool),
-		Postmortem:        postgres.NewPostmortemStore(pool),
-		Announcement:      postgres.NewAnnouncementStore(pool),
-		Chat:              postgres.NewChatStore(pool),
-		SEVLink:           postgres.NewSEVLinkStore(pool),
-		Task:              postgres.NewTaskStore(pool),
-		OnCall:            postgres.NewOnCallStore(pool),
-		IntegrationConfig: postgres.NewIntegrationConfigStore(pool),
-		RetentionConfig:   postgres.NewRetentionConfigStore(pool),
-		AIPlugin:          postgres.NewAIPluginStore(pool),
-		AIOutput:          postgres.NewAIOutputStore(pool),
-		Share:             postgres.NewShareStore(pool),
-		SEVAccess:         postgres.NewSEVAccessStore(pool),
+		Pool:               pool,
+		SEV:                postgres.NewSEVStore(pool),
+		Audit:              postgres.NewAuditStore(pool),
+		StatusHistory:      postgres.NewStatusHistoryStore(pool),
+		User:               postgres.NewUserStore(pool),
+		Role:               postgres.NewRoleStore(pool),
+		Service:            postgres.NewServiceStore(pool),
+		ServiceSLA:         postgres.NewServiceSLAStore(pool),
+		LevelingCriteria:   postgres.NewServiceLevelingCriteriaStore(pool),
+		NotificationConfig: postgres.NewNotificationConfigStore(pool),
+		EscalationConfig:   postgres.NewEscalationConfigStore(pool),
+		Postmortem:         postgres.NewPostmortemStore(pool),
+		Announcement:       postgres.NewAnnouncementStore(pool),
+		Chat:               postgres.NewChatStore(pool),
+		SEVLink:            postgres.NewSEVLinkStore(pool),
+		Task:               postgres.NewTaskStore(pool),
+		OnCall:             postgres.NewOnCallStore(pool),
+		IntegrationConfig:  postgres.NewIntegrationConfigStore(pool),
+		RetentionConfig:    postgres.NewRetentionConfigStore(pool),
+		AIPlugin:           postgres.NewAIPluginStore(pool),
+		AIOutput:           postgres.NewAIOutputStore(pool),
+		Share:              postgres.NewShareStore(pool),
+		SEVAccess:          postgres.NewSEVAccessStore(pool),
 	}, nil
 }
 
@@ -713,6 +750,86 @@ func startMetricsRefresher(ctx context.Context, log *slog.Logger, sevs store.SEV
 			return
 		case <-ticker.C:
 			refreshMetrics(ctx, log, sevs, pool)
+		}
+	}
+}
+
+// escalationScanInterval governs startEscalationScanner: minute-level
+// granularity, since admins configure thresholds in whole minutes — unlike
+// metricsRefreshInterval's 30s, tuned for a dashboard reading, this feeds an
+// actual alert.
+const escalationScanInterval = 1 * time.Minute
+
+// startEscalationScanner runs until ctx is done, calling scanEscalations
+// immediately and then every escalationScanInterval — same
+// ticker/select/ctx.Done shape as startMetricsRefresher above
+// (docs/requirements.md §16, docs/roadmap.md Phase 15): "alert if a SEV-1
+// has been open for > N minutes without an IC assigned," generalized to
+// every severity level via EscalationConfigStore.
+func startEscalationScanner(ctx context.Context, log *slog.Logger, sevs store.SEVStore, roles store.RoleStore, escalations store.EscalationConfigStore, notifier *grpchandler.Notifier) {
+	scanEscalations(ctx, log, sevs, roles, escalations, notifier)
+	ticker := time.NewTicker(escalationScanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			scanEscalations(ctx, log, sevs, roles, escalations, notifier)
+		}
+	}
+}
+
+// scanEscalations evaluates every open, non-sensitive SEV (the same "open"
+// status set — Open, Investigating, Mitigated — refreshMetrics/SearchService
+// already use) against its severity level's escalation config
+// (sev.EvaluateEscalations) and fires a "sev.escalation_no_ic" notification
+// for each newly-due one, marking it EscalatedAt so the next scan doesn't
+// re-fire for the same incident. Sensitive SEVs are excluded, matching every
+// other lifecycle-event notification/publish site's posture.
+func scanEscalations(ctx context.Context, log *slog.Logger, sevs store.SEVStore, roles store.RoleStore, escalations store.EscalationConfigStore, notifier *grpchandler.Notifier) {
+	open, err := sevs.List(ctx, store.SEVFilter{
+		Statuses:         []store.SEVStatus{store.SEVStatusOpen, store.SEVStatusInvestigating, store.SEVStatusMitigated},
+		ExcludeSensitive: true,
+	})
+	if err != nil {
+		log.ErrorContext(ctx, "escalation scan: list open SEVs failed", "err", err)
+		return
+	}
+	if len(open) == 0 {
+		return
+	}
+
+	configRows, err := escalations.List(ctx)
+	if err != nil {
+		log.ErrorContext(ctx, "escalation scan: list escalation config failed", "err", err)
+		return
+	}
+	configs := make(map[int16]*store.EscalationConfig, len(configRows))
+	for _, c := range configRows {
+		configs[c.SeverityLevel] = c
+	}
+
+	hasIC := make(map[string]bool, len(open))
+	for _, s := range open {
+		roleRows, err := roles.ListBySEVID(ctx, s.ID)
+		if err != nil {
+			log.ErrorContext(ctx, "escalation scan: list roles failed", "sev_id", s.ID, "err", err)
+			continue
+		}
+		for _, r := range roleRows {
+			if r.RoleType == store.SEVRoleIncidentCommander {
+				hasIC[s.ID] = true
+				break
+			}
+		}
+	}
+
+	now := time.Now()
+	for _, due := range sev.EvaluateEscalations(open, hasIC, configs, now) {
+		notifier.Notify(ctx, grpchandler.NotifyEvent{Type: "sev.escalation_no_ic", SEV: due})
+		if err := sevs.UpdateEscalatedAt(ctx, due.ID, &now); err != nil {
+			log.ErrorContext(ctx, "escalation scan: mark escalated failed", "sev_id", due.ID, "err", err)
 		}
 	}
 }

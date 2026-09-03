@@ -20,6 +20,11 @@ type SEVStore interface {
 	List(ctx context.Context, filter SEVFilter) ([]*SEV, error)
 	Count(ctx context.Context, filter SEVFilter) (int, error)
 	UpdateLocked(ctx context.Context, id string, locked bool) error
+	// UpdateEscalatedAt sets (or, with a nil at, clears) the EscalatedAt
+	// marker used by the escalation scanner (docs/roadmap.md Phase 15) — a
+	// narrow mutator, same shape as UpdateLocked, rather than widening
+	// Update.
+	UpdateEscalatedAt(ctx context.Context, id string, at *time.Time) error
 }
 
 // PostmortemStore manages the postmortem document attached to each SEV.
@@ -148,6 +153,34 @@ type ServiceLevelingCriteriaStore interface {
 	// collapsing to a single value, since there's nothing to reduce guidance
 	// text to.
 	ListForServices(ctx context.Context, serviceIDs []string, severityLevel int16) ([]*ServiceLevelingCriteria, error)
+}
+
+// NotificationConfigStore manages admin-configured notification routing
+// rules (docs/roadmap.md Phase 15).
+type NotificationConfigStore interface {
+	// Upsert creates or replaces the rule for (Role, Event, ChannelType).
+	Upsert(ctx context.Context, cfg *NotificationConfig) error
+	Delete(ctx context.Context, role OrgRole, event string, channelType NotificationChannelType) error
+	// List returns every configured rule — what the admin page renders as
+	// its routing-rules table.
+	List(ctx context.Context) ([]*NotificationConfig, error)
+	// ListForEvent returns every rule matching event, filtered to rules whose
+	// MaxSeverityLevel is nil or >= severityLevel. severityLevel is nil for
+	// an event with no SEV to filter on (none exist today, but keeps the
+	// contract honest) — in that case every rule for event matches
+	// regardless of its MaxSeverityLevel.
+	ListForEvent(ctx context.Context, event string, severityLevel *int16) ([]*NotificationConfig, error)
+}
+
+// EscalationConfigStore manages the per-severity-level escalation threshold
+// (docs/roadmap.md Phase 15).
+type EscalationConfigStore interface {
+	Get(ctx context.Context, severityLevel int16) (*EscalationConfig, error)
+	Upsert(ctx context.Context, cfg *EscalationConfig) error
+	// List returns every severity level's row (pre-seeded 1-4, disabled by
+	// default) — what the admin editor renders as its 4-row table and what
+	// the escalation scanner reads each cycle.
+	List(ctx context.Context) ([]*EscalationConfig, error)
 }
 
 // OnCallStore manages on-call rotation definitions and manual overrides.

@@ -193,6 +193,14 @@ type SEV struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	CreatedBy      string
+	// EscalatedAt is set once by the escalation scanner (docs/roadmap.md
+	// Phase 15, cmd/server's startEscalationScanner) the first time this SEV
+	// is found open past its severity level's configured escalation
+	// threshold with no Incident Commander assigned — so it notifies once per
+	// incident rather than every scan interval. Cleared back to nil when an
+	// Incident Commander is assigned (RoleServer.AssignRole) or the SEV
+	// leaves Open/Investigating.
+	EscalatedAt *time.Time
 }
 
 // SEVSortField selects the column SEVStore.List orders results by.
@@ -461,6 +469,52 @@ type ServiceLevelingCriteria struct {
 	Criteria      string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// NotificationChannelType is where a NotificationConfig rule delivers to.
+type NotificationChannelType string
+
+const (
+	NotificationChannelSlack NotificationChannelType = "slack"
+	NotificationChannelEmail NotificationChannelType = "email"
+)
+
+// NotificationConfig is one admin-configured notification routing rule
+// (docs/requirements.md §16/§18.5, docs/roadmap.md Phase 15): "for org Role,
+// on Event, post to ChannelType at ChannelTarget." A fixed broadcast
+// route — there is no UserID or SEVID on this row — not per-user or
+// per-incident personalized delivery (e.g. DMing the specific SEV's actual
+// assigned IC is a different, deferred targeting model; see the roadmap
+// entry's "Also considered and explicitly deferred").
+//
+// MaxSeverityLevel, when non-nil, restricts the rule to SEVs at that
+// severity level or more critical (severity 1 is the most critical) —
+// e.g. 2 expresses "SEV-1/SEV-2 opens only." Nil means every severity.
+type NotificationConfig struct {
+	ID               int64
+	Role             OrgRole
+	Event            string
+	ChannelType      NotificationChannelType
+	ChannelTarget    string
+	MaxSeverityLevel *int16
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// EscalationConfig is the per-severity-level escalation threshold
+// (docs/requirements.md §16, docs/roadmap.md Phase 15): if a SEV at
+// SeverityLevel has been open longer than ThresholdMinutes with no Incident
+// Commander assigned, cmd/server's escalation scanner fires a
+// "sev.escalation_no_ic" notification (routed the same way as every other
+// event, via NotificationConfig). A disabled (Enabled=false) severity level
+// is never scanned.
+type EscalationConfig struct {
+	ID               int64
+	SeverityLevel    int16
+	ThresholdMinutes int32
+	Enabled          bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // User is a registered user who authenticates with email and password.

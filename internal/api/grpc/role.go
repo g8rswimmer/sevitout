@@ -131,6 +131,16 @@ func (s *RoleServer) AssignRole(ctx context.Context, req *pb.AssignRoleRequest) 
 		CreatedAt: now,
 	})
 
+	// A SEV that escalated for having no Incident Commander stops being
+	// flagged once one is assigned (docs/roadmap.md Phase 15). Best-effort —
+	// a failure here just leaves the (already-fired) escalation marker in
+	// place, not something worth failing this RPC over.
+	if role.RoleType == store.SEVRoleIncidentCommander {
+		if err := s.sevs.UpdateEscalatedAt(ctx, req.GetSevId(), nil); err != nil {
+			slog.ErrorContext(ctx, "clear escalated_at on IC assignment failed", "sev_id", req.GetSevId(), "err", err)
+		}
+	}
+
 	resp := roleToProto(role)
 	if !sevRecord.Sensitive {
 		publishProto(s.publisher, req.GetSevId(), "role.changed", resp)

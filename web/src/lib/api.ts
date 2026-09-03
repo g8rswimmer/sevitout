@@ -15,6 +15,7 @@ import type {
   DashboardMetricsResponse,
   AddChatEntryRequest,
   AIOutputResponse,
+  EscalationConfigResponse,
   ExportSEVsParams,
   GetIntegrationCatalogResponse,
   GrantAccessRequest,
@@ -29,10 +30,12 @@ import type {
   ListAnnouncementsResponse,
   ListChatEntriesResponse,
   ListEnabledIntegrationsResponse,
+  ListEscalationConfigsResponse,
   ListIntegrationConfigsResponse,
   ListLevelingCriteriaForServicesResponse,
   ListLevelingCriteriaResponse,
   ListLinkedSEVsResponse,
+  ListNotificationConfigsResponse,
   ListOnCallRotationsResponse,
   ListPluginsResponse,
   ListRetentionConfigResponse,
@@ -44,6 +47,7 @@ import type {
   ListTasksResponse,
   ListUserDirectoryResponse,
   ListUsersResponse,
+  NotificationConfigResponse,
   OnCallRotationResponse,
   PostmortemResponse,
   RetentionConfigResponse,
@@ -73,8 +77,10 @@ import type {
   UpdateSEVRequest,
   UpdateServiceRequest,
   UpdateUserRoleRequest,
+  UpsertEscalationConfigRequest,
   UpsertIntegrationConfigRequest,
   UpsertLevelingCriteriaRequest,
+  UpsertNotificationConfigRequest,
   UpsertServiceSLARequest,
   UserResponse,
   WhoAmIResponse,
@@ -469,6 +475,31 @@ export const api = {
         request<ListLevelingCriteriaForServicesResponse>(
           `/v1/config/leveling-criteria${buildQuery({ service_ids: serviceIds, severity_level: severityLevel })}`,
         ),
+    },
+    // Notifications & Alerting (Roadmap Phase 15) — admin-configured Slack/
+    // email routing rules, keyed by (role, event, channel_type); a fixed
+    // broadcast route per rule, not per-user delivery.
+    notifications: {
+      list: () => request<ListNotificationConfigsResponse>('/v1/config/notifications'),
+      upsert: (req: UpsertNotificationConfigRequest) =>
+        request<NotificationConfigResponse>('/v1/config/notifications', { method: 'PUT', body: JSON.stringify(req) }),
+      // role/event/channel_type identify the rule; DeleteNotificationConfig
+      // has no path template, so grpc-gateway maps them to query params.
+      delete: (role: string, event: string, channelType: string) =>
+        request<void>(`/v1/config/notifications${buildQuery({ role, event, channel_type: channelType })}`, {
+          method: 'DELETE',
+        }),
+    },
+    // Per-severity-level escalation thresholds (Roadmap Phase 15) — "alert
+    // if a SEV has been open past this many minutes with no Incident
+    // Commander assigned."
+    escalation: {
+      list: () => request<ListEscalationConfigsResponse>('/v1/config/escalation'),
+      upsert: (severityLevel: number, req: UpsertEscalationConfigRequest) =>
+        request<EscalationConfigResponse>(`/v1/config/escalation/${severityLevel}`, {
+          method: 'PUT',
+          body: JSON.stringify(req),
+        }),
     },
     aiPlugins: {
       list: () => request<ListAIPluginsResponse>('/v1/config/ai-plugins'),

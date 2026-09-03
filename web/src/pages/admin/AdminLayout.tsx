@@ -8,6 +8,7 @@ const ADMIN_TABS = [
   { to: '/admin/integrations', label: 'Integrations' },
   { to: '/admin/ai', label: 'AI Plugins' },
   { to: '/admin/retention', label: 'Retention' },
+  { to: '/admin/notifications', label: 'Notifications' },
 ]
 
 /** Shared shell for every /admin/* page (docs/project-plan.md M14d) — a tab
@@ -20,7 +21,9 @@ export function AdminLayout() {
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="text-2xl font-semibold">Admin</h1>
-        <p className="text-sm text-muted-foreground">Service registry, users, on-call, integrations, AI, and data retention.</p>
+        <p className="text-sm text-muted-foreground">
+          Service registry, users, on-call, integrations, AI, data retention, and notifications.
+        </p>
       </div>
       <nav className="flex flex-wrap gap-1 border-b border-border" aria-label="Admin sections">
         {ADMIN_TABS.map(({ to, label }) => (

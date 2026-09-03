@@ -85,7 +85,7 @@ func TestAll_MonitoringHasNoCredentials(t *testing.T) {
 }
 
 func TestAll_FixedOrder(t *testing.T) {
-	want := []string{"pagerduty", "github", "slack", "jira", "monitoring"}
+	want := []string{"pagerduty", "github", "slack", "jira", "email", "monitoring"}
 	if len(catalog.All) != len(want) {
 		t.Fatalf("len(catalog.All) = %d, want %d", len(catalog.All), len(want))
 	}

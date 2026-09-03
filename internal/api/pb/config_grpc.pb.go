@@ -66,6 +66,21 @@ type ConfigServiceClient interface {
 	// multiple services, so it sits at a top-level path rather than nested
 	// under one service.
 	ListLevelingCriteriaForServices(ctx context.Context, in *ListLevelingCriteriaForServicesRequest, opts ...grpc.CallOption) (*ListLevelingCriteriaForServicesResponse, error)
+	// --- Notifications & Alerting (docs/requirements.md §16/§18.5,
+	// docs/roadmap.md Phase 15) --- an admin-configured routing rule set:
+	// "for org role X, on event Y, post to channel_type at channel_target."
+	// A fixed broadcast route, not per-user/per-incident personalization.
+	// Reads sit at the Viewer floor (same reasoning as ServiceSLA/
+	// LevelingCriteria); mutations are Admin-only.
+	UpsertNotificationConfig(ctx context.Context, in *UpsertNotificationConfigRequest, opts ...grpc.CallOption) (*NotificationConfigResponse, error)
+	DeleteNotificationConfig(ctx context.Context, in *DeleteNotificationConfigRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	ListNotificationConfigs(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListNotificationConfigsResponse, error)
+	// --- Escalation thresholds (docs/requirements.md §16, docs/roadmap.md
+	// Phase 15) --- per-severity-level "alert if open > N minutes with no
+	// Incident Commander assigned" configuration, scanned by cmd/server's
+	// escalation scanner. Reads/writes floor exactly like RetentionConfig.
+	UpsertEscalationConfig(ctx context.Context, in *UpsertEscalationConfigRequest, opts ...grpc.CallOption) (*EscalationConfigResponse, error)
+	ListEscalationConfigs(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListEscalationConfigsResponse, error)
 	// ListUsers is Admin-only; the directory includes email addresses.
 	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
 	UpdateUserRole(ctx context.Context, in *UpdateUserRoleRequest, opts ...grpc.CallOption) (*UserResponse, error)
@@ -256,6 +271,51 @@ func (c *configServiceClient) ListLevelingCriteria(ctx context.Context, in *List
 func (c *configServiceClient) ListLevelingCriteriaForServices(ctx context.Context, in *ListLevelingCriteriaForServicesRequest, opts ...grpc.CallOption) (*ListLevelingCriteriaForServicesResponse, error) {
 	out := new(ListLevelingCriteriaForServicesResponse)
 	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListLevelingCriteriaForServices", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpsertNotificationConfig(ctx context.Context, in *UpsertNotificationConfigRequest, opts ...grpc.CallOption) (*NotificationConfigResponse, error) {
+	out := new(NotificationConfigResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/UpsertNotificationConfig", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) DeleteNotificationConfig(ctx context.Context, in *DeleteNotificationConfigRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/DeleteNotificationConfig", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ListNotificationConfigs(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListNotificationConfigsResponse, error) {
+	out := new(ListNotificationConfigsResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListNotificationConfigs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpsertEscalationConfig(ctx context.Context, in *UpsertEscalationConfigRequest, opts ...grpc.CallOption) (*EscalationConfigResponse, error) {
+	out := new(EscalationConfigResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/UpsertEscalationConfig", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ListEscalationConfigs(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListEscalationConfigsResponse, error) {
+	out := new(ListEscalationConfigsResponse)
+	err := c.cc.Invoke(ctx, "/sevitout.v1.ConfigService/ListEscalationConfigs", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -516,6 +576,21 @@ type ConfigServiceServer interface {
 	// multiple services, so it sits at a top-level path rather than nested
 	// under one service.
 	ListLevelingCriteriaForServices(context.Context, *ListLevelingCriteriaForServicesRequest) (*ListLevelingCriteriaForServicesResponse, error)
+	// --- Notifications & Alerting (docs/requirements.md §16/§18.5,
+	// docs/roadmap.md Phase 15) --- an admin-configured routing rule set:
+	// "for org role X, on event Y, post to channel_type at channel_target."
+	// A fixed broadcast route, not per-user/per-incident personalization.
+	// Reads sit at the Viewer floor (same reasoning as ServiceSLA/
+	// LevelingCriteria); mutations are Admin-only.
+	UpsertNotificationConfig(context.Context, *UpsertNotificationConfigRequest) (*NotificationConfigResponse, error)
+	DeleteNotificationConfig(context.Context, *DeleteNotificationConfigRequest) (*emptypb.Empty, error)
+	ListNotificationConfigs(context.Context, *emptypb.Empty) (*ListNotificationConfigsResponse, error)
+	// --- Escalation thresholds (docs/requirements.md §16, docs/roadmap.md
+	// Phase 15) --- per-severity-level "alert if open > N minutes with no
+	// Incident Commander assigned" configuration, scanned by cmd/server's
+	// escalation scanner. Reads/writes floor exactly like RetentionConfig.
+	UpsertEscalationConfig(context.Context, *UpsertEscalationConfigRequest) (*EscalationConfigResponse, error)
+	ListEscalationConfigs(context.Context, *emptypb.Empty) (*ListEscalationConfigsResponse, error)
 	// ListUsers is Admin-only; the directory includes email addresses.
 	ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error)
 	UpdateUserRole(context.Context, *UpdateUserRoleRequest) (*UserResponse, error)
@@ -624,6 +699,21 @@ func (UnimplementedConfigServiceServer) ListLevelingCriteria(context.Context, *L
 }
 func (UnimplementedConfigServiceServer) ListLevelingCriteriaForServices(context.Context, *ListLevelingCriteriaForServicesRequest) (*ListLevelingCriteriaForServicesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListLevelingCriteriaForServices not implemented")
+}
+func (UnimplementedConfigServiceServer) UpsertNotificationConfig(context.Context, *UpsertNotificationConfigRequest) (*NotificationConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpsertNotificationConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) DeleteNotificationConfig(context.Context, *DeleteNotificationConfigRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteNotificationConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) ListNotificationConfigs(context.Context, *emptypb.Empty) (*ListNotificationConfigsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListNotificationConfigs not implemented")
+}
+func (UnimplementedConfigServiceServer) UpsertEscalationConfig(context.Context, *UpsertEscalationConfigRequest) (*EscalationConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpsertEscalationConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) ListEscalationConfigs(context.Context, *emptypb.Empty) (*ListEscalationConfigsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListEscalationConfigs not implemented")
 }
 func (UnimplementedConfigServiceServer) ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListUsers not implemented")
@@ -955,6 +1045,96 @@ func _ConfigService_ListLevelingCriteriaForServices_Handler(srv interface{}, ctx
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConfigServiceServer).ListLevelingCriteriaForServices(ctx, req.(*ListLevelingCriteriaForServicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpsertNotificationConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertNotificationConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpsertNotificationConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/UpsertNotificationConfig",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpsertNotificationConfig(ctx, req.(*UpsertNotificationConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_DeleteNotificationConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteNotificationConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).DeleteNotificationConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/DeleteNotificationConfig",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).DeleteNotificationConfig(ctx, req.(*DeleteNotificationConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ListNotificationConfigs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListNotificationConfigs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/ListNotificationConfigs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListNotificationConfigs(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpsertEscalationConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertEscalationConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpsertEscalationConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/UpsertEscalationConfig",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpsertEscalationConfig(ctx, req.(*UpsertEscalationConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ListEscalationConfigs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListEscalationConfigs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sevitout.v1.ConfigService/ListEscalationConfigs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListEscalationConfigs(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1435,6 +1615,26 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListLevelingCriteriaForServices",
 			Handler:    _ConfigService_ListLevelingCriteriaForServices_Handler,
+		},
+		{
+			MethodName: "UpsertNotificationConfig",
+			Handler:    _ConfigService_UpsertNotificationConfig_Handler,
+		},
+		{
+			MethodName: "DeleteNotificationConfig",
+			Handler:    _ConfigService_DeleteNotificationConfig_Handler,
+		},
+		{
+			MethodName: "ListNotificationConfigs",
+			Handler:    _ConfigService_ListNotificationConfigs_Handler,
+		},
+		{
+			MethodName: "UpsertEscalationConfig",
+			Handler:    _ConfigService_UpsertEscalationConfig_Handler,
+		},
+		{
+			MethodName: "ListEscalationConfigs",
+			Handler:    _ConfigService_ListEscalationConfigs_Handler,
 		},
 		{
 			MethodName: "ListUsers",

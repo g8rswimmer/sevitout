@@ -235,6 +235,25 @@ func (s *SEVStore) UpdateLocked(ctx context.Context, id string, locked bool) err
 	return nil
 }
 
+func (s *SEVStore) UpdateEscalatedAt(ctx context.Context, id string, at *time.Time) error {
+	q := queries.New(s.pool)
+
+	if _, err := q.GetSEV(ctx, id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		return fmt.Errorf("postgres sev: pre-escalate get: %w", err)
+	}
+
+	if err := q.UpdateSEVEscalatedAt(ctx, queries.UpdateSEVEscalatedAtParams{
+		ID:          id,
+		EscalatedAt: timeToDB(at),
+	}); err != nil {
+		return fmt.Errorf("postgres sev: update escalated_at: %w", err)
+	}
+	return nil
+}
+
 // ---------- StatusHistoryStore ----------
 
 // StatusHistoryStore implements store.StatusHistoryStore against PostgreSQL.
@@ -345,7 +364,7 @@ const sevSelectCols = `SELECT id, title, description, severity_level, status,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-       slack_channel_id, rtpc_seconds
+       slack_channel_id, rtpc_seconds, escalated_at
 FROM sevs`
 
 // buildSEVFilterWhere builds a parameterized WHERE clause from the filter,
@@ -475,6 +494,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		createdAt, updatedAt                  pgtype.Timestamptz
 		slackChannelID                        *string
 		rtpcSeconds                           *int64
+		escalatedAt                           pgtype.Timestamptz
 	)
 	if err := rows.Scan(
 		&id, &title, &desc, &severityLevel, &status,
@@ -486,7 +506,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		&startedAt, &detectedAt, &mitigatedAt, &resolvedAt, &postmortemCompletedAt,
 		&mttdSeconds, &mttmSeconds, &mttrSeconds, &dttmSeconds,
 		&locked, &sensitive, &aiDisabled, &createdAt, &updatedAt, &createdBy,
-		&slackChannelID, &rtpcSeconds,
+		&slackChannelID, &rtpcSeconds, &escalatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -535,6 +555,7 @@ func scanSEVRow(rows pgx.Rows) (*store.SEV, error) {
 		CreatedBy:             createdBy,
 		SlackChannelID:        slackChannelID,
 		RTPCSeconds:           rtpcSeconds,
+		EscalatedAt:           timeFromDB(escalatedAt),
 	}, nil
 }
 
@@ -584,5 +605,6 @@ func mapGetSEVRow(r queries.GetSEVRow) (*store.SEV, error) {
 		CreatedBy:             r.CreatedBy,
 		SlackChannelID:        r.SlackChannelID,
 		RTPCSeconds:           r.RtpcSeconds,
+		EscalatedAt:           timeFromDB(r.EscalatedAt),
 	}, nil
 }

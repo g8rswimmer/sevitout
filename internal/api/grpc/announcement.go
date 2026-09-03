@@ -21,11 +21,12 @@ type AnnouncementServer struct {
 	sevs          store.SEVStore
 	access        store.SEVAccessStore
 	publisher     Publisher // nil when WebSocket support is not wired up
+	notifier      *Notifier // nil when no notification routing is configured (docs/roadmap.md Phase 15)
 }
 
 // NewAnnouncementServer returns an AnnouncementServer backed by the given stores.
-func NewAnnouncementServer(announcements store.AnnouncementStore, sevs store.SEVStore, access store.SEVAccessStore, publisher Publisher) *AnnouncementServer {
-	return &AnnouncementServer{announcements: announcements, sevs: sevs, access: access, publisher: publisher}
+func NewAnnouncementServer(announcements store.AnnouncementStore, sevs store.SEVStore, access store.SEVAccessStore, publisher Publisher, notifier *Notifier) *AnnouncementServer {
+	return &AnnouncementServer{announcements: announcements, sevs: sevs, access: access, publisher: publisher, notifier: notifier}
 }
 
 func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.CreateAnnouncementRequest) (*pb.AnnouncementResponse, error) {
@@ -78,6 +79,7 @@ func (s *AnnouncementServer) CreateAnnouncement(ctx context.Context, req *pb.Cre
 	resp := announcementToProto(a)
 	if !sevRecord.Sensitive {
 		publishProto(s.publisher, a.SEVID, "announcement.created", resp)
+		s.notifier.Notify(ctx, NotifyEvent{Type: "announcement.created", SEV: sevRecord, Message: a.Message})
 	}
 
 	return resp, nil

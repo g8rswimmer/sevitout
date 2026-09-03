@@ -1578,7 +1578,7 @@ before Phase 12, or in parallel with Phase 13.
 
 ## Phase 15 — Notifications & Alerting
 
-**Status**: 📋 planned, not yet started
+**Status**: ✅ shipped, see [`demo/notifications-alerting.md`](../demo/notifications-alerting.md)
 
 `docs/requirements.md` §16 and §18.5 are the last major unimplemented section
 of the original functional spec: no `NotificationConfig` RPC/service and no
