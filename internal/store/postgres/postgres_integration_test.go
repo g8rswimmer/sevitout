@@ -6,7 +6,8 @@
 // mirroring internal/store/audit_integration_test.go's gating so
 // `go test ./...` (no tag) stays clean with no DB present.
 //
-// Run with: go test -tags integration -v ./internal/store/postgres/...
+// Run with: ALLOW_DESTRUCTIVE_DB_TESTS=1 go test -tags integration -v ./internal/store/postgres/...
+// (or just `make test-integration`, which sets the env var for you).
 // Requires: DATABASE_URL set and all migrations applied (make migrate, or
 // `migrate -path=./migrations -database "$DATABASE_URL" up`).
 package postgres_test
@@ -20,13 +21,30 @@ import (
 )
 
 // newTestPool returns a connection pool to the PostgreSQL instance
-// configured by DATABASE_URL, or skips the calling test if it's unset. The
-// pool is closed via t.Cleanup.
+// configured by DATABASE_URL, or skips the calling test if DATABASE_URL is
+// unset or ALLOW_DESTRUCTIVE_DB_TESTS isn't "1". The pool is closed via
+// t.Cleanup.
+//
+// The second gate exists because this package's tests TRUNCATE every
+// application table (see truncateAll below) against whatever DATABASE_URL
+// points to — the same variable the dev server and `make up` use. Requiring
+// a second, separate, unmistakably-named opt-in makes it much harder to
+// accidentally run this suite against a real dev/staging database that
+// happens to have DATABASE_URL set: an incident where exactly that happened
+// wiped a real deployment's users and integration_config tables with no
+// backup to restore from. Never set ALLOW_DESTRUCTIVE_DB_TESTS against a
+// database you are not prepared to lose entirely — see CLAUDE.md's
+// "Database safety" section before running this suite against anything
+// other than a database you just created for this purpose.
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("DATABASE_URL not set; skipping integration test")
+	}
+	if os.Getenv("ALLOW_DESTRUCTIVE_DB_TESTS") != "1" {
+		t.Skip(`ALLOW_DESTRUCTIVE_DB_TESTS not set to "1"; skipping integration test ` +
+			"(this suite TRUNCATEs every table at DATABASE_URL — only set this against a throwaway database; see CLAUDE.md's \"Database safety\" section)")
 	}
 	pool, err := pgxpool.New(context.Background(), dbURL)
 	if err != nil {
