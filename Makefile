@@ -45,8 +45,12 @@ migrate: check-env
 migrate-down: check-env
 	$(COMPOSE) run --rm migrate -path=/migrations -database "postgres://$${POSTGRES_USER}:$${POSTGRES_PASSWORD}@postgres:5432/$${POSTGRES_DB}?sslmode=disable" down 1
 
+# ALLOW_DESTRUCTIVE_DB_TESTS is a required, separate opt-in — this suite
+# TRUNCATEs every application table at DATABASE_URL. Only run this against a
+# database you just created for this purpose; see CLAUDE.md's "Database
+# safety" section.
 test-integration: check-env
-	go test -tags integration -v ./internal/store/...
+	ALLOW_DESTRUCTIVE_DB_TESTS=1 go test -tags integration -v ./internal/store/...
 
 psql: check-env
 	$(COMPOSE) exec postgres bash -c 'psql -U $$POSTGRES_USER -d $$POSTGRES_DB'
