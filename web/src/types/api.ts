@@ -281,8 +281,8 @@ export interface SLAStatus {
 }
 
 export interface ListSEVsResponse {
-  sevs: SEVResponse[]
-  total: number
+  sevs?: SEVResponse[]
+  total?: number
 }
 
 export interface ListSEVsParams {
