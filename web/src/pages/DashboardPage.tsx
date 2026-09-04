@@ -22,6 +22,7 @@ export function DashboardPage() {
 
   const countByLevel = new Map(metrics.data?.active_by_level?.map((c) => [c.severity_level, c.count]) ?? [])
   const totalActive = [...countByLevel.values()].reduce((a, b) => a + b, 0)
+  const activeSevList = activeSevs.data?.sevs ?? []
 
   return (
     <div className="flex flex-col gap-6">
@@ -123,12 +124,12 @@ export function DashboardPage() {
               Failed to load active SEVs: {(activeSevs.error as Error).message}
             </p>
           )}
-          {activeSevs.data && activeSevs.data.sevs.length === 0 && (
+          {activeSevs.data && activeSevList.length === 0 && (
             <p className="text-sm text-muted-foreground">No active SEVs. All clear.</p>
           )}
-          {activeSevs.data && activeSevs.data.sevs.length > 0 && (
+          {activeSevs.data && activeSevList.length > 0 && (
             <ul className="divide-y divide-border">
-              {activeSevs.data.sevs.map((sev) => (
+              {activeSevList.map((sev) => (
                 <li key={sev.id} className="flex items-center justify-between gap-3 py-2.5">
                   <Link to={`/sevs/${sev.id}`} className="flex min-w-0 items-center gap-3">
                     <SeverityBadge level={sev.severity_level} />

@@ -91,6 +91,28 @@ describe('DashboardPage', () => {
     expect(await screen.findByText(/no active sevs/i)).toBeInTheDocument()
   })
 
+  it('does not crash on a genuinely empty database, where protojson omits `sevs`/`total` entirely rather than sending empty/zero values', async () => {
+    // Regression test: on a freshly migrated database with zero SEVs ever
+    // created, ListSEVsResponse comes back as a bare `{}` — no `sevs` key at
+    // all — not `{ sevs: [], total: 0 }` (protojson omits empty repeated
+    // fields and zero-value scalars, the same convention documented
+    // throughout types/api.ts). DashboardPage previously read
+    // `activeSevs.data.sevs.length` directly, which threw
+    // "Cannot read properties of undefined (reading 'length')" and
+    // crashed the whole page to a blank screen with no error boundary.
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = String(input)
+      if (url.startsWith('/v1/reports/dashboard')) return Promise.resolve(jsonResponse({}))
+      if (url.startsWith('/v1/sevs')) return Promise.resolve(jsonResponse({}))
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+
+    renderWithProviders(<DashboardPage />)
+
+    expect(await screen.findByText(/no active sevs/i)).toBeInTheDocument()
+    expect(screen.getByText('Dashboard')).toBeInTheDocument()
+  })
+
   it('surfaces a load error for the metrics card', async () => {
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input)
