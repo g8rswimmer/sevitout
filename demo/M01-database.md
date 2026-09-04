@@ -14,7 +14,7 @@ All PostgreSQL tables for the Sevitout V1 data model are created via migration `
 ## Start the stack
 
 ```bash
-make up          # starts postgres in the background; press Ctrl-C or run make down to stop
+make up          # starts postgres detached; `make logs` to follow output, `make down` to stop
 ```
 
 In a second terminal:

@@ -5,7 +5,7 @@ PB_OUT        = .
 PROTO_FILES   = $(shell find $(PROTO_DIR)/sevitout -name '*.proto')
 GATEWAY_PROTO = $(shell go env GOPATH)/pkg/mod/github.com/grpc-ecosystem/grpc-gateway/v2@v2.19.1
 
-.PHONY: build test lint generate proto up down migrate psql check-env
+.PHONY: build test lint generate proto up down migrate psql check-env logs
 
 proto:
 	protoc \
@@ -33,11 +33,20 @@ lint:
 check-env:
 	@test -f .env || (echo "ERROR: .env not found — run: cp .env.example .env" && exit 1)
 
+# Detached (-d): the stack keeps running independent of this terminal.
+# Without it, closing the terminal or pressing Ctrl-C sends every container
+# (including postgres) a graceful shutdown — easy to trigger by accident,
+# and easy to mistake for an application bug (e.g. a blank page) when it's
+# actually just "nothing is running anymore." Use `make logs` to follow
+# output, `make down` to actually stop it.
 up: check-env
-	$(COMPOSE) up --build
+	$(COMPOSE) up -d --build
 
 down: check-env
 	$(COMPOSE) down
+
+logs: check-env
+	$(COMPOSE) logs -f
 
 migrate: check-env
 	$(COMPOSE) run --rm migrate
