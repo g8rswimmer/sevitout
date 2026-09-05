@@ -453,6 +453,11 @@ func main() {
 	// doc comment.
 	go startEscalationScanner(ctx, log, stores.SEV, stores.Role, stores.EscalationConfig, notifier)
 
+	// --- Background SLA risk scanner (docs/roadmap.md Phase 12/15): "notify
+	// once when a SEV's overall SLA status becomes at-risk, and again if it's
+	// later confirmed breached" — see startSLARiskScanner's doc comment.
+	go startSLARiskScanner(ctx, log, stores.SEV, stores.ServiceSLA, notifier)
+
 	// --- cmux: gRPC and HTTP/1.1 on the same TCP port ---
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -831,6 +836,130 @@ func scanEscalations(ctx context.Context, log *slog.Logger, sevs store.SEVStore,
 		if err := sevs.UpdateEscalatedAt(ctx, due.ID, &now); err != nil {
 			log.ErrorContext(ctx, "escalation scan: mark escalated failed", "sev_id", due.ID, "err", err)
 		}
+	}
+}
+
+// slaRiskScanInterval governs startSLARiskScanner — same minute-level
+// granularity as startEscalationScanner, for the same reason: this feeds a
+// real alert, not a dashboard reading.
+const slaRiskScanInterval = 1 * time.Minute
+
+// startSLARiskScanner runs until ctx is done, calling scanSLARisk immediately
+// and then every slaRiskScanInterval — same ticker/select/ctx.Done shape as
+// startEscalationScanner above (docs/roadmap.md Phase 12's SLA targets,
+// Phase 15's notification layer): "notify when a SEV's overall SLA status
+// becomes at-risk, and again if it's later confirmed breached."
+func startSLARiskScanner(ctx context.Context, log *slog.Logger, sevs store.SEVStore, serviceSLAs store.ServiceSLAStore, notifier *grpchandler.Notifier) {
+	scanSLARisk(ctx, log, sevs, serviceSLAs, notifier)
+	ticker := time.NewTicker(slaRiskScanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			scanSLARisk(ctx, log, sevs, serviceSLAs, notifier)
+		}
+	}
+}
+
+// slaRiskScanStatuses is deliberately wider than scanEscalations' "open" set:
+// RTPC (internal/sev.EvaluateSLA, measuring ResolvedAt → PostmortemCompletedAt)
+// is still live for a Resolved or PostmortemInProgress SEV, so the SLA risk
+// scan can't stop at Resolved the way an IC-assignment check reasonably does.
+var slaRiskScanStatuses = []store.SEVStatus{
+	store.SEVStatusOpen, store.SEVStatusInvestigating, store.SEVStatusMitigated,
+	store.SEVStatusResolved, store.SEVStatusPostmortemInProgress,
+}
+
+// scanSLARisk evaluates every non-sensitive, not-yet-postmortem-complete SEV
+// against its most-strict configured SLA (sev.MostStrictSLA/EvaluateSLA, the
+// same reduction SEVServer.sevToProtoWithSLA uses for the live SLABadge) and
+// fires a one-time "sev.sla_at_risk" or "sev.sla_breached" notification per
+// SEV, tracked via SLANotifiedStatus so a SEV already notified at one level
+// never re-fires the same or a less severe one. The batch-by-severity-level
+// ServiceSLA lookup mirrors internal/api/grpc/report.go's serviceLevelMetrics
+// — at most 4 store round-trips regardless of how many SEVs are scanned.
+func scanSLARisk(ctx context.Context, log *slog.Logger, sevs store.SEVStore, serviceSLAs store.ServiceSLAStore, notifier *grpchandler.Notifier) {
+	candidates, err := sevs.List(ctx, store.SEVFilter{
+		Statuses:         slaRiskScanStatuses,
+		ExcludeSensitive: true,
+	})
+	if err != nil {
+		log.ErrorContext(ctx, "sla risk scan: list SEVs failed", "err", err)
+		return
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	byLevel := make(map[int16][]*store.SEV, 4)
+	for _, s := range candidates {
+		byLevel[s.SeverityLevel] = append(byLevel[s.SeverityLevel], s)
+	}
+
+	now := time.Now()
+	for level, group := range byLevel {
+		serviceIDSet := make(map[string]bool)
+		for _, s := range group {
+			for _, id := range s.AffectedServices {
+				serviceIDSet[id] = true
+			}
+		}
+		serviceIDs := make([]string, 0, len(serviceIDSet))
+		for id := range serviceIDSet {
+			serviceIDs = append(serviceIDs, id)
+		}
+
+		rows, err := serviceSLAs.ListForServices(ctx, serviceIDs, level)
+		if err != nil {
+			log.ErrorContext(ctx, "sla risk scan: list service SLAs failed", "severity_level", level, "err", err)
+			continue
+		}
+		byService := make(map[string]*store.ServiceSLA, len(rows))
+		for _, r := range rows {
+			byService[r.ServiceID] = r
+		}
+
+		for _, s := range group {
+			var matched []*store.ServiceSLA
+			for _, id := range s.AffectedServices {
+				if row, ok := byService[id]; ok {
+					matched = append(matched, row)
+				}
+			}
+			eval := sev.EvaluateSLA(s, sev.MostStrictSLA(matched), now)
+			notifySLAStatus(ctx, log, sevs, notifier, s, eval.Overall)
+		}
+	}
+}
+
+// notifySLAStatus fires at most one notification per call, per this
+// SEV/scan-cycle: "breached" takes priority over "at_risk" so a SEV that
+// jumps straight from ok to breached (its final value landed over target
+// before ever being flagged at-risk) still gets a notification, and a SEV
+// already notified "breached" never re-fires "at_risk" for the same
+// incident. See store.SEV.SLANotifiedStatus's doc comment for why this is a
+// monotonic, never-cleared marker.
+func notifySLAStatus(ctx context.Context, log *slog.Logger, sevs store.SEVStore, notifier *grpchandler.Notifier, s *store.SEV, overall sev.SLAMetricStatus) {
+	var already string
+	if s.SLANotifiedStatus != nil {
+		already = *s.SLANotifiedStatus
+	}
+
+	var event, newStatus string
+	switch {
+	case overall == sev.SLABreached && already != string(sev.SLABreached):
+		event, newStatus = "sev.sla_breached", string(sev.SLABreached)
+	case overall == sev.SLAAtRisk && already == "":
+		event, newStatus = "sev.sla_at_risk", string(sev.SLAAtRisk)
+	default:
+		return
+	}
+
+	notifier.Notify(ctx, grpchandler.NotifyEvent{Type: event, SEV: s})
+	if err := sevs.UpdateSLANotifiedStatus(ctx, s.ID, &newStatus); err != nil {
+		log.ErrorContext(ctx, "sla risk scan: mark notified failed", "sev_id", s.ID, "event", event, "err", err)
 	}
 }
 

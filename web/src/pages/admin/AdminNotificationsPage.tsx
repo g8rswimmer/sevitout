@@ -14,8 +14,9 @@ import type { EscalationConfigResponse, NotificationConfigResponse } from '@/typ
 
 /** Every event this codebase actually dispatches a notification for
  * (internal/api/grpc/sev.go, announcement.go, postmortem.go, and
- * cmd/server's escalation scanner) — see internal/api/grpc/config_notification.go's
- * notificationEvents, which the server validates against independently. */
+ * cmd/server's escalation and SLA-risk scanners) — see
+ * internal/api/grpc/config_notification.go's notificationEvents, which the
+ * server validates against independently. */
 const NOTIFICATION_EVENTS = [
   { value: 'sev.created', label: 'SEV opened' },
   { value: 'sev.updated', label: 'SEV updated' },
@@ -24,6 +25,8 @@ const NOTIFICATION_EVENTS = [
   { value: 'postmortem.due', label: 'Postmortem due (SEV resolved)' },
   { value: 'postmortem.approved', label: 'Postmortem approved' },
   { value: 'sev.escalation_no_ic', label: 'Escalation: no Incident Commander' },
+  { value: 'sev.sla_at_risk', label: 'SLA at risk' },
+  { value: 'sev.sla_breached', label: 'SLA breached' },
 ]
 
 const ROLES = [

@@ -107,6 +107,17 @@ func (s *SEVStore) UpdateEscalatedAt(_ context.Context, id string, at *time.Time
 	return nil
 }
 
+func (s *SEVStore) UpdateSLANotifiedStatus(_ context.Context, id string, status *string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sev, ok := s.data[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	sev.SLANotifiedStatus = status
+	return nil
+}
+
 func (s *SEVStore) Count(_ context.Context, filter store.SEVFilter) (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -323,7 +323,7 @@ pushes for status changes and `external`/`status-page` announcements (§13.1)
 continue to ship alongside this — see `docs/user-guide.md` §17.
 
 - Configurable notification channels: Slack, email (new `internal/integrations/email`, a 6th admin-configurable integration)
-- Notification triggers: SEV opened, updated, status changed; announcement posted; postmortem due (on SEV resolve) and approved
+- Notification triggers: SEV opened, updated, status changed; announcement posted; postmortem due (on SEV resolve) and approved; a SEV's SLA (§18's per-service targets) becoming at-risk, and again if later confirmed breached
 - Role-based routing: each rule targets one org role's audience; an optional `max_severity_level` expresses e.g. "management notified of SEV-1/SEV-2 opens only"
 - Escalation: per-severity-level threshold — alert if a SEV has been open for > N minutes without an IC assigned, scanned once per minute
 

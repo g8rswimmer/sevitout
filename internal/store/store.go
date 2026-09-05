@@ -25,6 +25,10 @@ type SEVStore interface {
 	// narrow mutator, same shape as UpdateLocked, rather than widening
 	// Update.
 	UpdateEscalatedAt(ctx context.Context, id string, at *time.Time) error
+	// UpdateSLANotifiedStatus sets (or, with a nil status, clears) the
+	// SLANotifiedStatus marker used by the SLA risk scanner (docs/roadmap.md
+	// Phase 15) — a narrow mutator, same shape as UpdateEscalatedAt.
+	UpdateSLANotifiedStatus(ctx context.Context, id string, status *string) error
 }
 
 // PostmortemStore manages the postmortem document attached to each SEV.

@@ -1591,10 +1591,11 @@ today instead is a partial substitute: live WebSocket updates in the web app,
 and hard-coded Slack pushes for status changes and `external`/`status-page`
 announcements (§13.1, `cmd/slackbot/notify.go`). This phase builds the real
 thing: an admin-configurable, role/event-driven routing table across Slack
-and (new) email, plus a SEV-1-without-IC escalation scanner — and, by
-existing, unblocks the "automated breach notifications" and "automated
-compliance-drop alerts" that Phases 12 and 13 each explicitly deferred for
-exactly this reason ("no notification layer exists yet").
+and (new) email, a SEV-1-without-IC escalation scanner, and — closing the
+exact gap Phase 12 and Phase 13 each explicitly deferred for "no
+notification layer exists yet" — a second scanner that fires once when a
+SEV's overall SLA status (`internal/sev.EvaluateSLA`) becomes at-risk, and
+again if it's later confirmed breached.
 
 The `notification_config` schema's shape (`role`, `event`, `channel_target` —
 no `user_id`, no `sev_id`) tells us the intended model: each row is a fixed
@@ -1680,6 +1681,27 @@ New package `internal/notify`, parallel to `internal/telemetry`/`internal/share`
   escalationScanInterval = 1 * time.Minute`. Per breach: `notifier.Notify(ctx,
   notify.Event{Type: "sev.escalation_no_ic", SEV: sev})`, then
   `sevs.SetEscalatedAt(ctx, sev.ID, &now)`.
+- SLA risk scanner, same ticker shape and 1-minute interval, in
+  `cmd/server/main.go`'s `startSLARiskScanner`/`scanSLARisk`. Wider status
+  filter than the escalation scan — includes Resolved and Postmortem In
+  Progress, since RTPC (`internal/sev.EvaluateSLA`, measured
+  ResolvedAt → PostmortemCompletedAt) is still live post-resolution.
+  Batches the `ServiceSLAStore.ListForServices` lookup by severity level
+  (at most 4 round-trips per scan, mirroring `report.go`'s
+  `serviceLevelMetrics`), reduces each SEV's attached services via
+  `sev.MostStrictSLA`, evaluates via `sev.EvaluateSLA`, and fires
+  `sev.sla_at_risk` the first time a SEV's `Overall` reads `at_risk`, or
+  `sev.sla_breached` the first time it reads `breached` — tracked via a new
+  `SEV.SLANotifiedStatus` marker (nullable string, "at_risk"/"breached")
+  so neither event re-fires for the same SEV once notified at that level.
+  Monotonic by construction: a SEV whose elapsed time already exceeds
+  target can only have its eventual final value land at or above that same
+  elapsed time, so `at_risk` can't un-happen short of an admin loosening
+  the SLA target or affected-services list after the fact (an accepted
+  edge case, not handled) — "breached" always takes priority in the
+  notify decision so a SEV that jumps straight from on-track to breached
+  (final value lands over target before ever reading at-risk) still gets
+  exactly one notification, not a skipped one.
 - Wire `notify.Dispatcher` into `SEVServer`, `AnnouncementServer`,
   `PostmortemServer` (new `notifier *notify.Dispatcher` field on each,
   threaded through their `*ServerParams` structs like every other shared
@@ -1767,7 +1789,11 @@ New package `internal/notify`, parallel to `internal/telemetry`/`internal/share`
   per-incident-assignee personal delivery; admin config mutations here are
   unaudited, consistent with every sibling Config RPC (none of the
   `config_*.go` handlers write to the audit log today); escalation only
-  checks for a missing Incident Commander, not any other role.
+  checks for a missing Incident Commander, not any other role;
+  `sev.sla_at_risk`/`sev.sla_breached` fire on the SEV's `Overall` status
+  only (worst of MTTD/MTTM/MTTR/RTPC), not per-metric, and — like the
+  `at_risk`/`breached` state itself — an admin loosening a service's SLA
+  target after a SEV already read `at_risk` won't un-notify it.
 
 **Also considered and explicitly deferred**:
 

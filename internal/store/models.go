@@ -201,6 +201,18 @@ type SEV struct {
 	// Incident Commander is assigned (RoleServer.AssignRole) or the SEV
 	// leaves Open/Investigating.
 	EscalatedAt *time.Time
+	// SLANotifiedStatus tracks the most severe SLA state cmd/server's
+	// startSLARiskScanner has already fired a notification for on this SEV —
+	// "at_risk" or "breached" (the string values of internal/sev.SLAAtRisk/
+	// SLABreached; store can't import internal/sev, which itself imports
+	// store, so this is a plain string rather than sev.SLAMetricStatus). Nil
+	// means never notified. Monotonic within one SEV's lifecycle: once
+	// "breached", the scanner never re-fires "at_risk" for it — a SEV whose
+	// elapsed time already exceeds target can only have its final value land
+	// at or above that same elapsed time, so at_risk can't un-happen short of
+	// an admin loosening the SLA target or affected-services list after the
+	// fact (an accepted edge case, not handled).
+	SLANotifiedStatus *string
 }
 
 // SEVSortField selects the column SEVStore.List orders results by.

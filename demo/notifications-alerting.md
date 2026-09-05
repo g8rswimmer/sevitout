@@ -7,10 +7,11 @@ original functional spec: no `NotificationConfig` RPC/service, no admin page, an
 email delivery path existed anywhere in the codebase — only a hard-coded Slack
 substitute (status-change and `external`/`status-page` announcement pushes,
 `cmd/slackbot/notify.go`). This phase builds the real thing: an admin-configurable
-routing table across Slack and (new) email, plus a SEV-1-without-IC escalation
-scanner — and, by existing, unblocks the "automated breach notifications" /
-"automated compliance-drop alerts" Phases 12 and 13 each explicitly deferred
-pending exactly this layer.
+routing table across Slack and (new) email, a SEV-1-without-IC escalation
+scanner, and — closing the exact gap Phase 12 and Phase 13 each explicitly
+deferred pending "no notification layer exists yet" — an SLA risk scanner that
+fires once when a SEV's overall SLA status becomes at-risk, and again if it's
+later confirmed breached.
 
 - **Schema**: migration `000020` extends the already-present-but-unused
   `notification_config` table (`role`, `event`, `channel_type`, `channel_target`)
@@ -19,12 +20,14 @@ pending exactly this layer.
   band); adds a new `escalation_config` table (per-severity-level threshold,
   pre-seeded disabled for SEV-1..4, mirroring `retention_config`'s seed
   precedent); and adds `sevs.escalated_at`, a marker so the escalation scanner
-  notifies once per incident rather than every scan cycle.
+  notifies once per incident rather than every scan cycle. Migration `000021`
+  adds `sevs.sla_notified_status` for the same reason, on the SLA risk scanner.
 - **Store**: `store.NotificationConfigStore` (`Upsert`/`Delete`/`List`/
   `ListForEvent`) and `store.EscalationConfigStore` (`Get`/`Upsert`/`List`), both
   with in-memory and Postgres implementations, following
-  `ServiceLevelingCriteriaStore`'s exact shape. `SEVStore` gains a narrow
-  `UpdateEscalatedAt` mutator, same pattern as the existing `UpdateLocked`.
+  `ServiceLevelingCriteriaStore`'s exact shape. `SEVStore` gains two narrow
+  mutators, `UpdateEscalatedAt` and `UpdateSLANotifiedStatus`, same shape as
+  the existing `UpdateLocked`.
 - **Dispatch**: `internal/api/grpc/notify.go`'s `Notifier` — best-effort, same
   contract as `auditAppendBestEffort`: looks up every `NotificationConfig` row
   matching an event (filtered by severity), builds a Slack or email client from
@@ -48,6 +51,19 @@ pending exactly this layer.
   `internal/sev.EvaluateEscalations`, fires `sev.escalation_no_ic` through the
   same `Notifier`, and marks `EscalatedAt`. `RoleServer.AssignRole` clears
   `EscalatedAt` back to nil when the newly-assigned role is Incident Commander.
+- **SLA risk scanner**: `cmd/server`'s `startSLARiskScanner`/`scanSLARisk`,
+  same ticker shape, but a wider status filter (includes Resolved and
+  Postmortem In Progress, since RTPC is still live post-resolution). Batches
+  the `ServiceSLAStore.ListForServices` lookup by severity level (≤4 round
+  trips per scan, mirroring `report.go`'s `serviceLevelMetrics`), reduces
+  each SEV's attached services via `sev.MostStrictSLA`, evaluates via
+  `sev.EvaluateSLA`, and fires `sev.sla_at_risk` the first time a SEV's
+  `Overall` reads `at_risk`, or `sev.sla_breached` the first time it reads
+  `breached` — tracked via a new `sevs.sla_notified_status` column
+  (migration `000021`) so neither event re-fires for the same SEV once
+  notified at that level. "Breached" always wins the notify decision, so a
+  SEV that jumps straight from on-track to breached still gets exactly one
+  notification rather than a skipped one.
 - **API + RBAC**: `ConfigService` gains `UpsertNotificationConfig`/
   `DeleteNotificationConfig`/`ListNotificationConfigs` and
   `UpsertEscalationConfig`/`ListEscalationConfigs`. Reads sit at the Viewer floor
@@ -62,9 +78,9 @@ pending exactly this layer.
 - `go build ./... && go vet ./... && go test ./...` and `web`'s `tsc -b && vitest
   run && oxlint` passing.
 - The walkthrough below runs against the in-memory store (`DATABASE_URL` unset).
-  A real Postgres was also used once, out-of-band, to apply migration `000020` and
-  run `go test -tags integration ./internal/store/...` against it — see Verify
-  tests pass below for what that covered.
+  A real Postgres was also used, out-of-band, to apply migrations `000020` and
+  `000021` and run `go test -tags integration ./internal/store/...` against it —
+  see Verify tests pass below for what that covered.
 
 ## Walkthrough
 
@@ -143,18 +159,46 @@ curl -s -X POST localhost:8080/v1/sevs -H "Authorization: Bearer $TOKEN" \
 
 # the server log shows the graceful skip:
 # {"level":"ERROR","msg":"notify: email integration unavailable","err":"store: not found", ...}
+
+# 12. add SLA-risk rules, register a service with a strict SLA target, and
+#     open a SEV already backdated past that target.
+curl -s -X PUT localhost:8080/v1/config/notifications -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"admin","event":"sev.sla_at_risk","channel_type":"slack","channel_target":"#sla-alerts"}'
+curl -s -X PUT localhost:8080/v1/config/notifications -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"admin","event":"sev.sla_breached","channel_type":"slack","channel_target":"#sla-alerts"}'
+curl -s -X POST localhost:8080/v1/config/services -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"id":"checkout","name":"Checkout"}'
+curl -s -X PUT localhost:8080/v1/config/services/checkout/sla/1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"severity_level":1,"mttd_target_seconds":60}'
+# a 60-second MTTD target
+STARTED=$(date -u -v-5M +"%Y-%m-%dT%H:%M:%SZ")   # 5 minutes ago
+curl -s -X POST localhost:8080/v1/sevs -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"title\":\"Checkout down\",\"severity_level\":1,\"affected_services\":[\"checkout\"],\"started_at\":\"$STARTED\"}"
+# {"id":"SEV-2026-0001", ..., "sla_status":{"mttd":"at_risk", "overall":"at_risk",
+#  "mttd_target_seconds":"60", ...}}   — already over target on read, per Phase 12
+
+# within the next minute, the scanner picks it up and attempts delivery — no
+# real Slack integration is configured, so it skips gracefully, same as step 11:
+# {"level":"ERROR","source":{"function":"...(*Notifier).deliverSlack"},
+#  "msg":"notify: slack integration unavailable","err":"store: not found"}
 ```
 
-Every response above was run against a live server, not hand-typed. Actually
-delivering to a real Slack workspace or SMTP server isn't demoed here (that would
-need real external credentials and a live network call) — it's covered instead by
+Every response above was run against a live server, not hand-typed — including
+step 12's SLA-risk scanner, which really did fire ~40 seconds after the SEV was
+created and log the graceful-skip line shown. Actually delivering to a real Slack
+workspace or SMTP server isn't demoed here (that would need real external
+credentials and a live network call) — it's covered instead by
 `internal/api/grpc/notify_test.go` (`TestNotifier_Notify_SlackDelivery`/
 `_EmailDelivery`, against fake `SlackSender`/`EmailSender`s), `TestCreateSEV_NotifiesOnSevCreated`,
-`TestCreateAnnouncement_Notifies`, and `TestTransitionPostmortemStatus_NotifiesOnApproved`
-(all asserting the right handler calls `Notifier.Notify` with the right event
-type), and `internal/integrations/email/client_test.go` (a real SMTP conversation
-against a local fake server, exercising `Client.Send` end-to-end at the protocol
-level).
+`TestCreateAnnouncement_Notifies`, `TestTransitionPostmortemStatus_NotifiesOnApproved`,
+and `cmd/server/sla_risk_scanner_test.go` (all asserting the right code path calls
+`Notifier.Notify` with the right event type, against a real in-memory
+`Notifier`/fake Slack sender), and `internal/integrations/email/client_test.go` (a
+real SMTP conversation against a local fake server, exercising `Client.Send`
+end-to-end at the protocol level).
 
 ## Verify tests pass
 
@@ -190,6 +234,14 @@ New/updated coverage:
   `EscalatedAt` (and doesn't re-fire on a second scan), skips a SEV with an IC
   already assigned, doesn't panic with no open SEVs, and `startEscalationScanner`
   stops cleanly on context cancellation.
+- `cmd/server/sla_risk_scanner_test.go`: `scanSLARisk` fires `sla_at_risk` and
+  marks `SLANotifiedStatus` (no re-fire on a second scan); escalates a
+  previously-notified `at_risk` SEV to `sla_breached` once its final value
+  confirms it, and never re-fires past that; a SEV whose final value already
+  exceeds target on read gets exactly one `sla_breached` notification, not an
+  `sla_at_risk` one first; no notification with no `ServiceSLA` configured;
+  doesn't panic with no candidate SEVs; and `startSLARiskScanner` stops
+  cleanly on context cancellation.
 - `internal/integrations/email/client_test.go`: a full SMTP conversation against
   a local fake server (successful send, a rejected `RCPT TO`, and a dial failure
   against a closed port).
@@ -198,7 +250,9 @@ New/updated coverage:
   fields never are) still hold with the 6th ("email") entry added.
 - `internal/store/memory/memory_test.go`: `TestNotificationConfigStore` /
   `TestEscalationConfigStore` — insert/update/list/delete, the `ListForEvent`
-  severity filter, and the pre-seeded-disabled defaults.
+  severity filter, and the pre-seeded-disabled defaults; `TestSEVStore`'s new
+  `UpdateEscalatedAt`/`UpdateSLANotifiedStatus` subtests (set, clear,
+  not-found).
 - `internal/store/postgres/notificationconfig_test.go` /
   `escalationconfig_test.go` (integration-tagged, run against real Postgres):
   the same coverage against the actual schema and generated sqlc queries.
@@ -224,6 +278,12 @@ New/updated coverage:
   only), not a regression specific to this phase.
 - Escalation only checks for a missing Incident Commander — no other role, and no
   configurable "which role must be present" beyond IC.
+- `sev.sla_at_risk`/`sev.sla_breached` fire on the SEV's `Overall` SLA status
+  only (worst of MTTD/MTTM/MTTR/RTPC), not per-metric — a rule can't route
+  specifically on "MTTR at risk" versus "MTTD at risk." `SLANotifiedStatus`
+  is also a one-way marker: an admin loosening a service's SLA target (or
+  its affected-services list) after a SEV already read `at_risk` won't
+  un-notify it or reset the marker.
 - `ListEnabledIntegrations`-style blind spots aside, the Slack/email delivery
   clients are built fresh per notification from the datastore's current
   integration config (no caching) — matching every other per-call Slack-client

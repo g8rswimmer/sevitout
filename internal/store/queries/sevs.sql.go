@@ -21,7 +21,7 @@ SELECT id, title, description, severity_level, status,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-       slack_channel_id, rtpc_seconds, escalated_at
+       slack_channel_id, rtpc_seconds, escalated_at, sla_notified_status
 FROM sevs
 WHERE id = $1
 `
@@ -68,6 +68,7 @@ type GetSEVRow struct {
 	SlackChannelID        *string            `json:"slack_channel_id"`
 	RtpcSeconds           *int64             `json:"rtpc_seconds"`
 	EscalatedAt           pgtype.Timestamptz `json:"escalated_at"`
+	SlaNotifiedStatus     *string            `json:"sla_notified_status"`
 }
 
 func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
@@ -115,6 +116,7 @@ func (q *Queries) GetSEV(ctx context.Context, id string) (GetSEVRow, error) {
 		&i.SlackChannelID,
 		&i.RtpcSeconds,
 		&i.EscalatedAt,
+		&i.SlaNotifiedStatus,
 	)
 	return i, err
 }
@@ -244,7 +246,7 @@ SELECT id, title, description, severity_level, status,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-       slack_channel_id, rtpc_seconds, escalated_at
+       slack_channel_id, rtpc_seconds, escalated_at, sla_notified_status
 FROM sevs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -297,6 +299,7 @@ type ListSEVsRow struct {
 	SlackChannelID        *string            `json:"slack_channel_id"`
 	RtpcSeconds           *int64             `json:"rtpc_seconds"`
 	EscalatedAt           pgtype.Timestamptz `json:"escalated_at"`
+	SlaNotifiedStatus     *string            `json:"sla_notified_status"`
 }
 
 func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsRow, error) {
@@ -350,6 +353,7 @@ func (q *Queries) ListSEVs(ctx context.Context, arg ListSEVsParams) ([]ListSEVsR
 			&i.SlackChannelID,
 			&i.RtpcSeconds,
 			&i.EscalatedAt,
+			&i.SlaNotifiedStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -524,5 +528,19 @@ type UpdateSEVLockedParams struct {
 
 func (q *Queries) UpdateSEVLocked(ctx context.Context, arg UpdateSEVLockedParams) error {
 	_, err := q.db.Exec(ctx, updateSEVLocked, arg.ID, arg.Locked)
+	return err
+}
+
+const updateSEVSLANotifiedStatus = `-- name: UpdateSEVSLANotifiedStatus :exec
+UPDATE sevs SET sla_notified_status = $2, updated_at = NOW() WHERE id = $1
+`
+
+type UpdateSEVSLANotifiedStatusParams struct {
+	ID                string  `json:"id"`
+	SlaNotifiedStatus *string `json:"sla_notified_status"`
+}
+
+func (q *Queries) UpdateSEVSLANotifiedStatus(ctx context.Context, arg UpdateSEVSLANotifiedStatusParams) error {
+	_, err := q.db.Exec(ctx, updateSEVSLANotifiedStatus, arg.ID, arg.SlaNotifiedStatus)
 	return err
 }

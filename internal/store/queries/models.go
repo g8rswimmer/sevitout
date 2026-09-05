@@ -186,6 +186,7 @@ type Sev struct {
 	SlackChannelID        *string            `json:"slack_channel_id"`
 	RtpcSeconds           *int64             `json:"rtpc_seconds"`
 	EscalatedAt           pgtype.Timestamptz `json:"escalated_at"`
+	SlaNotifiedStatus     *string            `json:"sla_notified_status"`
 }
 
 type SevAccess struct {

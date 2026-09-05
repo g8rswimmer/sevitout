@@ -153,6 +153,58 @@ func TestSEVStore(t *testing.T) {
 			t.Fatalf("want ErrNotFound, got %v", err)
 		}
 	})
+
+	t.Run("UpdateEscalatedAt", func(t *testing.T) {
+		now := time.Now()
+		if err := s.UpdateEscalatedAt(ctx, sev.ID, &now); err != nil {
+			t.Fatalf("UpdateEscalatedAt: %v", err)
+		}
+		got, _ := s.Get(ctx, sev.ID)
+		if got.EscalatedAt == nil || !got.EscalatedAt.Equal(now) {
+			t.Fatalf("EscalatedAt = %v, want %v", got.EscalatedAt, now)
+		}
+		if err := s.UpdateEscalatedAt(ctx, sev.ID, nil); err != nil {
+			t.Fatalf("UpdateEscalatedAt (clear): %v", err)
+		}
+		got, _ = s.Get(ctx, sev.ID)
+		if got.EscalatedAt != nil {
+			t.Fatal("expected EscalatedAt cleared")
+		}
+	})
+
+	t.Run("UpdateEscalatedAtNotFound", func(t *testing.T) {
+		now := time.Now()
+		if err := s.UpdateEscalatedAt(ctx, "missing", &now); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("UpdateSLANotifiedStatus", func(t *testing.T) {
+		atRisk := "at_risk"
+		if err := s.UpdateSLANotifiedStatus(ctx, sev.ID, &atRisk); err != nil {
+			t.Fatalf("UpdateSLANotifiedStatus: %v", err)
+		}
+		got, _ := s.Get(ctx, sev.ID)
+		if got.SLANotifiedStatus == nil || *got.SLANotifiedStatus != "at_risk" {
+			t.Fatalf("SLANotifiedStatus = %v, want at_risk", got.SLANotifiedStatus)
+		}
+
+		breached := "breached"
+		if err := s.UpdateSLANotifiedStatus(ctx, sev.ID, &breached); err != nil {
+			t.Fatalf("UpdateSLANotifiedStatus (escalate to breached): %v", err)
+		}
+		got, _ = s.Get(ctx, sev.ID)
+		if got.SLANotifiedStatus == nil || *got.SLANotifiedStatus != "breached" {
+			t.Fatalf("SLANotifiedStatus = %v, want breached", got.SLANotifiedStatus)
+		}
+	})
+
+	t.Run("UpdateSLANotifiedStatusNotFound", func(t *testing.T) {
+		status := "at_risk"
+		if err := s.UpdateSLANotifiedStatus(ctx, "missing", &status); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
 }
 
 // ── SEVStore filter/sort combinations (M08 search) ─────────────────────────────

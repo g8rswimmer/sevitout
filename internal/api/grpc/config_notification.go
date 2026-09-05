@@ -22,7 +22,7 @@ import (
 // notificationEvents is the fixed, known set of event types a
 // NotificationConfig rule may route on — every event this codebase actually
 // fires a Notify call for (internal/api/grpc/sev.go, announcement.go,
-// postmortem.go, and cmd/server's escalation scanner).
+// postmortem.go, and cmd/server's escalation and SLA-risk scanners).
 var notificationEvents = map[string]bool{
 	"sev.created":          true,
 	"sev.updated":          true,
@@ -31,6 +31,13 @@ var notificationEvents = map[string]bool{
 	"postmortem.due":       true,
 	"postmortem.approved":  true,
 	"sev.escalation_no_ic": true,
+	// sev.sla_at_risk / sev.sla_breached fire from cmd/server's
+	// startSLARiskScanner, driven by internal/sev.EvaluateSLA's Overall
+	// status (docs/roadmap.md Phase 12's SLA targets) — one-time per SEV per
+	// level via SEV.SLANotifiedStatus, same "notify once" posture as
+	// sev.escalation_no_ic's EscalatedAt marker.
+	"sev.sla_at_risk":  true,
+	"sev.sla_breached": true,
 }
 
 func validNotificationRole(role string) bool {
