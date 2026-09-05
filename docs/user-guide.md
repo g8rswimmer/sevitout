@@ -397,17 +397,20 @@ All integration configuration lives under **Admin → Integrations** (and
 **Admin → AI Plugins** for the AI system specifically). Only Admins can
 configure integrations.
 
-**Admin → Integrations** is a sidebar of the five fixed integration types
-(PagerDuty, GitHub, Slack, Jira, Monitoring). Each row shows whether it's
-configured and a live health badge (green **Connected**, red **Error** with
-the underlying error message and a short troubleshooting hint shown right in
-the form, gray **Not configured**/**No health check**). Selecting a row
-opens a form built from that integration's own schema: credential fields are
-password-masked and labeled in plain language (e.g. "Bot Token", not
+**Admin → Integrations** is a sidebar of the six fixed integration types
+(PagerDuty, GitHub, Slack, Jira, Email, Monitoring). Each row shows whether
+it's configured and a live health badge (green **Connected**, red **Error**
+with the underlying error message and a short troubleshooting hint shown
+right in the form, gray **Not configured**/**No health check**). Selecting a
+row opens a form built from that integration's own schema: credential fields
+are password-masked and labeled in plain language (e.g. "Bot Token", not
 `bot_token`); leaving a credential field blank on save keeps whatever's
 already stored, so rotating one secret never requires re-entering the
 others. Monitoring has no credential fields at all — see
-[§14.6](#146-monitoring-datadog--prometheus--cloudwatch).
+[§14.6](#146-monitoring-datadog--prometheus--cloudwatch); Email has no
+environment-variable fallback at all (unlike the other five) — it's
+configured exclusively through this form, see
+[§14.7](#147-email-for-notifications).
 
 **Every credential below can also be set via an environment variable
 instead of (or as a fallback for) the admin form** — PagerDuty, GitHub, and
@@ -576,6 +579,19 @@ apart:
 There's no embedded chart-snapshot rendering yet — that's a possible future
 direction, not current behavior.
 
+### 14.7 Email (for notifications)
+
+Under **Admin → Integrations → Email**, enter your SMTP server's host, port,
+username, and password, plus a **From address**. There's no environment
+variable fallback for any of these — unlike the other five integrations,
+email is configured exclusively through this form. There's also no live
+health check (the sidebar row always shows "No health check") — the only
+way to confirm it works is to configure a notification rule (see
+[§17](#17-notifications--alerting)) and trigger the event it routes on.
+
+This exists purely to back the **email** channel type in notification
+routing rules — it has no other purpose in Sevitout.
+
 ---
 
 ## 15. Admin configuration reference
@@ -621,6 +637,10 @@ and rate limits — see [§14.5](#145-ai-plugins).
 
 See [§16](#16-data-retention) below.
 
+### 15.7 Notifications & Alerting
+
+See [§17](#17-notifications--alerting) below.
+
 ---
 
 ## 16. Data retention
@@ -636,26 +656,104 @@ before it archives if you need a durable copy for compliance.
 
 ---
 
-## 17. Notifications
+## 17. Notifications & Alerting
 
-There's no configurable notification-routing or escalation-threshold admin
-page — that's speced in `docs/requirements.md` §16/§18.5 as a future goal,
-but no such UI or API exists today; don't go looking for it under **Admin**.
+From **Admin → Notifications**, configure routing rules and escalation
+thresholds. Two independent things live on this page:
 
-What actually happens today:
+### 17.1 Routing rules
+
+Each rule is: **for this org role, on any of these events, post to this
+Slack channel or email address** — optionally restricted to a severity level
+or more critical. A single rule can cover several events (e.g. one Slack
+rule for both "SLA at risk" and "SLA breached"), so you don't need a
+separate rule per event just to reuse the same target. Add a rule with
+**Add rule**, choose:
+
+- **Role** — Viewer, Responder, Incident Commander, or Admin. This labels
+  who the rule is for; it does **not** look up individual users holding
+  that role and message them personally (see the limitation below).
+- **Events** — check every event this rule should cover: SEV opened,
+  updated, or status changed; an announcement posted; a postmortem becoming
+  due (fires the moment a SEV resolves) or approved; a SEV escalating for
+  having no Incident Commander (see [§17.2](#172-escalation)); or a SEV's
+  SLA becoming at-risk or breached (see
+  [§17.3](#173-sla-risk--breach-alerts)). At least one event is required.
+- **Channel type** — Slack or Email (email requires
+  [§14.7](#147-email-for-notifications) configured first).
+- **Channel target** — a Slack channel name (e.g. `#incidents`) or an
+  email address.
+- **Max severity** (optional) — e.g. set to SEV-2 to express "only for
+  SEV-1 and SEV-2," since severity 1 is the most critical. Leave unset to
+  match every severity.
+
+Delete a rule with the trash icon in its row. There's no edit-in-place in
+the UI yet — delete and re-add to change a rule's events, target, or
+severity filter.
+
+**Send test**: once role, events, channel type, and channel target are
+filled in, the **Send test** button (paper-plane icon) sends one real test
+message per selected event straight to that channel or address — without
+saving the rule first. Every already-saved rule has the same button in its
+table row, for testing a rule you set up earlier without waiting for a real
+SEV to trigger it. Results appear per event right below: "sent" on success,
+or the actual delivery error (e.g. "slack integration unavailable", "email
+integration is missing smtp_host or from_address") when something's wrong —
+this is the fastest way to debug a rule that isn't delivering. A test send
+never gets routed through any other rule's matching logic and never counts
+toward a real event.
+
+**Important limitation**: a rule is a fixed broadcast — it always posts to
+the same channel or address, for anyone matching that role. It is **not**
+a personal notification to whichever specific person is filling that role
+on a given SEV (e.g. it won't DM *this SEV's* actual assigned Incident
+Commander). If you need that, route the "SEV status changed" event to
+that SEV's own incident channel instead (everyone in it, including its
+IC, already sees it) — see [§14.1](#141-slack).
+
+The message you receive includes the SEV's real ID (e.g.
+`SEV-2026-0042`), title, severity, and status, and — once the SEV's
+incident channel exists (see [§14.1](#141-slack)) — a link to it. That
+channel link is normally missing from a SEV's very first "opened"
+notification, since the channel is created by a separate process reacting
+to that same event; it appears starting with the SEV's next notification
+(a status change, for example).
+
+### 17.2 Escalation
+
+Also on **Admin → Notifications**, a 4-row table (one per severity level)
+sets: **if a SEV at this level has been open longer than N minutes with no
+Incident Commander assigned, alert.** Each row has a minutes threshold and
+an enabled checkbox — all four start disabled with no threshold set. This
+is checked once a minute in the background; assigning an Incident
+Commander to a SEV clears its alert state, so a resolved gap doesn't
+re-alert once the threshold refires.
+
+To actually receive this alert, add a routing rule for the "no Incident
+Commander" event (§17.1) — the threshold table alone only decides *when*
+to alert, not *where*.
+
+### 17.3 SLA risk & breach alerts
+
+If you've configured per-service SLA targets (**Admin → Services → SLAs**
+icon, or see `docs/roadmap.md` Phase 12 for the underlying design), Sevitout
+checks once a minute whether any SEV's live SLA status has crossed into
+**at risk** or **breached**, and fires the corresponding event —
+route it to a channel via §17.1 the same way as any other event. Each SEV
+gets at most one "at risk" alert and one "breached" alert over its
+lifetime, not a repeat every minute.
+
+### 17.4 What else already happens, independent of the page above
 
 - The web app updates **live** via WebSocket while you have a SEV open —
   status changes, new announcements, role/task changes all appear without a
-  manual refresh.
-- If Slack is configured (see [§14.1](#141-slack)), `external`/
-  `status-page` announcements and every status change push to the SEV's
-  incident channel — that's the closest thing to a configurable
-  notification channel that exists today, and it isn't role- or
-  threshold-based; everyone in the channel sees the same messages.
-- There's no email channel and no per-role notification routing (e.g. "only
-  page management on a SEV-1") — if you need that, it has to be built
-  outside Sevitout for now (e.g. a Slack workflow watching the incident
-  channel).
+  manual refresh. This has nothing to do with the routing rules above and
+  can't be configured — it's always on.
+- If Slack is configured (see [§14.1](#141-slack)), *every* status change
+  and `external`/`status-page` announcement pushes to the SEV's own
+  incident channel automatically, regardless of anything configured on this
+  page — that's a separate, always-on mechanism, not one of the rules
+  above.
 
 ---
 

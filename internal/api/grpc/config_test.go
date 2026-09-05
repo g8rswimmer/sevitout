@@ -22,21 +22,25 @@ import (
 )
 
 type testConfigServer struct {
-	server           *grpchandler.ConfigServer
-	services         *memory.ServiceStore
-	serviceSLAs      *memory.ServiceSLAStore
-	levelingCriteria *memory.ServiceLevelingCriteriaStore
-	users            *memory.UserStore
-	oncall           *memory.OnCallStore
-	integrations     *memory.IntegrationConfigStore
-	retention        *memory.RetentionConfigStore
-	aiPlugins        *memory.AIPluginStore
+	server              *grpchandler.ConfigServer
+	services            *memory.ServiceStore
+	serviceSLAs         *memory.ServiceSLAStore
+	levelingCriteria    *memory.ServiceLevelingCriteriaStore
+	notificationConfigs *memory.NotificationConfigStore
+	escalationConfigs   *memory.EscalationConfigStore
+	users               *memory.UserStore
+	oncall              *memory.OnCallStore
+	integrations        *memory.IntegrationConfigStore
+	retention           *memory.RetentionConfigStore
+	aiPlugins           *memory.AIPluginStore
 }
 
 func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	services := memory.NewServiceStore()
 	serviceSLAs := memory.NewServiceSLAStore()
 	levelingCriteria := memory.NewServiceLevelingCriteriaStore()
+	notificationConfigs := memory.NewNotificationConfigStore()
+	escalationConfigs := memory.NewEscalationConfigStore()
 	users := memory.NewUserStore()
 	oncall := memory.NewOnCallStore()
 	integrations := memory.NewIntegrationConfigStore()
@@ -44,17 +48,21 @@ func newTestConfigServer(enc grpchandler.Encryptor) *testConfigServer {
 	aiPlugins := memory.NewAIPluginStore()
 	return &testConfigServer{
 		server: grpchandler.NewConfigServer(grpchandler.ConfigServerParams{
-			Services: services, ServiceSLAs: serviceSLAs, LevelingCriteria: levelingCriteria, Users: users, OnCall: oncall, Integrations: integrations,
+			Services: services, ServiceSLAs: serviceSLAs, LevelingCriteria: levelingCriteria,
+			NotificationConfigs: notificationConfigs, EscalationConfigs: escalationConfigs,
+			Users: users, OnCall: oncall, Integrations: integrations,
 			Retention: retention, AIPlugins: aiPlugins, Crypto: enc,
 		}),
-		services:         services,
-		serviceSLAs:      serviceSLAs,
-		levelingCriteria: levelingCriteria,
-		users:            users,
-		oncall:           oncall,
-		integrations:     integrations,
-		retention:        retention,
-		aiPlugins:        aiPlugins,
+		services:            services,
+		serviceSLAs:         serviceSLAs,
+		levelingCriteria:    levelingCriteria,
+		notificationConfigs: notificationConfigs,
+		escalationConfigs:   escalationConfigs,
+		users:               users,
+		oncall:              oncall,
+		integrations:        integrations,
+		retention:           retention,
+		aiPlugins:           aiPlugins,
 	}
 }
 
@@ -715,7 +723,7 @@ func TestGetIntegrationCatalog_Shape(t *testing.T) {
 		t.Fatalf("GetIntegrationCatalog: %v", err)
 	}
 
-	wantTypes := []string{"pagerduty", "github", "slack", "jira", "monitoring"}
+	wantTypes := []string{"pagerduty", "github", "slack", "jira", "email", "monitoring"}
 	if len(resp.GetIntegrations()) != len(wantTypes) {
 		t.Fatalf("got %d integrations, want %d", len(resp.GetIntegrations()), len(wantTypes))
 	}

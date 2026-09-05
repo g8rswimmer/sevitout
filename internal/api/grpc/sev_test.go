@@ -72,6 +72,40 @@ func newTestSEVServer() *testSEVServer {
 	}
 }
 
+// newTestSEVServerWithNotifier is like newTestSEVServer but also wires a
+// real *grpchandler.Notifier (docs/roadmap.md Phase 15), backed by tn's fake
+// Slack/email senders — so tests can assert a handler actually calls
+// Notify with the right event type, not just that it doesn't panic.
+func newTestSEVServerWithNotifier(t *testing.T, tn *testNotifier) *testSEVServer {
+	t.Helper()
+	sevs := memory.NewSEVStore()
+	audit := memory.NewAuditStore()
+	history := memory.NewStatusHistoryStore()
+	links := memory.NewSEVLinkStore()
+	access := memory.NewSEVAccessStore()
+	services := memory.NewServiceStore()
+	serviceSLAs := memory.NewServiceSLAStore()
+	pub := &fakePublisher{}
+	aiDispatch := &fakeAIDispatcher{}
+	return &testSEVServer{
+		server: grpchandler.NewSEVServer(grpchandler.SEVServerParams{
+			SEVs: sevs, Audit: audit, History: history, Roles: memory.NewRoleStore(),
+			Services: services, ServiceSLAs: serviceSLAs, Postmortems: memory.NewPostmortemStore(),
+			Links: links, Access: access, Publisher: pub, AIDispatch: aiDispatch,
+			Notifier: tn.notifier,
+		}),
+		sevs:        sevs,
+		audit:       audit,
+		history:     history,
+		links:       links,
+		access:      access,
+		services:    services,
+		serviceSLAs: serviceSLAs,
+		pub:         pub,
+		ai:          aiDispatch,
+	}
+}
+
 // seedSEV inserts a SEV directly into the backing store and returns the
 // auto-assigned ID. Use this for tests that need a pre-existing SEV to call
 // handlers such as TransitionStatus or UpdateSEV.
@@ -183,6 +217,77 @@ func TestCreateSEV_SensitiveSEVDoesNotPublish(t *testing.T) {
 
 	if events := ts.pub.All(); len(events) != 0 {
 		t.Errorf("published events = %d, want 0 for a sensitive SEV: %+v", len(events), events)
+	}
+}
+
+func TestCreateSEV_NotifiesOnSevCreated(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleIncidentCommander, "sev.created", store.NotificationChannelSlack, "#incidents", nil)
+	ts := newTestSEVServerWithNotifier(t, tn)
+
+	if _, err := ts.server.CreateSEV(context.Background(), &pb.CreateSEVRequest{
+		Title: "Database failure", SeverityLevel: 1,
+	}); err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	if tn.slack.calls != 1 {
+		t.Fatalf("want 1 notification delivery on sev.created, got %d", tn.slack.calls)
+	}
+	if tn.slack.channel != "#incidents" {
+		t.Errorf("channel = %q, want %q", tn.slack.channel, "#incidents")
+	}
+}
+
+func TestCreateSEV_SensitiveSEVDoesNotNotify(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleIncidentCommander, "sev.created", store.NotificationChannelSlack, "#incidents", nil)
+	ts := newTestSEVServerWithNotifier(t, tn)
+
+	if _, err := ts.server.CreateSEV(context.Background(), &pb.CreateSEVRequest{
+		Title: "Sensitive incident", SeverityLevel: 1, Sensitive: true,
+	}); err != nil {
+		t.Fatalf("CreateSEV: %v", err)
+	}
+
+	if tn.slack.calls != 0 {
+		t.Errorf("want no notification delivery for a sensitive SEV, got %d", tn.slack.calls)
+	}
+}
+
+func TestTransitionStatus_NotifiesStatusChangedAndPostmortemDue(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleIncidentCommander, "sev.status_changed", store.NotificationChannelSlack, "#incidents", nil)
+	tn.addRule(t, store.OrgRoleIncidentCommander, "postmortem.due", store.NotificationChannelSlack, "#incidents", nil)
+	ts := newTestSEVServerWithNotifier(t, tn)
+	sevID := seedSEV(t, ts)
+
+	if _, err := ts.server.TransitionStatus(context.Background(), &pb.TransitionStatusRequest{
+		Id: sevID, ToStatus: string(store.SEVStatusInvestigating),
+	}); err != nil {
+		t.Fatalf("TransitionStatus to Investigating: %v", err)
+	}
+	if tn.slack.calls != 1 {
+		t.Fatalf("want 1 delivery (sev.status_changed only) after Investigating, got %d", tn.slack.calls)
+	}
+
+	if _, err := ts.server.TransitionStatus(context.Background(), &pb.TransitionStatusRequest{
+		Id: sevID, ToStatus: string(store.SEVStatusMitigated),
+	}); err != nil {
+		t.Fatalf("TransitionStatus to Mitigated: %v", err)
+	}
+	if _, err := ts.server.TransitionStatus(context.Background(), &pb.TransitionStatusRequest{
+		Id: sevID, ToStatus: string(store.SEVStatusResolved),
+	}); err != nil {
+		t.Fatalf("TransitionStatus to Resolved: %v", err)
+	}
+
+	// Investigating (1) + Mitigated (1) + Resolved (status_changed + postmortem.due = 2) = 4.
+	if tn.slack.calls != 4 {
+		t.Fatalf("want 4 total deliveries after reaching Resolved (status_changed x3 + postmortem.due x1), got %d", tn.slack.calls)
 	}
 }
 

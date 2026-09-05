@@ -189,6 +189,68 @@
         ]
       }
     },
+    "/v1/config/escalation": {
+      "get": {
+        "operationId": "ConfigService_ListEscalationConfigs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListEscalationConfigsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/escalation/{severityLevel}": {
+      "put": {
+        "summary": "--- Escalation thresholds (docs/requirements.md §16, docs/roadmap.md\nPhase 15) --- per-severity-level \"alert if open \u003e N minutes with no\nIncident Commander assigned\" configuration, scanned by cmd/server's\nescalation scanner. Reads/writes floor exactly like RetentionConfig.",
+        "operationId": "ConfigService_UpsertEscalationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EscalationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpsertEscalationConfigBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
     "/v1/config/integration-catalog": {
       "get": {
         "summary": "GetIntegrationCatalog returns the fixed, ordered field schema for every\nintegration_type this server recognizes (docs/roadmap.md Phase 9) — a\npure translation of internal/integrations/catalog.All with no store\naccess. It's the single source of truth the admin UI renders its\nsidebar + schema-driven detail form from, and UpsertIntegrationConfig\nvalidates incoming requests against the same catalog.",
@@ -360,6 +422,162 @@
             "required": false,
             "type": "integer",
             "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/notifications": {
+      "get": {
+        "operationId": "ConfigService_ListNotificationConfigs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListNotificationConfigsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "post": {
+        "summary": "--- Notifications \u0026 Alerting (docs/requirements.md §16/§18.5,\ndocs/roadmap.md Phase 15) --- an admin-configured routing rule set:\n\"for org role X, on any of events Y, post to channel_type at\nchannel_target.\" A fixed broadcast route, not per-user/per-incident\npersonalization. Reads sit at the Viewer floor (same reasoning as\nServiceSLA/LevelingCriteria); mutations are Admin-only. Rules are\nID-identified (Create/Update/Delete by id), matching AIPlugin's shape\nabove — a rule covering several events can no longer be addressed by\nits field values the way the original single-event design could.",
+        "operationId": "ConfigService_CreateNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1NotificationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateNotificationConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/notifications/test": {
+      "post": {
+        "summary": "TestNotificationConfig sends one real test message per event in the\nrequest straight to its channel_type/channel_target — bypassing\nListForEvent's event/severity matching entirely, so it works equally\nfor an already-saved rule (pass its current field values) or a rule\nstill being drafted in the Add-rule form (id is never needed). Lets an\nadmin verify a Slack channel/email address and the underlying\nintegration actually work without waiting for a real SEV event.\nAdmin-only, like every other mutation here — it has the same\nreal-world side effect (a message lands in a real channel/inbox) as\nCreate/Update.",
+        "operationId": "ConfigService_TestNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TestNotificationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "TestNotificationConfigRequest carries the same fields as\nCreateNotificationConfigRequest (no id — see the RPC's doc comment).",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1TestNotificationConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/notifications/{id}": {
+      "delete": {
+        "operationId": "ConfigService_DeleteNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "patch": {
+        "operationId": "ConfigService_UpdateNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1NotificationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateNotificationConfigBody"
+            }
           }
         ],
         "tags": [
@@ -1265,6 +1483,30 @@
         }
       }
     },
+    "ConfigServiceUpdateNotificationConfigBody": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "ConfigServiceUpdateOnCallRotationBody": {
       "type": "object",
       "properties": {
@@ -1337,6 +1579,18 @@
         "orgRole": {
           "type": "string",
           "title": "org_role: viewer | responder | incident-commander | admin"
+        }
+      }
+    },
+    "ConfigServiceUpsertEscalationConfigBody": {
+      "type": "object",
+      "properties": {
+        "thresholdMinutes": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "enabled": {
+          "type": "boolean"
         }
       }
     },
@@ -1561,6 +1815,30 @@
         }
       }
     },
+    "v1CreateNotificationConfigRequest": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "v1CreateOnCallRotationRequest": {
       "type": "object",
       "properties": {
@@ -1614,6 +1892,26 @@
           "additionalProperties": {
             "type": "string"
           }
+        }
+      }
+    },
+    "v1EscalationConfigResponse": {
+      "type": "object",
+      "properties": {
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "thresholdMinutes": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -1742,6 +2040,18 @@
         }
       }
     },
+    "v1ListEscalationConfigsResponse": {
+      "type": "object",
+      "properties": {
+        "configs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EscalationConfigResponse"
+          }
+        }
+      }
+    },
     "v1ListIntegrationConfigsResponse": {
       "type": "object",
       "properties": {
@@ -1774,6 +2084,18 @@
           "items": {
             "type": "object",
             "$ref": "#/definitions/v1LevelingCriteriaResponse"
+          }
+        }
+      }
+    },
+    "v1ListNotificationConfigsResponse": {
+      "type": "object",
+      "properties": {
+        "configs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1NotificationConfigResponse"
           }
         }
       }
@@ -1835,6 +2157,44 @@
             "type": "object",
             "$ref": "#/definitions/v1UserResponse"
           }
+        }
+      }
+    },
+    "v1NotificationConfigResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "events is non-empty; a rule matches an incoming event when that event's\ntype appears anywhere in this list — one rule can cover several events\ninstead of requiring a separate rule per event."
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32",
+          "description": "max_severity_level restricts this rule to SEVs at this severity level or\nmore critical (severity 1 is most critical); 0 means unset (every\nseverity), the same proto3 convention ServiceSLAResponse's target-seconds\nfields already use."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -1978,6 +2338,58 @@
           "description": "rtpc_target_seconds targets Resolution to Postmortem Complete — see\nSEVResponse.rtpc_seconds."
         }
       }
+    },
+    "v1TestNotificationConfigRequest": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "TestNotificationConfigRequest carries the same fields as\nCreateNotificationConfigRequest (no id — see the RPC's doc comment)."
+    },
+    "v1TestNotificationConfigResponse": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1TestNotificationResult"
+          }
+        }
+      }
+    },
+    "v1TestNotificationResult": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "description": "TestNotificationResult is one event's test-delivery outcome. error is\nabsent/empty on success."
     },
     "v1UserResponse": {
       "type": "object",

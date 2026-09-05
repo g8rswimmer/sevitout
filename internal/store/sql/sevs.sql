@@ -33,7 +33,7 @@ SELECT id, title, description, severity_level, status,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-       slack_channel_id, rtpc_seconds
+       slack_channel_id, rtpc_seconds, escalated_at, sla_notified_status
 FROM sevs
 WHERE id = $1;
 
@@ -81,6 +81,12 @@ WHERE id = $1;
 -- name: UpdateSEVLocked :exec
 UPDATE sevs SET locked = $2, updated_at = NOW() WHERE id = $1;
 
+-- name: UpdateSEVEscalatedAt :exec
+UPDATE sevs SET escalated_at = $2, updated_at = NOW() WHERE id = $1;
+
+-- name: UpdateSEVSLANotifiedStatus :exec
+UPDATE sevs SET sla_notified_status = $2, updated_at = NOW() WHERE id = $1;
+
 -- name: ListSEVs :many
 SELECT id, title, description, severity_level, status,
        root_cause_category, root_cause_description, mitigation, prevention,
@@ -91,7 +97,7 @@ SELECT id, title, description, severity_level, status,
        started_at, detected_at, mitigated_at, resolved_at, postmortem_completed_at,
        mttd_seconds, mttm_seconds, mttr_seconds, dttm_seconds,
        locked, sensitive, ai_disabled, created_at, updated_at, created_by,
-       slack_channel_id, rtpc_seconds
+       slack_channel_id, rtpc_seconds, escalated_at, sla_notified_status
 FROM sevs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;

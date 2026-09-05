@@ -113,15 +113,26 @@ var rpcMinRole = map[string]store.OrgRole{
 	"/sevitout.v1.ConfigService/DeleteLevelingCriteria":          store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/ListLevelingCriteria":            store.OrgRoleViewer,
 	"/sevitout.v1.ConfigService/ListLevelingCriteriaForServices": store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/ListUsers":                       store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/UpdateUserRole":                  store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeactivateUser":                  store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ReactivateUser":                  store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/CreateOnCallRotation":            store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/GetOnCallRotation":               store.OrgRoleViewer,
-	"/sevitout.v1.ConfigService/UpdateOnCallRotation":            store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/DeleteOnCallRotation":            store.OrgRoleAdmin,
-	"/sevitout.v1.ConfigService/ListOnCallRotations":             store.OrgRoleViewer,
+	// Notifications & Alerting (docs/requirements.md §16/§18.5, docs/roadmap.md
+	// Phase 15) — reads sit at the same Viewer floor as ServiceSLA/
+	// LevelingCriteria; mutations are Admin-only per §18's "Admins are the
+	// only role with write access to configuration resources."
+	"/sevitout.v1.ConfigService/CreateNotificationConfig": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateNotificationConfig": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteNotificationConfig": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListNotificationConfigs":  store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/TestNotificationConfig":   store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpsertEscalationConfig":   store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListEscalationConfigs":    store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/ListUsers":                store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateUserRole":           store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeactivateUser":           store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ReactivateUser":           store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateOnCallRotation":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/GetOnCallRotation":        store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/UpdateOnCallRotation":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/DeleteOnCallRotation":     store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/ListOnCallRotations":      store.OrgRoleViewer,
 	// GetIntegrationCatalog is a pure static-schema read (no store access,
 	// nothing per-integration sensitive) but stays Admin-only for
 	// consistency with the rest of this integration-config group.

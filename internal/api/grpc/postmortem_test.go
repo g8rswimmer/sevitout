@@ -49,6 +49,33 @@ func newTestPostmortemServer() *testPostmortemServer {
 	}
 }
 
+// newTestPostmortemServerWithNotifier is like newTestPostmortemServer but
+// wires a real *grpchandler.Notifier (docs/roadmap.md Phase 15) backed by
+// tn's fake senders, for tests asserting TransitionPostmortemStatus notifies
+// on the move to Approved.
+func newTestPostmortemServerWithNotifier(tn *testNotifier) *testPostmortemServer {
+	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
+	audit := memory.NewAuditStore()
+	pms := memory.NewPostmortemStore()
+	signer := postmortem.NewUnlockSigner("test-secret-at-least-32-chars-long")
+	pub := &fakePublisher{}
+	aiDispatch := &fakeAIDispatcher{}
+	return &testPostmortemServer{
+		server: grpchandler.NewPostmortemServer(grpchandler.PostmortemServerParams{
+			Postmortems: pms, SEVs: sevs, Access: access, Audit: audit, Unlock: signer, Publisher: pub, AIDispatch: aiDispatch,
+			Notifier: tn.notifier,
+		}),
+		postmortems: pms,
+		sevs:        sevs,
+		access:      access,
+		audit:       audit,
+		unlock:      signer,
+		pub:         pub,
+		ai:          aiDispatch,
+	}
+}
+
 // seedLockedSEV creates a SEV in PostmortemComplete state (locked=true) with
 // an associated postmortem record and returns the SEV ID.
 func seedLockedSEV(t *testing.T, ts *testPostmortemServer) string {
@@ -267,6 +294,33 @@ func TestTransitionPostmortemStatus_DraftToInReview(t *testing.T) {
 	}
 	if resp.GetStatus() != string(store.PostmortemStatusInReview) {
 		t.Errorf("Status = %q, want %q", resp.GetStatus(), store.PostmortemStatusInReview)
+	}
+}
+
+func TestTransitionPostmortemStatus_NotifiesOnApproved(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleIncidentCommander, "postmortem.approved", store.NotificationChannelSlack, "#incidents", nil)
+	ts := newTestPostmortemServerWithNotifier(tn)
+	ctx := context.Background()
+	sevID := seedUnlockedSEVWithPostmortem(t, ts)
+
+	if _, err := ts.server.TransitionPostmortemStatus(ctx, &pb.TransitionPostmortemStatusRequest{
+		SevId: sevID, ToStatus: string(store.PostmortemStatusInReview), UserId: "user-ic",
+	}); err != nil {
+		t.Fatalf("TransitionPostmortemStatus to InReview: %v", err)
+	}
+	if tn.slack.calls != 0 {
+		t.Fatalf("want no notification on the move to InReview, got %d", tn.slack.calls)
+	}
+
+	if _, err := ts.server.TransitionPostmortemStatus(ctx, &pb.TransitionPostmortemStatusRequest{
+		SevId: sevID, ToStatus: string(store.PostmortemStatusApproved), UserId: "user-ic",
+	}); err != nil {
+		t.Fatalf("TransitionPostmortemStatus to Approved: %v", err)
+	}
+	if tn.slack.calls != 1 {
+		t.Fatalf("want 1 notification delivery on postmortem.approved, got %d", tn.slack.calls)
 	}
 }
 

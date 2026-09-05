@@ -49,6 +49,15 @@ type AuditLog struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type EscalationConfig struct {
+	ID               int64              `json:"id"`
+	SeverityLevel    int16              `json:"severity_level"`
+	ThresholdMinutes int32              `json:"threshold_minutes"`
+	Enabled          bool               `json:"enabled"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IntegrationConfig struct {
 	ID                   int64              `json:"id"`
 	IntegrationType      string             `json:"integration_type"`
@@ -59,13 +68,14 @@ type IntegrationConfig struct {
 }
 
 type NotificationConfig struct {
-	ID            int64              `json:"id"`
-	Role          string             `json:"role"`
-	Event         string             `json:"event"`
-	ChannelType   string             `json:"channel_type"`
-	ChannelTarget string             `json:"channel_target"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID               int64              `json:"id"`
+	Role             string             `json:"role"`
+	ChannelType      string             `json:"channel_type"`
+	ChannelTarget    string             `json:"channel_target"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	MaxSeverityLevel *int16             `json:"max_severity_level"`
+	Events           []string           `json:"events"`
 }
 
 type OncallRotation struct {
@@ -175,6 +185,8 @@ type Sev struct {
 	Query                 *string            `json:"query"`
 	SlackChannelID        *string            `json:"slack_channel_id"`
 	RtpcSeconds           *int64             `json:"rtpc_seconds"`
+	EscalatedAt           pgtype.Timestamptz `json:"escalated_at"`
+	SlaNotifiedStatus     *string            `json:"sla_notified_status"`
 }
 
 type SevAccess struct {

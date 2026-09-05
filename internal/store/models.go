@@ -193,6 +193,26 @@ type SEV struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	CreatedBy      string
+	// EscalatedAt is set once by the escalation scanner (docs/roadmap.md
+	// Phase 15, cmd/server's startEscalationScanner) the first time this SEV
+	// is found open past its severity level's configured escalation
+	// threshold with no Incident Commander assigned — so it notifies once per
+	// incident rather than every scan interval. Cleared back to nil when an
+	// Incident Commander is assigned (RoleServer.AssignRole) or the SEV
+	// leaves Open/Investigating.
+	EscalatedAt *time.Time
+	// SLANotifiedStatus tracks the most severe SLA state cmd/server's
+	// startSLARiskScanner has already fired a notification for on this SEV —
+	// "at_risk" or "breached" (the string values of internal/sev.SLAAtRisk/
+	// SLABreached; store can't import internal/sev, which itself imports
+	// store, so this is a plain string rather than sev.SLAMetricStatus). Nil
+	// means never notified. Monotonic within one SEV's lifecycle: once
+	// "breached", the scanner never re-fires "at_risk" for it — a SEV whose
+	// elapsed time already exceeds target can only have its final value land
+	// at or above that same elapsed time, so at_risk can't un-happen short of
+	// an admin loosening the SLA target or affected-services list after the
+	// fact (an accepted edge case, not handled).
+	SLANotifiedStatus *string
 }
 
 // SEVSortField selects the column SEVStore.List orders results by.
@@ -461,6 +481,61 @@ type ServiceLevelingCriteria struct {
 	Criteria      string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// NotificationChannelType is where a NotificationConfig rule delivers to.
+type NotificationChannelType string
+
+const (
+	NotificationChannelSlack NotificationChannelType = "slack"
+	NotificationChannelEmail NotificationChannelType = "email"
+)
+
+// NotificationConfig is one admin-configured notification routing rule
+// (docs/requirements.md §16/§18.5, docs/roadmap.md Phase 15): "for org Role,
+// on any of Events, post to ChannelType at ChannelTarget." A fixed broadcast
+// route — there is no UserID or SEVID on this row — not per-user or
+// per-incident personalized delivery (e.g. DMing the specific SEV's actual
+// assigned IC is a different, deferred targeting model; see the roadmap
+// entry's "Also considered and explicitly deferred").
+//
+// Events must be non-empty. A rule matches an incoming event when that
+// event's type appears anywhere in Events — one rule can cover several
+// event types instead of requiring a separate row per event. Because Events
+// is no longer a single scalar, (Role, Event, ChannelType) stopped being a
+// meaningful natural key once this widened (two rules can share a role and
+// channel while covering different, or even overlapping, event sets); rules
+// are identified by ID from here on, not by their field values — see
+// NotificationConfigStore.Upsert/Delete.
+//
+// MaxSeverityLevel, when non-nil, restricts the rule to SEVs at that
+// severity level or more critical (severity 1 is the most critical) —
+// e.g. 2 expresses "SEV-1/SEV-2 opens only." Nil means every severity.
+type NotificationConfig struct {
+	ID               int64
+	Role             OrgRole
+	Events           []string
+	ChannelType      NotificationChannelType
+	ChannelTarget    string
+	MaxSeverityLevel *int16
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// EscalationConfig is the per-severity-level escalation threshold
+// (docs/requirements.md §16, docs/roadmap.md Phase 15): if a SEV at
+// SeverityLevel has been open longer than ThresholdMinutes with no Incident
+// Commander assigned, cmd/server's escalation scanner fires a
+// "sev.escalation_no_ic" notification (routed the same way as every other
+// event, via NotificationConfig). A disabled (Enabled=false) severity level
+// is never scanned.
+type EscalationConfig struct {
+	ID               int64
+	SeverityLevel    int16
+	ThresholdMinutes int32
+	Enabled          bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // User is a registered user who authenticates with email and password.

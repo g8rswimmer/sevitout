@@ -27,7 +27,24 @@ func newTestAnnouncementServer() *testAnnouncementServer {
 	access := memory.NewSEVAccessStore()
 	pub := &fakePublisher{}
 	return &testAnnouncementServer{
-		server:        grpchandler.NewAnnouncementServer(announcements, sevs, access, pub),
+		server:        grpchandler.NewAnnouncementServer(announcements, sevs, access, pub, nil),
+		announcements: announcements,
+		sevs:          sevs,
+		access:        access,
+		pub:           pub,
+	}
+}
+
+// newTestAnnouncementServerWithNotifier is like newTestAnnouncementServer but
+// wires a real *grpchandler.Notifier (docs/roadmap.md Phase 15) backed by
+// tn's fake senders, for tests asserting CreateAnnouncement notifies.
+func newTestAnnouncementServerWithNotifier(tn *testNotifier) *testAnnouncementServer {
+	announcements := memory.NewAnnouncementStore()
+	sevs := memory.NewSEVStore()
+	access := memory.NewSEVAccessStore()
+	pub := &fakePublisher{}
+	return &testAnnouncementServer{
+		server:        grpchandler.NewAnnouncementServer(announcements, sevs, access, pub, tn.notifier),
 		announcements: announcements,
 		sevs:          sevs,
 		access:        access,
@@ -79,6 +96,27 @@ func TestCreateAnnouncement_ValidInternal(t *testing.T) {
 	}
 	if resp.GetMessage() != "We are investigating the issue." {
 		t.Errorf("message mismatch")
+	}
+}
+
+func TestCreateAnnouncement_Notifies(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleIncidentCommander, "announcement.created", store.NotificationChannelSlack, "#incidents", nil)
+	ts := newTestAnnouncementServerWithNotifier(tn)
+	sevID := seedSEVForAnnouncement(t, ts)
+
+	if _, err := ts.server.CreateAnnouncement(context.Background(), &pb.CreateAnnouncementRequest{
+		SevId: sevID, Message: "We are investigating the issue.", Audience: string(store.AudienceInternal), AuthorId: "user-1",
+	}); err != nil {
+		t.Fatalf("CreateAnnouncement: %v", err)
+	}
+
+	if tn.slack.calls != 1 {
+		t.Fatalf("want 1 notification delivery on announcement.created, got %d", tn.slack.calls)
+	}
+	if tn.slack.text != "We are investigating the issue." {
+		t.Errorf("text = %q, want the announcement message itself", tn.slack.text)
 	}
 }
 

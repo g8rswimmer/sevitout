@@ -121,6 +121,70 @@ service ConfigService {
     };
   }
 
+  // --- Notifications & Alerting (docs/requirements.md §16/§18.5,
+  // docs/roadmap.md Phase 15) --- an admin-configured routing rule set:
+  // "for org role X, on any of events Y, post to channel_type at
+  // channel_target." A fixed broadcast route, not per-user/per-incident
+  // personalization. Reads sit at the Viewer floor (same reasoning as
+  // ServiceSLA/LevelingCriteria); mutations are Admin-only. Rules are
+  // ID-identified (Create/Update/Delete by id), matching AIPlugin's shape
+  // above — a rule covering several events can no longer be addressed by
+  // its field values the way the original single-event design could.
+  rpc CreateNotificationConfig(CreateNotificationConfigRequest) returns (NotificationConfigResponse) {
+    option (google.api.http) = {
+      post: "/v1/config/notifications"
+      body: "*"
+    };
+  }
+  rpc UpdateNotificationConfig(UpdateNotificationConfigRequest) returns (NotificationConfigResponse) {
+    option (google.api.http) = {
+      patch: "/v1/config/notifications/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteNotificationConfig(DeleteNotificationConfigRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/config/notifications/{id}"
+    };
+  }
+  rpc ListNotificationConfigs(google.protobuf.Empty) returns (ListNotificationConfigsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/notifications"
+    };
+  }
+  // TestNotificationConfig sends one real test message per event in the
+  // request straight to its channel_type/channel_target — bypassing
+  // ListForEvent's event/severity matching entirely, so it works equally
+  // for an already-saved rule (pass its current field values) or a rule
+  // still being drafted in the Add-rule form (id is never needed). Lets an
+  // admin verify a Slack channel/email address and the underlying
+  // integration actually work without waiting for a real SEV event.
+  // Admin-only, like every other mutation here — it has the same
+  // real-world side effect (a message lands in a real channel/inbox) as
+  // Create/Update.
+  rpc TestNotificationConfig(TestNotificationConfigRequest) returns (TestNotificationConfigResponse) {
+    option (google.api.http) = {
+      post: "/v1/config/notifications/test"
+      body: "*"
+    };
+  }
+
+  // --- Escalation thresholds (docs/requirements.md §16, docs/roadmap.md
+  // Phase 15) --- per-severity-level "alert if open > N minutes with no
+  // Incident Commander assigned" configuration, scanned by cmd/server's
+  // escalation scanner. Reads/writes floor exactly like RetentionConfig.
+  rpc UpsertEscalationConfig(UpsertEscalationConfigRequest) returns (EscalationConfigResponse) {
+    option (google.api.http) = {
+      put: "/v1/config/escalation/{severity_level}"
+      body: "*"
+    };
+  }
+  rpc ListEscalationConfigs(google.protobuf.Empty) returns (ListEscalationConfigsResponse) {
+    option (google.api.http) = {
+      get: "/v1/config/escalation"
+    };
+  }
+
   // --- User management (§18.2, §14) ---
 
   // ListUsers is Admin-only; the directory includes email addresses.
@@ -448,6 +512,90 @@ message ListLevelingCriteriaForServicesRequest {
 
 message ListLevelingCriteriaForServicesResponse {
   repeated LevelingCriteriaResponse criteria = 1;
+}
+
+// ── Notifications & Alerting (docs/roadmap.md Phase 15) ─────────────────────
+
+message NotificationConfigResponse {
+  int64 id = 1;
+  string role = 2;
+  // events is non-empty; a rule matches an incoming event when that event's
+  // type appears anywhere in this list — one rule can cover several events
+  // instead of requiring a separate rule per event.
+  repeated string events = 3;
+  string channel_type = 4;
+  string channel_target = 5;
+  // max_severity_level restricts this rule to SEVs at this severity level or
+  // more critical (severity 1 is most critical); 0 means unset (every
+  // severity), the same proto3 convention ServiceSLAResponse's target-seconds
+  // fields already use.
+  int32 max_severity_level = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message CreateNotificationConfigRequest {
+  string role = 1;
+  repeated string events = 2;
+  string channel_type = 3;
+  string channel_target = 4;
+  int32 max_severity_level = 5;
+}
+
+message UpdateNotificationConfigRequest {
+  int64 id = 1;
+  string role = 2;
+  repeated string events = 3;
+  string channel_type = 4;
+  string channel_target = 5;
+  int32 max_severity_level = 6;
+}
+
+message DeleteNotificationConfigRequest {
+  int64 id = 1;
+}
+
+message ListNotificationConfigsResponse {
+  repeated NotificationConfigResponse configs = 1;
+}
+
+// TestNotificationConfigRequest carries the same fields as
+// CreateNotificationConfigRequest (no id — see the RPC's doc comment).
+message TestNotificationConfigRequest {
+  string role = 1;
+  repeated string events = 2;
+  string channel_type = 3;
+  string channel_target = 4;
+  int32 max_severity_level = 5;
+}
+
+// TestNotificationResult is one event's test-delivery outcome. error is
+// absent/empty on success.
+message TestNotificationResult {
+  string event = 1;
+  bool success = 2;
+  string error = 3;
+}
+
+message TestNotificationConfigResponse {
+  repeated TestNotificationResult results = 1;
+}
+
+message EscalationConfigResponse {
+  int32 severity_level = 1;
+  int32 threshold_minutes = 2;
+  bool enabled = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message UpsertEscalationConfigRequest {
+  int32 severity_level = 1;
+  int32 threshold_minutes = 2;
+  bool enabled = 3;
+}
+
+message ListEscalationConfigsResponse {
+  repeated EscalationConfigResponse configs = 1;
 }
 
 // ── User management ──────────────────────────────────────────────────────────

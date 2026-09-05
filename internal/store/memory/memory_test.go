@@ -153,6 +153,58 @@ func TestSEVStore(t *testing.T) {
 			t.Fatalf("want ErrNotFound, got %v", err)
 		}
 	})
+
+	t.Run("UpdateEscalatedAt", func(t *testing.T) {
+		now := time.Now()
+		if err := s.UpdateEscalatedAt(ctx, sev.ID, &now); err != nil {
+			t.Fatalf("UpdateEscalatedAt: %v", err)
+		}
+		got, _ := s.Get(ctx, sev.ID)
+		if got.EscalatedAt == nil || !got.EscalatedAt.Equal(now) {
+			t.Fatalf("EscalatedAt = %v, want %v", got.EscalatedAt, now)
+		}
+		if err := s.UpdateEscalatedAt(ctx, sev.ID, nil); err != nil {
+			t.Fatalf("UpdateEscalatedAt (clear): %v", err)
+		}
+		got, _ = s.Get(ctx, sev.ID)
+		if got.EscalatedAt != nil {
+			t.Fatal("expected EscalatedAt cleared")
+		}
+	})
+
+	t.Run("UpdateEscalatedAtNotFound", func(t *testing.T) {
+		now := time.Now()
+		if err := s.UpdateEscalatedAt(ctx, "missing", &now); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("UpdateSLANotifiedStatus", func(t *testing.T) {
+		atRisk := "at_risk"
+		if err := s.UpdateSLANotifiedStatus(ctx, sev.ID, &atRisk); err != nil {
+			t.Fatalf("UpdateSLANotifiedStatus: %v", err)
+		}
+		got, _ := s.Get(ctx, sev.ID)
+		if got.SLANotifiedStatus == nil || *got.SLANotifiedStatus != "at_risk" {
+			t.Fatalf("SLANotifiedStatus = %v, want at_risk", got.SLANotifiedStatus)
+		}
+
+		breached := "breached"
+		if err := s.UpdateSLANotifiedStatus(ctx, sev.ID, &breached); err != nil {
+			t.Fatalf("UpdateSLANotifiedStatus (escalate to breached): %v", err)
+		}
+		got, _ = s.Get(ctx, sev.ID)
+		if got.SLANotifiedStatus == nil || *got.SLANotifiedStatus != "breached" {
+			t.Fatalf("SLANotifiedStatus = %v, want breached", got.SLANotifiedStatus)
+		}
+	})
+
+	t.Run("UpdateSLANotifiedStatusNotFound", func(t *testing.T) {
+		status := "at_risk"
+		if err := s.UpdateSLANotifiedStatus(ctx, "missing", &status); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
 }
 
 // ── SEVStore filter/sort combinations (M08 search) ─────────────────────────────
@@ -2174,6 +2226,205 @@ func TestServiceLevelingCriteriaStore(t *testing.T) {
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		if err := s.Delete(ctx, "checkout", 1); err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound on second delete, got %v", err)
+		}
+	})
+}
+
+func TestNotificationConfigStore(t *testing.T) {
+	s := memory.NewNotificationConfigStore()
+
+	cfg := &store.NotificationConfig{
+		Role: store.OrgRoleIncidentCommander, Events: []string{"sev.created"},
+		ChannelType: store.NotificationChannelSlack, ChannelTarget: "#incidents",
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, cfg); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if cfg.ID == 0 {
+			t.Fatal("ID should be set on create")
+		}
+	})
+
+	t.Run("Update (replaces target, covers a second event)", func(t *testing.T) {
+		existingID := cfg.ID
+		updated := &store.NotificationConfig{
+			ID: existingID, Role: store.OrgRoleIncidentCommander,
+			Events:      []string{"sev.created", "sev.sla_breached"},
+			ChannelType: store.NotificationChannelSlack, ChannelTarget: "#incidents-v2",
+		}
+		if err := s.Update(ctx, updated); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if updated.ID != existingID {
+			t.Errorf("Update should preserve the ID, got %d want %d", updated.ID, existingID)
+		}
+	})
+
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		err := s.Update(ctx, &store.NotificationConfig{
+			ID: 999999, Role: store.OrgRoleAdmin, Events: []string{"sev.created"},
+			ChannelType: store.NotificationChannelSlack, ChannelTarget: "#x",
+		})
+		if err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound updating a nonexistent id, got %v", err)
+		}
+	})
+
+	t.Run("List", func(t *testing.T) {
+		other := &store.NotificationConfig{
+			Role: store.OrgRoleAdmin, Events: []string{"sev.created"},
+			ChannelType: store.NotificationChannelEmail, ChannelTarget: "mgmt@example.com", MaxSeverityLevel: int16p(2),
+		}
+		if err := s.Create(ctx, other); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		items, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2 rows, got %d", len(items))
+		}
+	})
+
+	t.Run("ListForEvent_MatchesEvent", func(t *testing.T) {
+		items, err := s.ListForEvent(ctx, "sev.created", nil)
+		if err != nil {
+			t.Fatalf("ListForEvent: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want both rules to match a nil severity filter, got %d", len(items))
+		}
+	})
+
+	t.Run("ListForEvent_MatchesSecondEventInMultiEventRule", func(t *testing.T) {
+		items, err := s.ListForEvent(ctx, "sev.sla_breached", nil)
+		if err != nil {
+			t.Fatalf("ListForEvent: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want the IC rule to match sev.sla_breached (its second event), got %d", len(items))
+		}
+		if items[0].Role != store.OrgRoleIncidentCommander {
+			t.Errorf("got role %q, want the IC rule", items[0].Role)
+		}
+	})
+
+	t.Run("ListForEvent_NoMatchingEvent", func(t *testing.T) {
+		items, err := s.ListForEvent(ctx, "sev.updated", nil)
+		if err != nil {
+			t.Fatalf("ListForEvent: %v", err)
+		}
+		if len(items) != 0 {
+			t.Fatalf("want 0 rows for an unrelated event, got %d", len(items))
+		}
+	})
+
+	t.Run("ListForEvent_SeverityFilter", func(t *testing.T) {
+		// The "mgmt" rule has MaxSeverityLevel=2 ("SEV-1/SEV-2 opens only").
+		lvl3 := int16(3)
+		items, err := s.ListForEvent(ctx, "sev.created", &lvl3)
+		if err != nil {
+			t.Fatalf("ListForEvent: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want only the unfiltered IC rule to match severity 3, got %d", len(items))
+		}
+		if items[0].Role != store.OrgRoleIncidentCommander {
+			t.Errorf("got role %q, want the IC rule", items[0].Role)
+		}
+
+		lvl1 := int16(1)
+		items, err = s.ListForEvent(ctx, "sev.created", &lvl1)
+		if err != nil {
+			t.Fatalf("ListForEvent: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want both rules to match severity 1 (more critical than max_severity_level=2), got %d", len(items))
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := s.Delete(ctx, cfg.ID); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		items, _ := s.List(ctx)
+		if len(items) != 1 {
+			t.Fatalf("want 1 row after delete, got %d", len(items))
+		}
+	})
+
+	t.Run("DeleteNotFound", func(t *testing.T) {
+		err := s.Delete(ctx, cfg.ID)
+		if err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound on second delete, got %v", err)
+		}
+	})
+}
+
+func int16p(v int16) *int16 { return &v }
+
+func TestEscalationConfigStore(t *testing.T) {
+	s := memory.NewEscalationConfigStore()
+
+	t.Run("PreSeededDisabled", func(t *testing.T) {
+		items, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 4 {
+			t.Fatalf("want 4 pre-seeded rows, got %d", len(items))
+		}
+		for _, cfg := range items {
+			if cfg.Enabled {
+				t.Errorf("severity %d: want disabled by default, got enabled", cfg.SeverityLevel)
+			}
+		}
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		cfg, err := s.Get(ctx, 1)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if cfg.SeverityLevel != 1 || cfg.Enabled {
+			t.Errorf("got %+v, want severity=1 enabled=false", cfg)
+		}
+	})
+
+	t.Run("GetOutOfRange", func(t *testing.T) {
+		if _, err := s.Get(ctx, 9); err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound for an out-of-range severity level, got %v", err)
+		}
+	})
+
+	t.Run("Upsert (preserves ID, updates fields)", func(t *testing.T) {
+		existing, _ := s.Get(ctx, 1)
+		updated := &store.EscalationConfig{SeverityLevel: 1, ThresholdMinutes: 30, Enabled: true}
+		if err := s.Upsert(ctx, updated); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if updated.ID != existing.ID {
+			t.Errorf("Upsert should preserve the existing ID, got %d want %d", updated.ID, existing.ID)
+		}
+		got, _ := s.Get(ctx, 1)
+		if got.ThresholdMinutes != 30 || !got.Enabled {
+			t.Errorf("got %+v, want threshold=30 enabled=true after update", got)
+		}
+	})
+
+	t.Run("List_ReflectsUpdate", func(t *testing.T) {
+		items, err := s.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(items) != 4 {
+			t.Fatalf("want 4 rows still, got %d", len(items))
+		}
+		if items[0].ThresholdMinutes != 30 || !items[0].Enabled {
+			t.Errorf("severity 1 (first in ascending order) = %+v, want threshold=30 enabled=true", items[0])
 		}
 	})
 }

@@ -1576,6 +1576,284 @@ before Phase 12, or in parallel with Phase 13.
 
 ---
 
+## Phase 15 — Notifications & Alerting
+
+**Status**: ✅ shipped, see [`demo/notifications-alerting.md`](../demo/notifications-alerting.md)
+
+`docs/requirements.md` §16 and §18.5 are the last major unimplemented section
+of the original functional spec: no `NotificationConfig` RPC/service and no
+admin page exist for any of it today. A `notification_config` table already
+sits in the schema (`migrations/000002_schema.up.sql`, columns `role`,
+`event`, `channel_type` (`slack`|`email`), `channel_target`) but nothing in
+the codebase reads or writes it — confirmed by grep, there is no store
+interface, no memory/postgres implementation, and no handler. What ships
+today instead is a partial substitute: live WebSocket updates in the web app,
+and hard-coded Slack pushes for status changes and `external`/`status-page`
+announcements (§13.1, `cmd/slackbot/notify.go`). This phase builds the real
+thing: an admin-configurable, role/event-driven routing table across Slack
+and (new) email, a SEV-1-without-IC escalation scanner, and — closing the
+exact gap Phase 12 and Phase 13 each explicitly deferred for "no
+notification layer exists yet" — a second scanner that fires once when a
+SEV's overall SLA status (`internal/sev.EvaluateSLA`) becomes at-risk, and
+again if it's later confirmed breached.
+
+The `notification_config` schema's shape (`role`, `event`, `channel_target` —
+no `user_id`, no `sev_id`) tells us the intended model: each row is a fixed
+broadcast route — "for org role X, on event Y, post to channel/address Z" —
+not per-user or per-incident personalization. Personalized delivery (e.g. DM
+the specific incident's actual assigned IC) is a different targeting model
+and is explicitly deferred, not built here.
+
+**15a. Backend: schema + store**
+
+- Migration `000020_notification_config.{up,down}.sql` (next free number
+  after `000019_service_leveling_criteria`):
+  - `ALTER TABLE notification_config ADD COLUMN max_severity_level SMALLINT;`
+    — nullable; `NULL` fires for every severity, a value `N` fires only when
+    the triggering SEV's `severity_level <= N`. This expresses "management
+    notified of SEV-1/SEV-2 opens only" as one row (`max_severity_level = 2`)
+    rather than inventing a new event type per severity band.
+  - New table `escalation_config`, mirroring `retention_config`'s
+    per-severity-level shape: `id BIGSERIAL PK`, `severity_level SMALLINT
+    NOT NULL CHECK (BETWEEN 1 AND 4) UNIQUE`, `threshold_minutes INT NOT
+    NULL`, `enabled BOOLEAN NOT NULL DEFAULT false`, `created_at`/`updated_at`.
+    All four severity levels pre-seeded disabled, matching
+    `internal/store/memory/retentionconfig.go`'s pre-seeded-defaults
+    precedent.
+  - `ALTER TABLE sevs ADD COLUMN escalated_at TIMESTAMPTZ;` — nullable,
+    set the first time the escalation scanner fires for a SEV so it notifies
+    once per incident rather than every scan interval; cleared back to
+    `NULL` once an Incident Commander is assigned or the SEV leaves
+    Open/Investigating.
+- `store.NotificationConfig` / `store.EscalationConfig` structs in
+  `internal/store/models.go`, doc-commented alongside `RetentionConfig`/`ServiceSLA`.
+- `store.NotificationConfigStore` (`internal/store/store.go`, next to
+  `ServiceLevelingCriteriaStore`): `Upsert`, `Delete(ctx, role, event,
+  channelType string)`, `List(ctx) ([]*NotificationConfig, error)` (admin
+  table — no per-service scoping needed), `ListForEvent(ctx, event string,
+  severityLevel *int16) ([]*NotificationConfig, error)` (what the dispatcher
+  calls; filters `max_severity_level` server-side).
+- `store.EscalationConfigStore`: `Upsert`, `Get(ctx, severityLevel int16)`,
+  `List(ctx) ([]*EscalationConfig, error)` — same 4-row CRUD shape as
+  `RetentionConfigStore`.
+- In-memory fakes (`internal/store/memory/notificationconfig.go`,
+  `escalationconfig.go`) and Postgres implementations + sqlc queries,
+  copying `service_leveling_criteria.go`'s file shape 1:1.
+- `store.SEVStore` gains a narrow `SetEscalatedAt(ctx, sevID string, at
+  *time.Time) error` mutator for the scanner — not a general-purpose field
+  update, matching this codebase's existing preference for narrow mutators
+  over widening `Update`.
+
+**15b. Backend: `internal/notify` — dispatch + escalation domain logic**
+
+New package `internal/notify`, parallel to `internal/telemetry`/`internal/share`:
+
+- `Event{Type string; SEV *store.SEV; Message string}` — `SEV` is nil for any
+  event type with no severity to filter on.
+- Consumer-owned interfaces (per this file's "interfaces belong to the
+  consumer" principle): `SlackSender interface { PostMessage(ctx, channel,
+  text string) error }` (already satisfied by
+  `internal/integrations/slack.Client`) and `EmailSender interface {
+  Send(ctx context.Context, to, subject, body string) error }` (satisfied by
+  the new `internal/integrations/email.Client`, 15d).
+- `Dispatcher{configs store.NotificationConfigStore, integrations
+  store.IntegrationConfigStore, crypto Encryptor, slackFactory func(botToken
+  string) SlackSender, emailFactory func(creds map[string]string)
+  EmailSender}`. `Notify(ctx, ev Event) error` is best-effort — logs and
+  swallows per-row delivery errors, never fails the caller's mutation,
+  exactly like `auditAppendBestEffort`'s contract — looks up
+  `configs.ListForEvent(ctx, ev.Type, severityLevelOf(ev.SEV))`, and for each
+  matching row builds the right client from `integrations.Get(ctx,
+  string(row.ChannelType))` (reusing `DecryptIntegrationCredentials`, exactly
+  as `internal/api/grpc/role.go` already does for Slack) and sends.
+- `EvaluateEscalations(ctx, sevs []*store.SEV, roles map[string][]*store.SEVRole,
+  configs []*store.EscalationConfig, now time.Time) []*store.SEV` — a pure,
+  table-testable function (same shape as `internal/sev/sla.go`'s
+  `EvaluateSLA`): for each open SEV with an enabled config at its severity
+  level and no `EscalatedAt` set, checks for an `SEVRoleIncidentCommander`
+  holder; if none and `now.Sub(sev.StartedAt) > threshold`, includes it.
+- Escalation scanner in `cmd/server/main.go`,
+  `startEscalationScanner(ctx, log, sevs store.SEVStore, roles
+  store.SEVRoleStore, escalations store.EscalationConfigStore, notifier
+  *notify.Dispatcher)`, identical ticker shape to `startMetricsRefresher`
+  (`main.go`'s existing `ticker`/`select { case <-ctx.Done(): / case
+  <-ticker.C: }` loop, started with a bare `go` call), `const
+  escalationScanInterval = 1 * time.Minute`. Per breach: `notifier.Notify(ctx,
+  notify.Event{Type: "sev.escalation_no_ic", SEV: sev})`, then
+  `sevs.SetEscalatedAt(ctx, sev.ID, &now)`.
+- SLA risk scanner, same ticker shape and 1-minute interval, in
+  `cmd/server/main.go`'s `startSLARiskScanner`/`scanSLARisk`. Wider status
+  filter than the escalation scan — includes Resolved and Postmortem In
+  Progress, since RTPC (`internal/sev.EvaluateSLA`, measured
+  ResolvedAt → PostmortemCompletedAt) is still live post-resolution.
+  Batches the `ServiceSLAStore.ListForServices` lookup by severity level
+  (at most 4 round-trips per scan, mirroring `report.go`'s
+  `serviceLevelMetrics`), reduces each SEV's attached services via
+  `sev.MostStrictSLA`, evaluates via `sev.EvaluateSLA`, and fires
+  `sev.sla_at_risk` the first time a SEV's `Overall` reads `at_risk`, or
+  `sev.sla_breached` the first time it reads `breached` — tracked via a new
+  `SEV.SLANotifiedStatus` marker (nullable string, "at_risk"/"breached")
+  so neither event re-fires for the same SEV once notified at that level.
+  Monotonic by construction: a SEV whose elapsed time already exceeds
+  target can only have its eventual final value land at or above that same
+  elapsed time, so `at_risk` can't un-happen short of an admin loosening
+  the SLA target or affected-services list after the fact (an accepted
+  edge case, not handled) — "breached" always takes priority in the
+  notify decision so a SEV that jumps straight from on-track to breached
+  (final value lands over target before ever reading at-risk) still gets
+  exactly one notification, not a skipped one.
+- Wire `notify.Dispatcher` into `SEVServer`, `AnnouncementServer`,
+  `PostmortemServer` (new `notifier *notify.Dispatcher` field on each,
+  threaded through their `*ServerParams` structs like every other shared
+  dependency), called right after the existing `publishProto`/`publishJSON`
+  call at each already-published event site (`sev.created`, `sev.updated`,
+  `sev.status_changed`, `announcement.created`), plus two new call sites:
+  `postmortem.go`'s transition-to-Resolved path (fires `postmortem.due`) and
+  transition-to-Approved path (fires `postmortem.approved`), reusing
+  `internal/postmortem/statemachine.go`'s existing transition validation.
+
+**15c. Backend: API surface**
+
+- `proto/sevitout/v1/config.proto`: `NotificationConfigResponse{role, event,
+  channel_type, channel_target, max_severity_level}`,
+  `UpsertNotificationConfigRequest`, `DeleteNotificationConfigRequest{role,
+  event, channel_type}`, `ListNotificationConfigsResponse{repeated
+  NotificationConfigResponse}`; same pattern for
+  `EscalationConfigResponse{severity_level, threshold_minutes, enabled}` +
+  Upsert/List. New RPCs on `ConfigService`: `UpsertNotificationConfig`/
+  `DeleteNotificationConfig`/`ListNotificationConfigs`,
+  `UpsertEscalationConfig`/`ListEscalationConfigs`.
+- New `internal/api/grpc/config_notification.go`, copying
+  `config_leveling_criteria.go`'s structure 1:1 (validation before store
+  access, `store.ErrNotFound` → `codes.NotFound`, `internalError(ctx, ...)`
+  fallback).
+- `internal/auth/rbac.go`: reads (`List*`) → `store.OrgRoleViewer`; writes
+  (`Upsert*`/`Delete*`) → `store.OrgRoleAdmin`, matching §18's "Admins are
+  the only role with write access to configuration resources."
+- `ConfigServer`/`ConfigServerParams` and `cmd/server/main.go`'s `Stores`
+  struct + memory/postgres instantiation each gain the two new store fields,
+  following the `ServiceLevelingCriteria` precedent exactly.
+
+**15d. Backend: email delivery + catalog entry**
+
+- New `internal/integrations/email` package: `Client{host string; port int;
+  username, password, from string}`, `NewClient(host string, port int,
+  username, password, from string) *Client`, `Send(ctx, to, subject, body
+  string) error` using `net/smtp` with `crypto/tls` STARTTLS — standard
+  library only, no new dependency, matching this codebase's existing
+  integration clients.
+- Extend `internal/integrations/catalog` with a 6th entry, "email":
+  credential fields `smtp_host`, `smtp_port`, `smtp_username`,
+  `smtp_password`, settings field `from_address`. `GetIntegrationCatalog` and
+  `UpsertIntegrationConfig`'s validation need no new code beyond the catalog
+  entry itself — confirming Phase 9's prediction that "a 6th integration is a
+  one-file catalog change."
+- `Dispatcher.emailFactory` (15b) builds an `email.Client` the same way
+  Slack's factory builds a Slack client: decrypt the "email" integration
+  config, construct, send.
+
+**15e. Frontend: admin Notifications page**
+
+- `web/src/lib/api.ts`: `api.config.notifications.{list, upsert, delete}` and
+  `api.config.escalation.{list, upsert}`, same one-line-arrow-function shape
+  as every existing `api.config.*` slice.
+- `web/src/types/api.ts`: `NotificationConfigResponse`,
+  `EscalationConfigResponse` and request types, doc-commented "Roadmap Phase
+  15" like every existing type in that file.
+- New `web/src/pages/admin/AdminNotificationsPage.tsx`: a routing-rules table
+  (role, event, channel type, channel target, max severity, delete) with an
+  "Add rule" form above it, built on `ServiceSLAEditor.tsx`'s
+  query/mutation/per-row-error pattern, plus a second `<Section>` for the
+  4-row (SEV-1..4) escalation threshold table modeled directly on
+  `AdminRetentionPage.tsx`'s existing per-severity-level table.
+- Register the route in `web/src/pages/admin/AdminRoutes.tsx` and add a tab
+  in `AdminLayout.tsx`'s `ADMIN_TABS` array — no new client-side role check
+  needed, the whole `/admin/*` subtree is already gated by `App.tsx`'s
+  `<ProtectedRoute minRole="admin">`.
+
+**15f. Tests + demo doc**
+
+- Go: `internal/notify/dispatcher_test.go` (event→row matching, severity
+  filtering, best-effort error swallowing) and `escalation_test.go`
+  (`EvaluateEscalations`: no-IC-and-over-threshold fires, IC-present doesn't,
+  already-escalated doesn't re-fire, disabled config doesn't fire); store
+  tests for both new stores mirroring `service_leveling_criteria_test.go`;
+  `config_notification_test.go` for RBAC floors and validation; additions to
+  `sev_test.go`/`announcement_test.go`/`postmortem_test.go` asserting the
+  notifier is invoked with the right event type at each call site.
+- Frontend: `AdminNotificationsPage.test.tsx` covering add/list/delete for
+  both tables.
+- `demo/notifications-alerting.md` (existing template: What was built /
+  Prerequisites / Walkthrough / Known limitations). Known limitations to
+  state: routing is role/event → fixed-channel broadcast, not per-user or
+  per-incident-assignee personal delivery; admin config mutations here are
+  unaudited, consistent with every sibling Config RPC (none of the
+  `config_*.go` handlers write to the audit log today); escalation only
+  checks for a missing Incident Commander, not any other role;
+  `sev.sla_at_risk`/`sev.sla_breached` fire on the SEV's `Overall` status
+  only (worst of MTTD/MTTM/MTTR/RTPC), not per-metric, and — like the
+  `at_risk`/`breached` state itself — an admin loosening a service's SLA
+  target after a SEV already read `at_risk` won't un-notify it.
+
+**Also considered and explicitly deferred**:
+
+- **Per-user notification preferences** (e.g. opt in/out of email pings) on
+  `ProfilePage.tsx` — no plumbing exists today (`WhoAmIResponse` has no such
+  field); a natural follow-up once the org-wide routing table above is in
+  place and there's a real need to override it per person.
+- **In-app toast/badge delivery** — the existing WS hub
+  (`internal/api/ws/hub.go`) is SEV-scoped per client with no per-user
+  filtering; a global cross-cutting in-app alert would need either a new
+  app-shell-level `BroadcastRoom` subscriber with client-side "is this for
+  me" filtering, or a separate delivery path. Out of scope; Slack/email
+  cover the requirement.
+- **Personal/per-incident delivery** (DM the specific SEV's actual assigned
+  IC/on-call, rather than a fixed broadcast channel for "whoever holds this
+  org role") — would reuse Phase 10's `SlackUserID`/email identity fields,
+  but is a materially different targeting model from the
+  `notification_config` schema as designed; scope as its own follow-up if
+  the broadcast model proves insufficient in practice.
+
+**Follow-up, shipped (migration `000022`)**: routing rules originally covered
+exactly one event each (`(role, event, channel_type)` as the natural key).
+Widened `notification_config.event` to `events TEXT[]` (`= ANY(...)`
+matching, the same idiom `sevs.affected_services`/`service_slas.service_id`
+already use) so one rule can cover several events — e.g. a single Slack
+rule for both `sev.sla_at_risk` and `sev.sla_breached` instead of two
+identical rows differing only in event. A multi-event rule can no longer
+serve as its own natural key, so `NotificationConfigStore`/the API moved
+from natural-key `Upsert`/`Delete` to `Create`/`Update`/`Delete` by `id`
+(the same shape `AIPluginStore` already uses) — see
+`demo/notifications-alerting.md` for the current exact schema, RPCs, and a
+live-verified walkthrough. The admin UI's event picker became a multi-select
+checkbox group; everything else about a rule (role, channel type, channel
+target, max severity) stayed single-valued, per the original design.
+
+**Follow-up, shipped ("Send test")**: `ConfigService.TestNotificationConfig`
+(POST `/v1/config/notifications/test`) sends one real test message per event
+straight to a rule's own channel — bypassing `ListForEvent`'s event/severity
+matching entirely — so an admin can verify a Slack channel or email address
+actually works without waiting for a real SEV. It takes the same fields as
+`CreateNotificationConfigRequest` (no `id`), so it works for an already-saved
+rule (the admin page's per-row "Send test" button, passing that row's
+current values) or a rule still being drafted in the Add-rule form (same
+button, enabled once role/events/channel/target are filled in). `Notifier`
+gained a parallel `Test` method that returns each event's delivery error to
+the caller instead of only logging it — `Notify`'s best-effort/never-block
+contract stays unchanged for real event dispatch; `Test` exists precisely to
+surface the error a real admin needs to see. Admin-only and unaudited, like
+every other `ConfigService` mutation.
+
+**Estimate**: ~7-9 days (15a ~1 day, 15b ~1.5-2 days, 15c ~1-1.5 days, 15d
+~1 day, 15e ~1-1.5 days, 15f ~1-1.25 days) — comparable to Phase 10's scope,
+since it spans a new schema, a new domain package, a new integration client,
+a new background worker, and a new admin page. **Depends on**: nothing
+already in the roadmap — reuses `Publisher`, `IntegrationConfigStore`/
+`DecryptIntegrationCredentials`, the integration catalog, and the
+`ConfigServer` wiring pattern, all already in place.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -1596,6 +1874,7 @@ before Phase 12, or in parallel with Phase 13.
 | 12 | Per-service SLA targets and breach indicators | — | 4.5-6 days |
 | 13 | Per-service SLA compliance reporting | 12 (except 13a's UX mockup) | 3.5-5.25 days |
 | 14 | Per-service SEV leveling criteria (guidance, not enforced) | — | 3-4.25 days |
+| 15 | Notifications & Alerting (routing + email + escalation) | — | 7-9 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -1630,7 +1909,15 @@ in. Phase 14 is likewise independent of every phase above it, including
 Phase 12's SLA editor, but shares no table or evaluation logic with
 `service_slas`/`sla.go`, so it can be sequenced whenever the leveling-
 guidance need becomes a priority, independently of where Phase 12/13
-stand.
+stand. Phase 15 is independent of every phase above it in the same way —
+it reuses the existing `Publisher`, `IntegrationConfigStore`/
+`DecryptIntegrationCredentials`, integration catalog, and `ConfigServer`
+wiring, but introduces its own schema, domain package, and background
+worker, sharing no table or evaluation logic with Phases 12-14. It is,
+however, the phase that Phases 12 and 13 each named as their own
+prerequisite for "automated breach notifications" / "automated alerts when
+compliance drops below a threshold" — those two follow-ups can only be
+built once Phase 15's routing table and dispatcher exist.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known

@@ -20,6 +20,15 @@ type SEVStore interface {
 	List(ctx context.Context, filter SEVFilter) ([]*SEV, error)
 	Count(ctx context.Context, filter SEVFilter) (int, error)
 	UpdateLocked(ctx context.Context, id string, locked bool) error
+	// UpdateEscalatedAt sets (or, with a nil at, clears) the EscalatedAt
+	// marker used by the escalation scanner (docs/roadmap.md Phase 15) — a
+	// narrow mutator, same shape as UpdateLocked, rather than widening
+	// Update.
+	UpdateEscalatedAt(ctx context.Context, id string, at *time.Time) error
+	// UpdateSLANotifiedStatus sets (or, with a nil status, clears) the
+	// SLANotifiedStatus marker used by the SLA risk scanner (docs/roadmap.md
+	// Phase 15) — a narrow mutator, same shape as UpdateEscalatedAt.
+	UpdateSLANotifiedStatus(ctx context.Context, id string, status *string) error
 }
 
 // PostmortemStore manages the postmortem document attached to each SEV.
@@ -148,6 +157,42 @@ type ServiceLevelingCriteriaStore interface {
 	// collapsing to a single value, since there's nothing to reduce guidance
 	// text to.
 	ListForServices(ctx context.Context, serviceIDs []string, severityLevel int16) ([]*ServiceLevelingCriteria, error)
+}
+
+// NotificationConfigStore manages admin-configured notification routing
+// rules (docs/roadmap.md Phase 15). Rules are ID-identified (like
+// AIPluginStore above), not keyed by their field values — see
+// NotificationConfig's doc comment for why (Role, Events, ChannelType)
+// stopped being a usable natural key once a rule could cover several
+// events.
+type NotificationConfigStore interface {
+	Create(ctx context.Context, cfg *NotificationConfig) error
+	// Update replaces the rule with cfg.ID (store.ErrNotFound if it doesn't
+	// exist).
+	Update(ctx context.Context, cfg *NotificationConfig) error
+	// Delete removes the rule with the given id (store.ErrNotFound if it
+	// doesn't exist).
+	Delete(ctx context.Context, id int64) error
+	// List returns every configured rule — what the admin page renders as
+	// its routing-rules table.
+	List(ctx context.Context) ([]*NotificationConfig, error)
+	// ListForEvent returns every rule whose Events contains event, filtered
+	// to rules whose MaxSeverityLevel is nil or >= severityLevel.
+	// severityLevel is nil for an event with no SEV to filter on (none exist
+	// today, but keeps the contract honest) — in that case every rule
+	// containing event matches regardless of its MaxSeverityLevel.
+	ListForEvent(ctx context.Context, event string, severityLevel *int16) ([]*NotificationConfig, error)
+}
+
+// EscalationConfigStore manages the per-severity-level escalation threshold
+// (docs/roadmap.md Phase 15).
+type EscalationConfigStore interface {
+	Get(ctx context.Context, severityLevel int16) (*EscalationConfig, error)
+	Upsert(ctx context.Context, cfg *EscalationConfig) error
+	// List returns every severity level's row (pre-seeded 1-4, disabled by
+	// default) — what the admin editor renders as its 4-row table and what
+	// the escalation scanner reads each cycle.
+	List(ctx context.Context) ([]*EscalationConfig, error)
 }
 
 // OnCallStore manages on-call rotation definitions and manual overrides.

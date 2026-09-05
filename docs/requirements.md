@@ -313,17 +313,20 @@ SEVs must be searchable and filterable across all records:
 
 ## 16. Notifications & Alerting
 
-**Not yet built** — no `NotificationConfig` RPC/service and no admin page
-exist for any of this today (a `notification_config` table exists in the
-schema, unused by any application code). What ships today: live WebSocket
-updates in the web app, and Slack channel pushes for status changes and
-`external`/`status-page` announcements (§13.1) — see
-`docs/user-guide.md` §17.
+**Shipped** (`docs/roadmap.md` Phase 15, `demo/notifications-alerting.md`) —
+`ConfigService.{Create,Update,Delete,List}NotificationConfig` and
+`{Upsert,List}EscalationConfig`, plus an admin page at `/admin/notifications`.
+Routing rules are a fixed broadcast route per (role, channel_type,
+channel_target) that can cover several event types at once — not per-user or
+per-incident-assignee personal delivery; see the demo doc's Known
+limitations. Live WebSocket updates and the pre-existing Slack channel
+pushes for status changes and `external`/`status-page` announcements (§13.1)
+continue to ship alongside this — see `docs/user-guide.md` §17.
 
-- Configurable notification channels: Slack, email
-- Notification triggers: SEV opened, status change, new announcement, postmortem due, postmortem approved
-- Role-based routing: IC notified of all changes; management notified of SEV-1/SEV-2 opens only
-- Escalation: alert if a SEV-1 has been open for > N minutes without an IC assigned (configurable threshold)
+- Configurable notification channels: Slack, email (new `internal/integrations/email`, a 6th admin-configurable integration)
+- Notification triggers: SEV opened, updated, status changed; announcement posted; postmortem due (on SEV resolve) and approved; a SEV's SLA (§18's per-service targets) becoming at-risk, and again if later confirmed breached
+- Role-based routing: each rule targets one org role's audience; an optional `max_severity_level` expresses e.g. "management notified of SEV-1/SEV-2 opens only"
+- Escalation: per-severity-level threshold — alert if a SEV has been open for > N minutes without an IC assigned, scanned once per minute
 
 ---
 
@@ -378,16 +381,20 @@ Sevitout maintains its own lightweight service registry:
     project/board setting — no consumer exists for it yet
   - **Monitoring**: tool type (a closed choice) and base URL, settings-only
     — no credentials, no live health check by design
+  - **Email** (Roadmap Phase 15): SMTP username/password as encrypted
+    credentials; SMTP host, port, and from-address as settings. Backs the
+    notification routing rules in §18.5 below. No live health check, same as
+    Monitoring — nothing to poll without sending a real test message.
 - Integration health status visible on the admin page (connected / error /
   not configured / no health check)
 
 ### 18.5 Notification & Escalation Settings
 
-**Not yet built** — see §16 above.
+**Shipped** (`docs/roadmap.md` Phase 15) — see §16 above.
 
-- Configure escalation thresholds (e.g., SEV-1 without IC after N minutes)
-- Configure which roles receive which notification events
-- Manage notification channel defaults (Slack channel, email list)
+- Configure escalation thresholds per severity level (e.g., SEV-1 without IC after N minutes) — `/admin/notifications`
+- Configure which roles receive which notification events (a rule may cover more than one event), and over which channel (Slack or email) — `ConfigService.{Create,Update,Delete,List}NotificationConfig`
+- Notification channel *targets* (a specific Slack channel or email address) are set per rule, not as a single org-wide default
 
 ### 18.6 AI Plugin Configuration
 

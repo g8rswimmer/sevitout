@@ -59,6 +59,8 @@ type ConfigServer struct {
 	services             store.ServiceStore
 	serviceSLAs          store.ServiceSLAStore
 	levelingCriteria     store.ServiceLevelingCriteriaStore
+	notificationConfigs  store.NotificationConfigStore
+	escalationConfigs    store.EscalationConfigStore
 	users                store.UserStore
 	oncall               store.OnCallStore
 	integrations         store.IntegrationConfigStore
@@ -68,6 +70,7 @@ type ConfigServer struct {
 	rateLimits           RateLimitEvictor                  // nil is a no-op (e.g. in tests that don't wire a Dispatcher)
 	refreshers           []IntegrationCredentialsRefresher // notified after every successful UpsertIntegrationConfig
 	slackbotServiceEmail string                            // gates GetSlackBotCredential; see its doc comment
+	notifier             *Notifier                         // TestNotificationConfig only; nil-safe (Notifier.Test no-ops on nil)
 }
 
 // ConfigServerParams groups NewConfigServer's dependencies. Crypto may be
@@ -81,6 +84,8 @@ type ConfigServerParams struct {
 	Services             store.ServiceStore
 	ServiceSLAs          store.ServiceSLAStore
 	LevelingCriteria     store.ServiceLevelingCriteriaStore
+	NotificationConfigs  store.NotificationConfigStore
+	EscalationConfigs    store.EscalationConfigStore
 	Users                store.UserStore
 	OnCall               store.OnCallStore
 	Integrations         store.IntegrationConfigStore
@@ -90,6 +95,7 @@ type ConfigServerParams struct {
 	RateLimits           RateLimitEvictor
 	Refreshers           []IntegrationCredentialsRefresher
 	SlackbotServiceEmail string
+	Notifier             *Notifier // TestNotificationConfig only; may be nil
 }
 
 func NewConfigServer(p ConfigServerParams) *ConfigServer {
@@ -97,6 +103,8 @@ func NewConfigServer(p ConfigServerParams) *ConfigServer {
 		services:             p.Services,
 		serviceSLAs:          p.ServiceSLAs,
 		levelingCriteria:     p.LevelingCriteria,
+		notificationConfigs:  p.NotificationConfigs,
+		escalationConfigs:    p.EscalationConfigs,
 		users:                p.Users,
 		oncall:               p.OnCall,
 		integrations:         p.Integrations,
@@ -106,6 +114,7 @@ func NewConfigServer(p ConfigServerParams) *ConfigServer {
 		rateLimits:           p.RateLimits,
 		refreshers:           p.Refreshers,
 		slackbotServiceEmail: p.SlackbotServiceEmail,
+		notifier:             p.Notifier,
 	}
 }
 

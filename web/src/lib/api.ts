@@ -8,6 +8,7 @@ import type {
   CreateAIPluginRequest,
   CreateGitHubIssueRequest,
   CreateJiraIssueRequest,
+  CreateNotificationConfigRequest,
   CreateOnCallRotationRequest,
   CreateSEVRequest,
   CreateServiceRequest,
@@ -15,6 +16,7 @@ import type {
   DashboardMetricsResponse,
   AddChatEntryRequest,
   AIOutputResponse,
+  EscalationConfigResponse,
   ExportSEVsParams,
   GetIntegrationCatalogResponse,
   GrantAccessRequest,
@@ -29,10 +31,12 @@ import type {
   ListAnnouncementsResponse,
   ListChatEntriesResponse,
   ListEnabledIntegrationsResponse,
+  ListEscalationConfigsResponse,
   ListIntegrationConfigsResponse,
   ListLevelingCriteriaForServicesResponse,
   ListLevelingCriteriaResponse,
   ListLinkedSEVsResponse,
+  ListNotificationConfigsResponse,
   ListOnCallRotationsResponse,
   ListPluginsResponse,
   ListRetentionConfigResponse,
@@ -44,6 +48,7 @@ import type {
   ListTasksResponse,
   ListUserDirectoryResponse,
   ListUsersResponse,
+  NotificationConfigResponse,
   OnCallRotationResponse,
   PostmortemResponse,
   RetentionConfigResponse,
@@ -60,6 +65,8 @@ import type {
   ShareLinkResponse,
   SharedSEVResponse,
   TaskResponse,
+  TestNotificationConfigRequest,
+  TestNotificationConfigResponse,
   TransitionPostmortemStatusRequest,
   TransitionStatusRequest,
   TriggerActionRequest,
@@ -67,12 +74,14 @@ import type {
   UnlockSEVResponse,
   UpdateAIPluginRequest,
   UpdateMyIntegrationIdentitiesRequest,
+  UpdateNotificationConfigRequest,
   UpdateOnCallRotationRequest,
   UpdatePostmortemRequest,
   UpdateRetentionConfigRequest,
   UpdateSEVRequest,
   UpdateServiceRequest,
   UpdateUserRoleRequest,
+  UpsertEscalationConfigRequest,
   UpsertIntegrationConfigRequest,
   UpsertLevelingCriteriaRequest,
   UpsertServiceSLARequest,
@@ -469,6 +478,43 @@ export const api = {
         request<ListLevelingCriteriaForServicesResponse>(
           `/v1/config/leveling-criteria${buildQuery({ service_ids: serviceIds, severity_level: severityLevel })}`,
         ),
+    },
+    // Notifications & Alerting (Roadmap Phase 15) — admin-configured Slack/
+    // email routing rules; a fixed broadcast route per rule, not per-user
+    // delivery. Rules are id-identified (create/update/delete by id, same
+    // shape as aiPlugins below) since a rule covering several events can no
+    // longer be addressed by its field values.
+    notifications: {
+      list: () => request<ListNotificationConfigsResponse>('/v1/config/notifications'),
+      create: (req: CreateNotificationConfigRequest) =>
+        request<NotificationConfigResponse>('/v1/config/notifications', { method: 'POST', body: JSON.stringify(req) }),
+      update: (id: string, req: UpdateNotificationConfigRequest) =>
+        request<NotificationConfigResponse>(`/v1/config/notifications/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(req),
+        }),
+      delete: (id: string) =>
+        request<void>(`/v1/config/notifications/${id}`, { method: 'DELETE' }),
+      // Sends one real test message per event straight to req's own
+      // channel_type/channel_target — no id involved, so it works for a
+      // saved rule (pass its current field values) or one still being
+      // drafted in the Add-rule form.
+      test: (req: TestNotificationConfigRequest) =>
+        request<TestNotificationConfigResponse>('/v1/config/notifications/test', {
+          method: 'POST',
+          body: JSON.stringify(req),
+        }),
+    },
+    // Per-severity-level escalation thresholds (Roadmap Phase 15) — "alert
+    // if a SEV has been open past this many minutes with no Incident
+    // Commander assigned."
+    escalation: {
+      list: () => request<ListEscalationConfigsResponse>('/v1/config/escalation'),
+      upsert: (severityLevel: number, req: UpsertEscalationConfigRequest) =>
+        request<EscalationConfigResponse>(`/v1/config/escalation/${severityLevel}`, {
+          method: 'PUT',
+          body: JSON.stringify(req),
+        }),
     },
     aiPlugins: {
       list: () => request<ListAIPluginsResponse>('/v1/config/ai-plugins'),

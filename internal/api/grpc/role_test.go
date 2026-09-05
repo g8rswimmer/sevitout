@@ -167,6 +167,56 @@ func TestAssignRole_ValidRequest(t *testing.T) {
 	}
 }
 
+func TestAssignRole_ClearsEscalatedAtOnICAssignment(t *testing.T) {
+	ts := newTestRoleServer()
+	ctx := context.Background()
+	sevID := seedSEVForRole(t, ts)
+
+	escalatedAt := time.Now()
+	if err := ts.sevs.UpdateEscalatedAt(ctx, sevID, &escalatedAt); err != nil {
+		t.Fatalf("seed EscalatedAt: %v", err)
+	}
+
+	if _, err := ts.server.AssignRole(ctx, &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleIncidentCommander), DisplayName: "Alice", CreatedBy: "user-1",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	got, err := ts.sevs.Get(ctx, sevID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.EscalatedAt != nil {
+		t.Error("want EscalatedAt cleared after an Incident Commander is assigned")
+	}
+}
+
+func TestAssignRole_NonICRoleDoesNotClearEscalatedAt(t *testing.T) {
+	ts := newTestRoleServer()
+	ctx := context.Background()
+	sevID := seedSEVForRole(t, ts)
+
+	escalatedAt := time.Now()
+	if err := ts.sevs.UpdateEscalatedAt(ctx, sevID, &escalatedAt); err != nil {
+		t.Fatalf("seed EscalatedAt: %v", err)
+	}
+
+	if _, err := ts.server.AssignRole(ctx, &pb.AssignRoleRequest{
+		SevId: sevID, RoleType: string(store.SEVRoleResponder), DisplayName: "Bob", CreatedBy: "user-1",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	got, err := ts.sevs.Get(ctx, sevID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.EscalatedAt == nil {
+		t.Error("want EscalatedAt left untouched by a non-IC role assignment")
+	}
+}
+
 func TestAssignRole_MissingSEVID(t *testing.T) {
 	ts := newTestRoleServer()
 	_, err := ts.server.AssignRole(context.Background(), &pb.AssignRoleRequest{

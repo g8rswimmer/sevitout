@@ -33,6 +33,7 @@ type PostmortemServer struct {
 	unlock      Unlocker
 	publisher   Publisher    // nil when WebSocket support is not wired up
 	aiDispatch  AIDispatcher // nil when no AI plugin is configured
+	notifier    *Notifier    // nil when no notification routing is configured (docs/roadmap.md Phase 15)
 }
 
 // PostmortemServerParams groups NewPostmortemServer's dependencies.
@@ -46,6 +47,7 @@ type PostmortemServerParams struct {
 	Unlock      Unlocker
 	Publisher   Publisher
 	AIDispatch  AIDispatcher
+	Notifier    *Notifier
 }
 
 // NewPostmortemServer returns a PostmortemServer backed by the given stores.
@@ -58,6 +60,7 @@ func NewPostmortemServer(p PostmortemServerParams) *PostmortemServer {
 		unlock:      p.Unlock,
 		publisher:   p.Publisher,
 		aiDispatch:  p.AIDispatch,
+		notifier:    p.Notifier,
 	}
 }
 
@@ -189,6 +192,9 @@ func (s *PostmortemServer) TransitionPostmortemStatus(ctx context.Context, req *
 	if sv, err := s.sevs.Get(ctx, req.GetSevId()); err == nil {
 		if !sv.Sensitive {
 			publishProto(s.publisher, req.GetSevId(), "postmortem.updated", resp)
+			if toStatus == store.PostmortemStatusApproved {
+				s.notifier.Notify(ctx, NotifyEvent{Type: "postmortem.approved", SEV: sv})
+			}
 		}
 		// Sensitive/AIDisabled gating is enforced centrally by ai.Dispatcher
 		// (see SEVServer.dispatchAI's doc comment) — not duplicated here.
