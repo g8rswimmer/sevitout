@@ -3,6 +3,7 @@ package grpc_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,76 @@ func TestNotifier_Notify_EventWithNoSEV_MatchesEveryRule(t *testing.T) {
 	}
 	if tn.slack.text != "hello" {
 		t.Errorf("text = %q, want the overriding Message %q", tn.slack.text, "hello")
+	}
+}
+
+func TestNotifier_Notify_MessageIncludesRealSEVIDNotJustSeverityLevel(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleAdmin, "sev.created", store.NotificationChannelSlack, "#incidents", nil)
+
+	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{
+		Type: "sev.created",
+		SEV:  &store.SEV{ID: "SEV-2026-0042", Title: "Checkout down", SeverityLevel: 1, Status: store.SEVStatusOpen},
+	})
+
+	if !strings.Contains(tn.slack.text, "SEV-2026-0042") {
+		t.Errorf("text = %q, want it to include the real case ID SEV-2026-0042, not just the severity level", tn.slack.text)
+	}
+}
+
+func TestNotifier_Notify_SlackIncludesIncidentChannelMentionWhenSet(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleAdmin, "sev.status_changed", store.NotificationChannelSlack, "#incidents", nil)
+
+	channelID := "C0123456"
+	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{
+		Type: "sev.status_changed",
+		SEV: &store.SEV{
+			ID: "SEV-2026-0042", Title: "Checkout down", SeverityLevel: 1,
+			Status: store.SEVStatusInvestigating, SlackChannelID: &channelID,
+		},
+	})
+
+	if !strings.Contains(tn.slack.text, "<#C0123456>") {
+		t.Errorf("text = %q, want it to include the incident channel mention <#C0123456>", tn.slack.text)
+	}
+}
+
+func TestNotifier_Notify_SlackOmitsChannelMentionWhenUnset(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	tn.addRule(t, store.OrgRoleAdmin, "sev.created", store.NotificationChannelSlack, "#incidents", nil)
+
+	// sev.created fires from the same event that triggers cmd/slackbot's
+	// channel creation in a separate process — SlackChannelID is normally
+	// still nil at this point (see notify.go's deliverSlack doc comment).
+	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{
+		Type: "sev.created",
+		SEV:  &store.SEV{ID: "SEV-2026-0042", Title: "Checkout down", SeverityLevel: 1, Status: store.SEVStatusOpen},
+	})
+
+	if strings.Contains(tn.slack.text, "Incident channel") {
+		t.Errorf("text = %q, want no channel mention when SlackChannelID is unset", tn.slack.text)
+	}
+}
+
+func TestNotifier_Notify_EmailIncludesSlackDeepLinkWhenChannelSet(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedEmailConfig(t, "smtpuser", "smtppass")
+	tn.addRule(t, store.OrgRoleAdmin, "sev.status_changed", store.NotificationChannelEmail, "oncall@example.com", nil)
+
+	channelID := "C0123456"
+	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{
+		Type: "sev.status_changed",
+		SEV: &store.SEV{
+			ID: "SEV-2026-0042", Title: "Checkout down", SeverityLevel: 1,
+			Status: store.SEVStatusInvestigating, SlackChannelID: &channelID,
+		},
+	})
+
+	if !strings.Contains(tn.email.body, "https://slack.com/app_redirect?channel=C0123456") {
+		t.Errorf("body = %q, want it to include the Slack deep link", tn.email.body)
 	}
 }

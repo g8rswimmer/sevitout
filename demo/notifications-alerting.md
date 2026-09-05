@@ -33,7 +33,17 @@ later confirmed breached.
   matching an event (filtered by severity), builds a Slack or email client from
   the datastore's current integration config, and delivers. A missing/
   unconfigured integration, or a delivery error, is logged and skipped — it never
-  fails the mutation the event is attached to. Wired into `SEVServer`
+  fails the mutation the event is attached to. The rendered message includes
+  the SEV's real case ID (e.g. `SEV-2026-0042`, not just its 1-4 severity
+  level — an earlier version of this conflated the two), title, severity, and
+  status, plus — once `cmd/slackbot` has created the incident channel for
+  that SEV (§13.1) — a Slack channel mention (`<#CHANNELID>`, or a
+  `slack.com/app_redirect` deep link for email). That channel reference is
+  necessarily absent from the very first `sev.created` notification, since
+  it fires from the same event that triggers channel creation in a separate
+  process; it appears starting with the next event for that SEV
+  (`sev.updated`/`sev.status_changed`/etc.) once the channel exists. Wired
+  into `SEVServer`
   (`sev.created`, `sev.updated`, `sev.status_changed`, and `postmortem.due` on the
   move to Resolved), `AnnouncementServer` (`announcement.created`), and
   `PostmortemServer` (`postmortem.approved`) — right alongside each handler's
@@ -216,8 +226,11 @@ New/updated coverage:
 - `internal/api/grpc/notify_test.go`: `Notifier.Notify` — nil-receiver no-op, no
   matching rule delivers nothing, Slack delivery, email delivery, the
   `max_severity_level` filter (both sides), a rule routed to an unconfigured
-  integration skips gracefully, and a nil-SEV event still matches an unfiltered
-  rule.
+  integration skips gracefully, a nil-SEV event still matches an unfiltered
+  rule, the rendered message includes the real SEV case ID (not just its
+  severity level), the Slack channel mention appears when `SlackChannelID` is
+  set and is omitted when it isn't, and the email body includes the
+  equivalent Slack deep link when set.
 - `internal/api/grpc/config_notification_test.go`: Upsert/Delete/List for both
   `NotificationConfig` and `EscalationConfig` — validation of role/event/
   channel_type/severity/threshold, not-found mapping, and the pre-seeded 4-row

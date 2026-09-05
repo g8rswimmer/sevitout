@@ -111,7 +111,7 @@ func (n *Notifier) Notify(ctx context.Context, ev NotifyEvent) {
 func (n *Notifier) deliver(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) {
 	switch row.ChannelType {
 	case store.NotificationChannelSlack:
-		n.deliverSlack(ctx, row, notifyText(ev))
+		n.deliverSlack(ctx, row, ev)
 	case store.NotificationChannelEmail:
 		n.deliverEmail(ctx, row, ev)
 	default:
@@ -119,7 +119,7 @@ func (n *Notifier) deliver(ctx context.Context, row *store.NotificationConfig, e
 	}
 }
 
-func (n *Notifier) deliverSlack(ctx context.Context, row *store.NotificationConfig, text string) {
+func (n *Notifier) deliverSlack(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) {
 	if n.slackFactory == nil || n.integrations == nil {
 		return
 	}
@@ -131,6 +131,19 @@ func (n *Notifier) deliverSlack(ctx context.Context, row *store.NotificationConf
 	botToken := creds["bot_token"]
 	if botToken == "" {
 		return
+	}
+	text := notifyText(ev)
+	// <#CHANNELID> is Slack's own channel-mention syntax — it renders as a
+	// clickable "#channel-name" link regardless of the posting channel, no
+	// separate name lookup needed. Only ever populated once cmd/slackbot has
+	// created the incident channel for this SEV (§13.1) — a race against the
+	// very first "sev.created" notification, which fires from the same event
+	// that triggers that channel's creation in a separate process, so it's
+	// normal for that one delivery to go out without this line and a later
+	// event (sev.updated/status_changed) to include it once the channel
+	// exists.
+	if ev.SEV != nil && ev.SEV.SlackChannelID != nil && *ev.SEV.SlackChannelID != "" {
+		text = fmt.Sprintf("%s\nIncident channel: <#%s>", text, *ev.SEV.SlackChannelID)
 	}
 	if err := n.slackFactory(botToken).PostMessage(ctx, row.ChannelTarget, text); err != nil {
 		slog.ErrorContext(ctx, "notify: slack delivery failed", "channel", row.ChannelTarget, "event", row.Event, "err", err)
@@ -163,7 +176,15 @@ func (n *Notifier) deliverEmail(ctx context.Context, row *store.NotificationConf
 	if merged["smtp_host"] == "" || merged["from_address"] == "" {
 		return
 	}
-	if err := n.emailFactory(merged).Send(ctx, row.ChannelTarget, notifySubject(ev), notifyText(ev)); err != nil {
+	body := notifyText(ev)
+	if ev.SEV != nil && ev.SEV.SlackChannelID != nil && *ev.SEV.SlackChannelID != "" {
+		// Slack's universal deep link — works from any workspace context,
+		// unlike a workspace-specific https://<team>.slack.com/... URL, which
+		// this codebase has no clean way to construct (see catalog's "slack"
+		// entry: no team/workspace domain is stored, only the bot token).
+		body = fmt.Sprintf("%s\nSlack channel: https://slack.com/app_redirect?channel=%s", body, *ev.SEV.SlackChannelID)
+	}
+	if err := n.emailFactory(merged).Send(ctx, row.ChannelTarget, notifySubject(ev), body); err != nil {
 		slog.ErrorContext(ctx, "notify: email delivery failed", "to", row.ChannelTarget, "event", row.Event, "err", err)
 	}
 }
@@ -176,10 +197,14 @@ func (n *Notifier) decryptedIntegration(ctx context.Context, integrationType str
 	return DecryptIntegrationCredentials(n.crypto, cfg)
 }
 
-// notifySubject renders an email subject line for ev.
+// notifySubject renders an email subject line for ev. ev.SEV.ID is the
+// human-readable case number (e.g. "SEV-2026-0042", docs/requirements.md
+// §4.1) — not to be confused with ev.SEV.SeverityLevel (an int16, 1-4),
+// which gets its own "severity N" label instead of overloading the
+// "SEV-" prefix, a confusion an earlier version of this function had.
 func notifySubject(ev NotifyEvent) string {
 	if ev.SEV != nil {
-		return fmt.Sprintf("[Sevitout] SEV-%d %s: %s", ev.SEV.SeverityLevel, ev.Type, ev.SEV.Title)
+		return fmt.Sprintf("[Sevitout] %s (%s, severity %d): %s", ev.Type, ev.SEV.ID, ev.SEV.SeverityLevel, ev.SEV.Title)
 	}
 	return fmt.Sprintf("[Sevitout] %s", ev.Type)
 }
@@ -191,7 +216,7 @@ func notifyText(ev NotifyEvent) string {
 		return ev.Message
 	}
 	if ev.SEV != nil {
-		return fmt.Sprintf("%s: SEV-%d %s (%s)", ev.Type, ev.SEV.SeverityLevel, ev.SEV.Title, ev.SEV.Status)
+		return fmt.Sprintf("%s: %s — %q (severity %d, %s)", ev.Type, ev.SEV.ID, ev.SEV.Title, ev.SEV.SeverityLevel, ev.SEV.Status)
 	}
 	return ev.Type
 }
