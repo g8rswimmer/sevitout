@@ -117,9 +117,11 @@ var rpcMinRole = map[string]store.OrgRole{
 	// Phase 15) — reads sit at the same Viewer floor as ServiceSLA/
 	// LevelingCriteria; mutations are Admin-only per §18's "Admins are the
 	// only role with write access to configuration resources."
-	"/sevitout.v1.ConfigService/UpsertNotificationConfig": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/CreateNotificationConfig": store.OrgRoleAdmin,
+	"/sevitout.v1.ConfigService/UpdateNotificationConfig": store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/DeleteNotificationConfig": store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/ListNotificationConfigs":  store.OrgRoleViewer,
+	"/sevitout.v1.ConfigService/TestNotificationConfig":   store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/UpsertEscalationConfig":   store.OrgRoleAdmin,
 	"/sevitout.v1.ConfigService/ListEscalationConfigs":    store.OrgRoleViewer,
 	"/sevitout.v1.ConfigService/ListUsers":                store.OrgRoleAdmin,

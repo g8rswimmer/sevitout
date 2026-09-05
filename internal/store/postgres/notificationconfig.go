@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/g8rswimmer/sevitout/internal/store"
@@ -23,18 +25,18 @@ func NewNotificationConfigStore(pool *pgxpool.Pool) *NotificationConfigStore {
 	return &NotificationConfigStore{pool: pool}
 }
 
-func (s *NotificationConfigStore) Upsert(ctx context.Context, cfg *store.NotificationConfig) error {
+func (s *NotificationConfigStore) Create(ctx context.Context, cfg *store.NotificationConfig) error {
 	q := queries.New(s.pool)
 
-	row, err := q.UpsertNotificationConfig(ctx, queries.UpsertNotificationConfigParams{
+	row, err := q.CreateNotificationConfig(ctx, queries.CreateNotificationConfigParams{
 		Role:             string(cfg.Role),
-		Event:            cfg.Event,
+		Events:           cfg.Events,
 		ChannelType:      string(cfg.ChannelType),
 		ChannelTarget:    cfg.ChannelTarget,
 		MaxSeverityLevel: cfg.MaxSeverityLevel,
 	})
 	if err != nil {
-		return fmt.Errorf("postgres notification config: upsert: %w", err)
+		return fmt.Errorf("postgres notification config: create: %w", err)
 	}
 	cfg.ID = row.ID
 	cfg.CreatedAt = row.CreatedAt.Time
@@ -42,14 +44,32 @@ func (s *NotificationConfigStore) Upsert(ctx context.Context, cfg *store.Notific
 	return nil
 }
 
-func (s *NotificationConfigStore) Delete(ctx context.Context, role store.OrgRole, event string, channelType store.NotificationChannelType) error {
+func (s *NotificationConfigStore) Update(ctx context.Context, cfg *store.NotificationConfig) error {
 	q := queries.New(s.pool)
 
-	n, err := q.DeleteNotificationConfig(ctx, queries.DeleteNotificationConfigParams{
-		Role:        string(role),
-		Event:       event,
-		ChannelType: string(channelType),
+	row, err := q.UpdateNotificationConfig(ctx, queries.UpdateNotificationConfigParams{
+		ID:               cfg.ID,
+		Role:             string(cfg.Role),
+		Events:           cfg.Events,
+		ChannelType:      string(cfg.ChannelType),
+		ChannelTarget:    cfg.ChannelTarget,
+		MaxSeverityLevel: cfg.MaxSeverityLevel,
 	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		return fmt.Errorf("postgres notification config: update: %w", err)
+	}
+	cfg.CreatedAt = row.CreatedAt.Time
+	cfg.UpdatedAt = row.UpdatedAt.Time
+	return nil
+}
+
+func (s *NotificationConfigStore) Delete(ctx context.Context, id int64) error {
+	q := queries.New(s.pool)
+
+	n, err := q.DeleteNotificationConfig(ctx, id)
 	if err != nil {
 		return fmt.Errorf("postgres notification config: delete: %w", err)
 	}
@@ -71,7 +91,7 @@ func (s *NotificationConfigStore) List(ctx context.Context) ([]*store.Notificati
 		out = append(out, &store.NotificationConfig{
 			ID:               r.ID,
 			Role:             store.OrgRole(r.Role),
-			Event:            r.Event,
+			Events:           r.Events,
 			ChannelType:      store.NotificationChannelType(r.ChannelType),
 			ChannelTarget:    r.ChannelTarget,
 			MaxSeverityLevel: r.MaxSeverityLevel,
@@ -97,7 +117,7 @@ func (s *NotificationConfigStore) ListForEvent(ctx context.Context, event string
 		out = append(out, &store.NotificationConfig{
 			ID:               r.ID,
 			Role:             store.OrgRole(r.Role),
-			Event:            r.Event,
+			Events:           r.Events,
 			ChannelType:      store.NotificationChannelType(r.ChannelType),
 			ChannelTarget:    r.ChannelTarget,
 			MaxSeverityLevel: r.MaxSeverityLevel,

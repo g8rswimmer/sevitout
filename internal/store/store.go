@@ -160,19 +160,27 @@ type ServiceLevelingCriteriaStore interface {
 }
 
 // NotificationConfigStore manages admin-configured notification routing
-// rules (docs/roadmap.md Phase 15).
+// rules (docs/roadmap.md Phase 15). Rules are ID-identified (like
+// AIPluginStore above), not keyed by their field values — see
+// NotificationConfig's doc comment for why (Role, Events, ChannelType)
+// stopped being a usable natural key once a rule could cover several
+// events.
 type NotificationConfigStore interface {
-	// Upsert creates or replaces the rule for (Role, Event, ChannelType).
-	Upsert(ctx context.Context, cfg *NotificationConfig) error
-	Delete(ctx context.Context, role OrgRole, event string, channelType NotificationChannelType) error
+	Create(ctx context.Context, cfg *NotificationConfig) error
+	// Update replaces the rule with cfg.ID (store.ErrNotFound if it doesn't
+	// exist).
+	Update(ctx context.Context, cfg *NotificationConfig) error
+	// Delete removes the rule with the given id (store.ErrNotFound if it
+	// doesn't exist).
+	Delete(ctx context.Context, id int64) error
 	// List returns every configured rule — what the admin page renders as
 	// its routing-rules table.
 	List(ctx context.Context) ([]*NotificationConfig, error)
-	// ListForEvent returns every rule matching event, filtered to rules whose
-	// MaxSeverityLevel is nil or >= severityLevel. severityLevel is nil for
-	// an event with no SEV to filter on (none exist today, but keeps the
-	// contract honest) — in that case every rule for event matches
-	// regardless of its MaxSeverityLevel.
+	// ListForEvent returns every rule whose Events contains event, filtered
+	// to rules whose MaxSeverityLevel is nil or >= severityLevel.
+	// severityLevel is nil for an event with no SEV to filter on (none exist
+	// today, but keeps the contract honest) — in that case every rule
+	// containing event matches regardless of its MaxSeverityLevel.
 	ListForEvent(ctx context.Context, event string, severityLevel *int16) ([]*NotificationConfig, error)
 }
 

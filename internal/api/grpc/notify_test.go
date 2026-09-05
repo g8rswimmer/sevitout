@@ -97,8 +97,13 @@ func (tn *testNotifier) seedIntegration(t *testing.T, integrationType string, cr
 
 func (tn *testNotifier) addRule(t *testing.T, role store.OrgRole, event string, channelType store.NotificationChannelType, target string, maxSeverity *int16) {
 	t.Helper()
-	if err := tn.configs.Upsert(context.Background(), &store.NotificationConfig{
-		Role: role, Event: event, ChannelType: channelType, ChannelTarget: target, MaxSeverityLevel: maxSeverity,
+	tn.addRuleForEvents(t, role, []string{event}, channelType, target, maxSeverity)
+}
+
+func (tn *testNotifier) addRuleForEvents(t *testing.T, role store.OrgRole, events []string, channelType store.NotificationChannelType, target string, maxSeverity *int16) {
+	t.Helper()
+	if err := tn.configs.Create(context.Background(), &store.NotificationConfig{
+		Role: role, Events: events, ChannelType: channelType, ChannelTarget: target, MaxSeverityLevel: maxSeverity,
 	}); err != nil {
 		t.Fatalf("addRule: %v", err)
 	}
@@ -181,6 +186,36 @@ func TestNotifier_Notify_SeverityFilter(t *testing.T) {
 	}
 }
 
+func TestNotifier_Notify_MultiEventRule_MatchesEitherEvent(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+	// One rule covering two events, rather than a separate row per event.
+	tn.addRuleForEvents(t, store.OrgRoleAdmin,
+		[]string{"sev.sla_at_risk", "sev.sla_breached"},
+		store.NotificationChannelSlack, "#sla-alerts", nil)
+
+	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{
+		Type: "sev.sla_at_risk", SEV: &store.SEV{ID: "sev-1", SeverityLevel: 1},
+	})
+	if tn.slack.calls != 1 {
+		t.Fatalf("want 1 delivery for sev.sla_at_risk, got %d", tn.slack.calls)
+	}
+
+	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{
+		Type: "sev.sla_breached", SEV: &store.SEV{ID: "sev-1", SeverityLevel: 1},
+	})
+	if tn.slack.calls != 2 {
+		t.Fatalf("want a 2nd delivery for sev.sla_breached (same rule, other event), got %d", tn.slack.calls)
+	}
+
+	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{
+		Type: "sev.created", SEV: &store.SEV{ID: "sev-1", SeverityLevel: 1},
+	})
+	if tn.slack.calls != 2 {
+		t.Fatalf("sev.created is not in the rule's event list and should not match, got %d deliveries", tn.slack.calls)
+	}
+}
+
 func TestNotifier_Notify_UnconfiguredIntegration_SkipsGracefully(t *testing.T) {
 	tn := newTestNotifier(t)
 	// A rule exists, but no "slack" integration config was ever seeded.
@@ -202,8 +237,8 @@ func TestNotifier_Notify_EventWithNoSEV_MatchesEveryRule(t *testing.T) {
 	// SEV is set here (escalation events always carry one), but confirm a
 	// nil-severity NotifyEvent (Message-only) still matches a rule with no
 	// MaxSeverityLevel filter at all.
-	tn.configs.Upsert(context.Background(), &store.NotificationConfig{
-		Role: store.OrgRoleAdmin, Event: "custom.event", ChannelType: store.NotificationChannelSlack, ChannelTarget: "#alerts",
+	tn.configs.Create(context.Background(), &store.NotificationConfig{
+		Role: store.OrgRoleAdmin, Events: []string{"custom.event"}, ChannelType: store.NotificationChannelSlack, ChannelTarget: "#alerts",
 	})
 	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{Type: "custom.event", Message: "hello"})
 	if tn.slack.calls != 1 {
@@ -282,5 +317,102 @@ func TestNotifier_Notify_EmailIncludesSlackDeepLinkWhenChannelSet(t *testing.T) 
 
 	if !strings.Contains(tn.email.body, "https://slack.com/app_redirect?channel=C0123456") {
 		t.Errorf("body = %q, want it to include the Slack deep link", tn.email.body)
+	}
+}
+
+func TestNotifier_Test_NilReceiver_NoOp(t *testing.T) {
+	var n *grpchandler.Notifier
+	if got := n.Test(context.Background(), &store.NotificationConfig{Events: []string{"sev.created"}}); got != nil {
+		t.Errorf("want nil result from a nil *Notifier, got %v", got)
+	}
+}
+
+func TestNotifier_Test_NilConfig_NoOp(t *testing.T) {
+	tn := newTestNotifier(t)
+	if got := tn.notifier.Test(context.Background(), nil); got != nil {
+		t.Errorf("want nil result for a nil cfg, got %v", got)
+	}
+}
+
+func TestNotifier_Test_OneResultPerEvent(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+
+	cfg := &store.NotificationConfig{
+		Role: store.OrgRoleAdmin, Events: []string{"sev.sla_at_risk", "sev.sla_breached"},
+		ChannelType: store.NotificationChannelSlack, ChannelTarget: "#sla-alerts",
+	}
+	results := tn.notifier.Test(context.Background(), cfg)
+
+	if len(results) != 2 {
+		t.Fatalf("want 2 results (one per event), got %d", len(results))
+	}
+	for i, want := range []string{"sev.sla_at_risk", "sev.sla_breached"} {
+		if results[i].Event != want {
+			t.Errorf("results[%d].Event = %q, want %q", i, results[i].Event, want)
+		}
+		if results[i].Err != nil {
+			t.Errorf("results[%d].Err = %v, want nil", i, results[i].Err)
+		}
+	}
+	if tn.slack.calls != 2 {
+		t.Errorf("want 2 slack deliveries, got %d", tn.slack.calls)
+	}
+	if tn.slack.channel != "#sla-alerts" {
+		t.Errorf("channel = %q, want %q", tn.slack.channel, "#sla-alerts")
+	}
+}
+
+func TestNotifier_Test_UnconfiguredIntegration_ReturnsError(t *testing.T) {
+	tn := newTestNotifier(t)
+	// No "slack" integration seeded at all.
+	cfg := &store.NotificationConfig{
+		Role: store.OrgRoleAdmin, Events: []string{"sev.created"},
+		ChannelType: store.NotificationChannelSlack, ChannelTarget: "#incidents",
+	}
+	results := tn.notifier.Test(context.Background(), cfg)
+
+	if len(results) != 1 {
+		t.Fatalf("want 1 result, got %d", len(results))
+	}
+	if results[0].Err == nil {
+		t.Error("want a non-nil error when the slack integration isn't configured")
+	}
+	if tn.slack.calls != 0 {
+		t.Errorf("want no delivery attempt to reach the fake sender, got %d calls", tn.slack.calls)
+	}
+}
+
+func TestNotifier_Test_IgnoresListForEventAndMaxSeverityLevel(t *testing.T) {
+	tn := newTestNotifier(t)
+	tn.seedSlackConfig(t, "xoxb-fake")
+
+	// No NotificationConfig rows exist in tn.configs at all — Test must not
+	// consult ListForEvent, so this still delivers based purely on cfg's own
+	// fields (and works for a rule that hasn't been saved yet, i.e. ID == 0).
+	// MaxSeverityLevel is set here specifically to confirm Test ignores it —
+	// there's no triggering SEV/severity for a manual test to filter against.
+	cfg := &store.NotificationConfig{
+		Role: store.OrgRoleAdmin, Events: []string{"sev.created"},
+		ChannelType: store.NotificationChannelSlack, ChannelTarget: "#incidents",
+		MaxSeverityLevel: int16p(1),
+	}
+	results := tn.notifier.Test(context.Background(), cfg)
+
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("want 1 successful result even with no saved rule and a MaxSeverityLevel set, got %+v", results)
+	}
+	if tn.slack.calls != 1 {
+		t.Errorf("want 1 delivery, got %d", tn.slack.calls)
+	}
+}
+
+func TestNotifier_Test_EmptyEvents_ReturnsEmptyResults(t *testing.T) {
+	tn := newTestNotifier(t)
+	cfg := &store.NotificationConfig{
+		Role: store.OrgRoleAdmin, ChannelType: store.NotificationChannelSlack, ChannelTarget: "#incidents",
+	}
+	if got := tn.notifier.Test(context.Background(), cfg); len(got) != 0 {
+		t.Errorf("want 0 results for a cfg with no events, got %d", len(got))
 	}
 }

@@ -11,19 +11,46 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteNotificationConfig = `-- name: DeleteNotificationConfig :execrows
-DELETE FROM notification_config
-WHERE role = $1 AND event = $2 AND channel_type = $3
+const createNotificationConfig = `-- name: CreateNotificationConfig :one
+INSERT INTO notification_config (role, events, channel_type, channel_target, max_severity_level, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+RETURNING id, created_at, updated_at
 `
 
-type DeleteNotificationConfigParams struct {
-	Role        string `json:"role"`
-	Event       string `json:"event"`
-	ChannelType string `json:"channel_type"`
+type CreateNotificationConfigParams struct {
+	Role             string   `json:"role"`
+	Events           []string `json:"events"`
+	ChannelType      string   `json:"channel_type"`
+	ChannelTarget    string   `json:"channel_target"`
+	MaxSeverityLevel *int16   `json:"max_severity_level"`
 }
 
-func (q *Queries) DeleteNotificationConfig(ctx context.Context, arg DeleteNotificationConfigParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteNotificationConfig, arg.Role, arg.Event, arg.ChannelType)
+type CreateNotificationConfigRow struct {
+	ID        int64              `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateNotificationConfig(ctx context.Context, arg CreateNotificationConfigParams) (CreateNotificationConfigRow, error) {
+	row := q.db.QueryRow(ctx, createNotificationConfig,
+		arg.Role,
+		arg.Events,
+		arg.ChannelType,
+		arg.ChannelTarget,
+		arg.MaxSeverityLevel,
+	)
+	var i CreateNotificationConfigRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
+const deleteNotificationConfig = `-- name: DeleteNotificationConfig :execrows
+DELETE FROM notification_config
+WHERE id = $1
+`
+
+func (q *Queries) DeleteNotificationConfig(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteNotificationConfig, id)
 	if err != nil {
 		return 0, err
 	}
@@ -31,15 +58,15 @@ func (q *Queries) DeleteNotificationConfig(ctx context.Context, arg DeleteNotifi
 }
 
 const listNotificationConfigs = `-- name: ListNotificationConfigs :many
-SELECT id, role, event, channel_type, channel_target, max_severity_level, created_at, updated_at
+SELECT id, role, events, channel_type, channel_target, max_severity_level, created_at, updated_at
 FROM notification_config
-ORDER BY role, event, channel_type
+ORDER BY role, channel_type, id
 `
 
 type ListNotificationConfigsRow struct {
 	ID               int64              `json:"id"`
 	Role             string             `json:"role"`
-	Event            string             `json:"event"`
+	Events           []string           `json:"events"`
 	ChannelType      string             `json:"channel_type"`
 	ChannelTarget    string             `json:"channel_target"`
 	MaxSeverityLevel *int16             `json:"max_severity_level"`
@@ -59,7 +86,7 @@ func (q *Queries) ListNotificationConfigs(ctx context.Context) ([]ListNotificati
 		if err := rows.Scan(
 			&i.ID,
 			&i.Role,
-			&i.Event,
+			&i.Events,
 			&i.ChannelType,
 			&i.ChannelTarget,
 			&i.MaxSeverityLevel,
@@ -77,9 +104,9 @@ func (q *Queries) ListNotificationConfigs(ctx context.Context) ([]ListNotificati
 }
 
 const listNotificationConfigsForEvent = `-- name: ListNotificationConfigsForEvent :many
-SELECT id, role, event, channel_type, channel_target, max_severity_level, created_at, updated_at
+SELECT id, role, events, channel_type, channel_target, max_severity_level, created_at, updated_at
 FROM notification_config
-WHERE event = $1
+WHERE $1::text = ANY(events)
   AND (max_severity_level IS NULL OR $2::smallint IS NULL OR max_severity_level >= $2)
 ORDER BY role, channel_type
 `
@@ -92,7 +119,7 @@ type ListNotificationConfigsForEventParams struct {
 type ListNotificationConfigsForEventRow struct {
 	ID               int64              `json:"id"`
 	Role             string             `json:"role"`
-	Event            string             `json:"event"`
+	Events           []string           `json:"events"`
 	ChannelType      string             `json:"channel_type"`
 	ChannelTarget    string             `json:"channel_target"`
 	MaxSeverityLevel *int16             `json:"max_severity_level"`
@@ -112,7 +139,7 @@ func (q *Queries) ListNotificationConfigsForEvent(ctx context.Context, arg ListN
 		if err := rows.Scan(
 			&i.ID,
 			&i.Role,
-			&i.Event,
+			&i.Events,
 			&i.ChannelType,
 			&i.ChannelTarget,
 			&i.MaxSeverityLevel,
@@ -129,39 +156,43 @@ func (q *Queries) ListNotificationConfigsForEvent(ctx context.Context, arg ListN
 	return items, nil
 }
 
-const upsertNotificationConfig = `-- name: UpsertNotificationConfig :one
-INSERT INTO notification_config (role, event, channel_type, channel_target, max_severity_level, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-ON CONFLICT (role, event, channel_type) DO UPDATE SET
-    channel_target     = EXCLUDED.channel_target,
-    max_severity_level = EXCLUDED.max_severity_level,
-    updated_at         = NOW()
+const updateNotificationConfig = `-- name: UpdateNotificationConfig :one
+UPDATE notification_config SET
+    role                = $2,
+    events              = $3,
+    channel_type        = $4,
+    channel_target      = $5,
+    max_severity_level  = $6,
+    updated_at          = NOW()
+WHERE id = $1
 RETURNING id, created_at, updated_at
 `
 
-type UpsertNotificationConfigParams struct {
-	Role             string `json:"role"`
-	Event            string `json:"event"`
-	ChannelType      string `json:"channel_type"`
-	ChannelTarget    string `json:"channel_target"`
-	MaxSeverityLevel *int16 `json:"max_severity_level"`
+type UpdateNotificationConfigParams struct {
+	ID               int64    `json:"id"`
+	Role             string   `json:"role"`
+	Events           []string `json:"events"`
+	ChannelType      string   `json:"channel_type"`
+	ChannelTarget    string   `json:"channel_target"`
+	MaxSeverityLevel *int16   `json:"max_severity_level"`
 }
 
-type UpsertNotificationConfigRow struct {
+type UpdateNotificationConfigRow struct {
 	ID        int64              `json:"id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) UpsertNotificationConfig(ctx context.Context, arg UpsertNotificationConfigParams) (UpsertNotificationConfigRow, error) {
-	row := q.db.QueryRow(ctx, upsertNotificationConfig,
+func (q *Queries) UpdateNotificationConfig(ctx context.Context, arg UpdateNotificationConfigParams) (UpdateNotificationConfigRow, error) {
+	row := q.db.QueryRow(ctx, updateNotificationConfig,
+		arg.ID,
 		arg.Role,
-		arg.Event,
+		arg.Events,
 		arg.ChannelType,
 		arg.ChannelTarget,
 		arg.MaxSeverityLevel,
 	)
-	var i UpsertNotificationConfigRow
+	var i UpdateNotificationConfigRow
 	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
 	return i, err
 }

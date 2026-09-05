@@ -25,6 +25,9 @@ Sevitout covers the full lifecycle of an incident:
   curated read-only view of a SEV publicly without a login.
 - **Run it from Slack** — open, update, transition, and resolve SEVs with
   slash commands; every SEV gets its own auto-created incident channel.
+- **Configure notification routing** — per-role, per-event rules across Slack
+  and email, plus automatic alerts when a SEV has been open too long with no
+  Incident Commander, or is approaching/has breached its SLA.
 - **Ask an AI plugin** to summarize, suggest a root cause, draft a
   postmortem, or suggest responders — proactively at key lifecycle
   transitions, or on demand.

@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Send, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -10,7 +10,12 @@ import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Section } from '@/components/sev/Section'
 import { formatDateTime } from '@/lib/format'
-import type { EscalationConfigResponse, NotificationConfigResponse } from '@/types/api'
+import type {
+  EscalationConfigResponse,
+  NotificationConfigResponse,
+  TestNotificationConfigRequest,
+  TestNotificationResult,
+} from '@/types/api'
 
 /** Every event this codebase actually dispatches a notification for
  * (internal/api/grpc/sev.go, announcement.go, postmortem.go, and
@@ -45,14 +50,20 @@ const SEVERITY_LEVELS = [1, 2, 3, 4]
 
 interface RuleForm {
   role: string
-  event: string
+  events: string[]
   channelType: string
   channelTarget: string
   maxSeverityLevel: string // '' = every severity
 }
 
 function emptyRuleForm(): RuleForm {
-  return { role: 'incident-commander', event: 'sev.created', channelType: 'slack', channelTarget: '', maxSeverityLevel: '' }
+  return {
+    role: 'incident-commander',
+    events: ['sev.created'],
+    channelType: 'slack',
+    channelTarget: '',
+    maxSeverityLevel: '',
+  }
 }
 
 function eventLabel(event: string): string {
@@ -63,11 +74,41 @@ function roleLabel(role: string): string {
   return ROLES.find((r) => r.value === role)?.label ?? role
 }
 
+/** Per-key (a rule's id, or 'draft' for the not-yet-saved Add-rule form)
+ * outcome of the last "Send test" click — results on success (one per
+ * event tested), error when the request itself failed (e.g. validation,
+ * permissions) before any delivery was attempted. */
+interface TestOutcome {
+  results?: TestNotificationResult[]
+  error?: string
+}
+
+function TestResultsList({ outcome }: { outcome?: TestOutcome }) {
+  if (!outcome) return null
+  if (outcome.error) {
+    return (
+      <p role="alert" className="mt-1 text-xs text-destructive">
+        {outcome.error}
+      </p>
+    )
+  }
+  return (
+    <ul className="mt-1 flex flex-col gap-0.5 text-xs">
+      {(outcome.results ?? []).map((r) => (
+        <li key={r.event} className={r.success ? 'text-muted-foreground' : 'text-destructive'}>
+          {eventLabel(r.event)}: {r.success ? 'sent' : r.error || 'failed'}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** Admin routing-rules + escalation-threshold editor (Roadmap Phase 15):
  * §16/§18.5's "configurable notification channels/triggers/role-based
  * routing" and "escalate a SEV-1 open too long with no IC." Each routing
- * rule is a fixed broadcast route — role/event/channel_type identify it,
- * channel_target is where it posts — not per-user personalized delivery. */
+ * rule is a fixed broadcast route to one channel_target for one role, that
+ * can cover several events at once — not per-user personalized delivery,
+ * and not a separate rule required per event. Rules are id-identified. */
 export function AdminNotificationsPage() {
   return (
     <div className="flex flex-col gap-4">
@@ -89,9 +130,9 @@ function NotificationRulesSection() {
 
   const addMutation = useMutation({
     mutationFn: () =>
-      api.config.notifications.upsert({
+      api.config.notifications.create({
         role: form.role,
-        event: form.event,
+        events: form.events,
         channel_type: form.channelType,
         channel_target: form.channelTarget,
         max_severity_level: form.maxSeverityLevel ? Number(form.maxSeverityLevel) : undefined,
@@ -101,15 +142,40 @@ function NotificationRulesSection() {
       setAdding(false)
       setForm(emptyRuleForm())
       setAddError(null)
+      setTestOutcomes((o) => {
+        const { draft: _draft, ...rest } = o
+        return rest
+      })
     },
     onError: (err) => setAddError(err instanceof ApiError ? err.message : 'Failed to add rule'),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (rule: NotificationConfigResponse) =>
-      api.config.notifications.delete(rule.role, rule.event, rule.channel_type),
+    mutationFn: (rule: NotificationConfigResponse) => api.config.notifications.delete(rule.id),
     onSuccess: invalidate,
   })
+
+  // Keyed by rule id, or 'draft' for the Add-rule form — lets an admin test
+  // a saved rule or one they haven't saved yet, without waiting for a real
+  // SEV event to see whether the channel/integration actually works.
+  const [testOutcomes, setTestOutcomes] = useState<Record<string, TestOutcome>>({})
+  const testMutation = useMutation({
+    mutationFn: ({ req }: { key: string; req: TestNotificationConfigRequest }) => api.config.notifications.test(req),
+    onSuccess: (resp, { key }) => setTestOutcomes((o) => ({ ...o, [key]: { results: resp.results } })),
+    onError: (err, { key }) =>
+      setTestOutcomes((o) => ({ ...o, [key]: { error: err instanceof ApiError ? err.message : 'Failed to send test' } })),
+  })
+
+  function sendTest(key: string, rule: TestNotificationConfigRequest) {
+    testMutation.mutate({ key, req: rule })
+  }
+
+  function toggleEvent(event: string) {
+    setForm((f) => ({
+      ...f,
+      events: f.events.includes(event) ? f.events.filter((e) => e !== event) : [...f.events, event],
+    }))
+  }
 
   const list = rules.data?.configs ?? []
 
@@ -142,15 +208,6 @@ function NotificationRulesSection() {
                 ))}
               </Select>
             </Field>
-            <Field label="Event" htmlFor="rule-new-event">
-              <Select id="rule-new-event" value={form.event} onChange={(e) => setForm({ ...form, event: e.target.value })}>
-                {NOTIFICATION_EVENTS.map((e) => (
-                  <option key={e.value} value={e.value}>
-                    {e.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
             <Field label="Channel type" htmlFor="rule-new-channel-type">
               <Select
                 id="rule-new-channel-type"
@@ -179,6 +236,20 @@ function NotificationRulesSection() {
               </Select>
             </Field>
           </div>
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="text-sm font-medium">Events</legend>
+            <p className="text-xs text-muted-foreground">
+              Select every event this rule should fire for — one rule can cover several.
+            </p>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              {NOTIFICATION_EVENTS.map((e) => (
+                <label key={e.value} className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={form.events.includes(e.value)} onChange={() => toggleEvent(e.value)} />
+                  {e.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <Field label="Channel target" htmlFor="rule-new-target">
             <Input
               id="rule-new-target"
@@ -192,14 +263,51 @@ function NotificationRulesSection() {
               {addError}
             </p>
           )}
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => addMutation.mutate()} disabled={addMutation.isPending || !form.channelTarget}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => addMutation.mutate()}
+              disabled={addMutation.isPending || !form.channelTarget || form.events.length === 0}
+            >
               {addMutation.isPending ? 'Adding…' : 'Add rule'}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setAdding(false)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                sendTest('draft', {
+                  role: form.role,
+                  events: form.events,
+                  channel_type: form.channelType,
+                  channel_target: form.channelTarget,
+                  max_severity_level: form.maxSeverityLevel ? Number(form.maxSeverityLevel) : undefined,
+                })
+              }
+              disabled={
+                (testMutation.isPending && testMutation.variables?.key === 'draft') ||
+                !form.channelTarget ||
+                form.events.length === 0
+              }
+              title="Send a real test message for every selected event, without saving this rule"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {testMutation.isPending && testMutation.variables?.key === 'draft' ? 'Sending…' : 'Send test'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setAdding(false)
+                setTestOutcomes((o) => {
+                  const { draft: _draft, ...rest } = o
+                  return rest
+                })
+              }}
+            >
               Cancel
             </Button>
           </div>
+          <TestResultsList outcome={testOutcomes.draft} />
         </div>
       )}
 
@@ -213,7 +321,7 @@ function NotificationRulesSection() {
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
                 <th className="py-2 pr-3">Role</th>
-                <th className="py-2 pr-3">Event</th>
+                <th className="py-2 pr-3">Events</th>
                 <th className="py-2 pr-3">Channel</th>
                 <th className="py-2 pr-3">Target</th>
                 <th className="py-2 pr-3">Max severity</th>
@@ -222,25 +330,63 @@ function NotificationRulesSection() {
             </thead>
             <tbody>
               {list.map((rule) => (
-                <tr key={`${rule.role}-${rule.event}-${rule.channel_type}`} className="border-b border-border last:border-0">
-                  <td className="py-2 pr-3">{roleLabel(rule.role)}</td>
-                  <td className="py-2 pr-3">{eventLabel(rule.event)}</td>
-                  <td className="py-2 pr-3 capitalize">{rule.channel_type}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{rule.channel_target}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">
-                    {rule.max_severity_level ? `SEV-${rule.max_severity_level}+` : 'Every severity'}
-                  </td>
-                  <td className="py-2 text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete rule for ${roleLabel(rule.role)} on ${eventLabel(rule.event)}`}
-                      onClick={() => deleteMutation.mutate(rule)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </td>
-                </tr>
+                <Fragment key={rule.id}>
+                  <tr className="border-b border-border align-top last:border-0">
+                    <td className="py-2 pr-3">{roleLabel(rule.role)}</td>
+                    <td className="py-2 pr-3">
+                      <div className="flex flex-wrap gap-1">
+                        {rule.events.map((event) => (
+                          <span
+                            key={event}
+                            className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                          >
+                            {eventLabel(event)}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3 capitalize">{rule.channel_type}</td>
+                    <td className="py-2 pr-3 text-muted-foreground">{rule.channel_target}</td>
+                    <td className="py-2 pr-3 text-muted-foreground">
+                      {rule.max_severity_level ? `SEV-${rule.max_severity_level}+` : 'Every severity'}
+                    </td>
+                    <td className="py-2 text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Send test notifications for ${roleLabel(rule.role)} on ${rule.events.map(eventLabel).join(', ')}`}
+                        title="Send a real test message for every event this rule covers"
+                        disabled={testMutation.isPending && testMutation.variables?.key === rule.id}
+                        onClick={() =>
+                          sendTest(rule.id, {
+                            role: rule.role,
+                            events: rule.events,
+                            channel_type: rule.channel_type,
+                            channel_target: rule.channel_target,
+                            max_severity_level: rule.max_severity_level,
+                          })
+                        }
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Delete rule for ${roleLabel(rule.role)} on ${rule.events.map(eventLabel).join(', ')}`}
+                        onClick={() => deleteMutation.mutate(rule)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                  {testOutcomes[rule.id] && (
+                    <tr className="border-b border-border last:border-0">
+                      <td colSpan={6} className="pb-2 pl-0">
+                        <TestResultsList outcome={testOutcomes[rule.id]} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

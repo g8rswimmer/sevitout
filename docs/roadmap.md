@@ -1814,6 +1814,36 @@ New package `internal/notify`, parallel to `internal/telemetry`/`internal/share`
   `notification_config` schema as designed; scope as its own follow-up if
   the broadcast model proves insufficient in practice.
 
+**Follow-up, shipped (migration `000022`)**: routing rules originally covered
+exactly one event each (`(role, event, channel_type)` as the natural key).
+Widened `notification_config.event` to `events TEXT[]` (`= ANY(...)`
+matching, the same idiom `sevs.affected_services`/`service_slas.service_id`
+already use) so one rule can cover several events — e.g. a single Slack
+rule for both `sev.sla_at_risk` and `sev.sla_breached` instead of two
+identical rows differing only in event. A multi-event rule can no longer
+serve as its own natural key, so `NotificationConfigStore`/the API moved
+from natural-key `Upsert`/`Delete` to `Create`/`Update`/`Delete` by `id`
+(the same shape `AIPluginStore` already uses) — see
+`demo/notifications-alerting.md` for the current exact schema, RPCs, and a
+live-verified walkthrough. The admin UI's event picker became a multi-select
+checkbox group; everything else about a rule (role, channel type, channel
+target, max severity) stayed single-valued, per the original design.
+
+**Follow-up, shipped ("Send test")**: `ConfigService.TestNotificationConfig`
+(POST `/v1/config/notifications/test`) sends one real test message per event
+straight to a rule's own channel — bypassing `ListForEvent`'s event/severity
+matching entirely — so an admin can verify a Slack channel or email address
+actually works without waiting for a real SEV. It takes the same fields as
+`CreateNotificationConfigRequest` (no `id`), so it works for an already-saved
+rule (the admin page's per-row "Send test" button, passing that row's
+current values) or a rule still being drafted in the Add-rule form (same
+button, enabled once role/events/channel/target are filled in). `Notifier`
+gained a parallel `Test` method that returns each event's delivery error to
+the caller instead of only logging it — `Notify`'s best-effort/never-block
+contract stays unchanged for real event dispatch; `Test` exists precisely to
+surface the error a real admin needs to see. Admin-only and unaudited, like
+every other `ConfigService` mutation.
+
 **Estimate**: ~7-9 days (15a ~1 day, 15b ~1.5-2 days, 15c ~1-1.5 days, 15d
 ~1 day, 15e ~1-1.5 days, 15f ~1-1.25 days) — comparable to Phase 10's scope,
 since it spans a new schema, a new domain package, a new integration client,

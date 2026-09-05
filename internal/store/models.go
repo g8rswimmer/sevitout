@@ -493,11 +493,20 @@ const (
 
 // NotificationConfig is one admin-configured notification routing rule
 // (docs/requirements.md §16/§18.5, docs/roadmap.md Phase 15): "for org Role,
-// on Event, post to ChannelType at ChannelTarget." A fixed broadcast
+// on any of Events, post to ChannelType at ChannelTarget." A fixed broadcast
 // route — there is no UserID or SEVID on this row — not per-user or
 // per-incident personalized delivery (e.g. DMing the specific SEV's actual
 // assigned IC is a different, deferred targeting model; see the roadmap
 // entry's "Also considered and explicitly deferred").
+//
+// Events must be non-empty. A rule matches an incoming event when that
+// event's type appears anywhere in Events — one rule can cover several
+// event types instead of requiring a separate row per event. Because Events
+// is no longer a single scalar, (Role, Event, ChannelType) stopped being a
+// meaningful natural key once this widened (two rules can share a role and
+// channel while covering different, or even overlapping, event sets); rules
+// are identified by ID from here on, not by their field values — see
+// NotificationConfigStore.Upsert/Delete.
 //
 // MaxSeverityLevel, when non-nil, restricts the rule to SEVs at that
 // severity level or more critical (severity 1 is the most critical) —
@@ -505,7 +514,7 @@ const (
 type NotificationConfig struct {
 	ID               int64
 	Role             OrgRole
-	Event            string
+	Events           []string
 	ChannelType      NotificationChannelType
 	ChannelTarget    string
 	MaxSeverityLevel *int16

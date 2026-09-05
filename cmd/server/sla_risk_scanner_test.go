@@ -42,12 +42,13 @@ func newTestSLANotifier(t *testing.T, slack *recordingSlackSender) *grpchandler.
 	}
 
 	configs := memory.NewNotificationConfigStore()
-	for _, event := range []string{"sev.sla_at_risk", "sev.sla_breached"} {
-		if err := configs.Upsert(context.Background(), &store.NotificationConfig{
-			Role: store.OrgRoleAdmin, Event: event, ChannelType: store.NotificationChannelSlack, ChannelTarget: "#alerts",
-		}); err != nil {
-			t.Fatalf("seed notification config for %s: %v", event, err)
-		}
+	// One rule covering both events — exercises the multi-event rule shape
+	// rather than one row per event.
+	if err := configs.Create(context.Background(), &store.NotificationConfig{
+		Role: store.OrgRoleAdmin, Events: []string{"sev.sla_at_risk", "sev.sla_breached"},
+		ChannelType: store.NotificationChannelSlack, ChannelTarget: "#alerts",
+	}); err != nil {
+		t.Fatalf("seed notification config: %v", err)
 	}
 
 	return grpchandler.NewNotifier(grpchandler.NotifierParams{

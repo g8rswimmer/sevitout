@@ -55,8 +55,8 @@ func newTestEscalationNotifier(t *testing.T, slack *recordingSlackSender) *grpch
 	}
 
 	configs := memory.NewNotificationConfigStore()
-	if err := configs.Upsert(context.Background(), &store.NotificationConfig{
-		Role: store.OrgRoleAdmin, Event: "sev.escalation_no_ic", ChannelType: store.NotificationChannelSlack, ChannelTarget: "#alerts",
+	if err := configs.Create(context.Background(), &store.NotificationConfig{
+		Role: store.OrgRoleAdmin, Events: []string{"sev.escalation_no_ic"}, ChannelType: store.NotificationChannelSlack, ChannelTarget: "#alerts",
 	}); err != nil {
 		t.Fatalf("seed notification config: %v", err)
 	}

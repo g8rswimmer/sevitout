@@ -931,14 +931,20 @@ export interface UpsertLevelingCriteriaRequest {
 }
 
 /** One admin-configured notification routing rule (Roadmap Phase 15): "for
- * org role X, on event Y, post to channel_type at channel_target." A fixed
- * broadcast route, not per-user or per-incident personalized delivery.
+ * org role X, on any of events Y, post to channel_type at channel_target." A
+ * fixed broadcast route, not per-user or per-incident personalized delivery.
+ * events is non-empty — a rule matches an incoming event when that event's
+ * type appears anywhere in this list, so one rule can cover several events
+ * instead of requiring a separate rule per event. Rules are id-identified
+ * (create/update/delete by id), not keyed by their field values, since a
+ * multi-event rule can no longer serve as its own natural key.
  * max_severity_level is absent/0 when unset (every severity matches) — a
  * plain proto3 int32, not int64, so it serializes as a number, not a string,
  * unlike ServiceSLAResponse's target-seconds fields. */
 export interface NotificationConfigResponse {
+  id: string
   role: string
-  event: string
+  events: string[]
   channel_type: 'slack' | 'email' | string
   channel_target: string
   max_severity_level?: number
@@ -950,12 +956,43 @@ export interface ListNotificationConfigsResponse {
   configs?: NotificationConfigResponse[]
 }
 
-export interface UpsertNotificationConfigRequest {
+export interface CreateNotificationConfigRequest {
   role: string
-  event: string
+  events: string[]
   channel_type: string
   channel_target: string
   max_severity_level?: number
+}
+
+export interface UpdateNotificationConfigRequest {
+  id: string
+  role: string
+  events: string[]
+  channel_type: string
+  channel_target: string
+  max_severity_level?: number
+}
+
+/** Same fields as CreateNotificationConfigRequest, no id — works equally for
+ * an already-saved rule (pass its current field values) or one still being
+ * drafted in the Add-rule form. */
+export interface TestNotificationConfigRequest {
+  role: string
+  events: string[]
+  channel_type: string
+  channel_target: string
+  max_severity_level?: number
+}
+
+/** One event's test-delivery outcome. `error` is absent on success. */
+export interface TestNotificationResult {
+  event: string
+  success?: boolean
+  error?: string
+}
+
+export interface TestNotificationConfigResponse {
+  results?: TestNotificationResult[]
 }
 
 /** Per-severity-level escalation threshold (Roadmap Phase 15): "alert if a

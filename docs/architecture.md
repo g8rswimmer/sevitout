@@ -58,6 +58,7 @@ sevitout/
 │   │   │   └── jira/   # Jira Issues link/create
 │   │   ├── catalog/    # Static field-schema registry driving the admin
 │   │   │                # integrations UI and its upsert validation
+│   │   ├── email/      # SMTP client for notification delivery (§4.2, Phase 15)
 │   │   └── monitoring/ # Unused placeholder (.gitkeep only) — Monitoring is
 │   │                    # settings-only (tool + base URL via catalog above),
 │   │                    # with no live client of its own
@@ -106,7 +107,7 @@ All API capabilities are defined in Protocol Buffers under `proto/sevitout/v1/`.
 | `PostmortemService` | Postmortem CRUD, status transitions, lock/unlock |
 | `SearchService` | Full-text search and filtered listing of SEVs |
 | `ReportService` | Dashboard metrics, MTTR/frequency trends, CSV export |
-| `ConfigService` | Service registry, users, on-call, integration config + catalog, AI plugins, retention |
+| `ConfigService` | Service registry, users, on-call, integration config + catalog, AI plugins, retention, service SLA targets, per-service leveling criteria, notification routing rules, escalation thresholds |
 | `AIService` | Trigger AI actions, stream AI output, list AI plugin configurations |
 | `AuditService` | Read audit log entries for a SEV |
 | `AuthService` | Login/register, `WhoAmI` |
@@ -210,12 +211,29 @@ Every transition records: `from_status`, `to_status`, `user_id`, `transitioned_a
 
 ### 4.2 Lifecycle Hooks
 
-The domain emits lifecycle events on status transitions via an internal event bus (Go channel). Subscribers:
+There is no generic internal event bus — each side effect is a direct call
+from the mutating `internal/api/grpc` handler (`SEVServer`,
+`AnnouncementServer`, `PostmortemServer`) after its write succeeds, mirroring
+the existing `publishProto`/`auditAppendBestEffort` calls already made at
+each of those sites:
 
-- **AI plugin dispatcher** — triggers proactive AI actions (§11.1 of requirements)
-- **Notification dispatcher** — sends Slack/email notifications
-- **Slack integration** — auto-creates incident channel on SEV-1/SEV-2 open
-- **WebSocket hub** — broadcasts `sev.status_changed` to subscribed clients
+- **AI plugin dispatcher** (`internal/ai.Dispatcher`) — triggers proactive AI
+  actions (§11.1 of requirements) via a buffered-channel worker pool (§8)
+- **Notifier** (`internal/api/grpc/notify.go`, Phase 15) — evaluates
+  admin-configured routing rules and delivers a Slack message and/or email
+  for SEV create/update/status-change, announcement, postmortem due/approved,
+  and escalation/SLA-risk events; best-effort, same contract as
+  `auditAppendBestEffort`. Two background scanners (started in
+  `cmd/server/main.go` alongside the metrics refresher) also call into it on
+  a 1-minute tick rather than from a request handler: one flags SEVs open too
+  long with no Incident Commander (`sev.escalation_no_ic`), the other flags
+  SEVs newly at-risk-of or in breach of their service's SLA
+  (`sev.sla_at_risk`/`sev.sla_breached`) — see `docs/roadmap.md` Phase 15 and
+  Phase 12 for the SLA evaluation logic it reuses (`internal/sev/sla.go`)
+- **Slack integration** — auto-creates incident channel on every SEV open,
+  regardless of severity; owned by `cmd/slackbot`, not the API server (§7)
+- **WebSocket hub** (`Publisher`) — broadcasts `sev.status_changed` and the
+  other event types in §3.2 to subscribed clients
 - **Metrics recorder** — computes and stores MTTD/MTTM/MTTR/DTTM when relevant timestamps are set
 
 ### 4.3 Post-Postmortem Lock
@@ -253,8 +271,11 @@ Full-text search uses PostgreSQL's native `tsvector`/`tsquery` with GIN indexes 
 | `oncall_rotations` | On-call rotation definitions and overrides |
 | `ai_plugins` | Registered AI plugin configurations |
 | `integration_config` | Per-integration credentials and settings |
-| `notification_config` | Role-based notification routing rules — schema exists, unused by any application code today (see `docs/requirements.md` §16) |
+| `notification_config` | Role/event → Slack-or-email routing rules, with an optional max-severity filter (`docs/requirements.md` §16, Phase 15) |
+| `escalation_config` | Per-severity-level "no Incident Commander" alert threshold (minutes) and enabled flag (Phase 15) |
 | `retention_config` | Per-severity-level retention policy |
+| `service_slas` | Per-service, per-severity-level SLA targets (Phase 12) |
+| `service_leveling_criteria` | Per-service severity-leveling guidance text (Phase 14) |
 | `shareable_links` | Public link tokens (signed, revocable) |
 
 ### Full-text search
@@ -417,6 +438,7 @@ returns credentials or handler internals.
 | `/admin/integrations` | Integration settings |
 | `/admin/ai` | AI plugin configuration |
 | `/admin/retention` | Data retention policy |
+| `/admin/notifications` | Notification routing rules and escalation thresholds (Phase 15) |
 | `/s/:token` | Public shareable SEV view (no auth required) |
 
 ### Data fetching

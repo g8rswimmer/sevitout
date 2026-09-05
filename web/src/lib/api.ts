@@ -8,6 +8,7 @@ import type {
   CreateAIPluginRequest,
   CreateGitHubIssueRequest,
   CreateJiraIssueRequest,
+  CreateNotificationConfigRequest,
   CreateOnCallRotationRequest,
   CreateSEVRequest,
   CreateServiceRequest,
@@ -64,6 +65,8 @@ import type {
   ShareLinkResponse,
   SharedSEVResponse,
   TaskResponse,
+  TestNotificationConfigRequest,
+  TestNotificationConfigResponse,
   TransitionPostmortemStatusRequest,
   TransitionStatusRequest,
   TriggerActionRequest,
@@ -71,6 +74,7 @@ import type {
   UnlockSEVResponse,
   UpdateAIPluginRequest,
   UpdateMyIntegrationIdentitiesRequest,
+  UpdateNotificationConfigRequest,
   UpdateOnCallRotationRequest,
   UpdatePostmortemRequest,
   UpdateRetentionConfigRequest,
@@ -80,7 +84,6 @@ import type {
   UpsertEscalationConfigRequest,
   UpsertIntegrationConfigRequest,
   UpsertLevelingCriteriaRequest,
-  UpsertNotificationConfigRequest,
   UpsertServiceSLARequest,
   UserResponse,
   WhoAmIResponse,
@@ -477,17 +480,29 @@ export const api = {
         ),
     },
     // Notifications & Alerting (Roadmap Phase 15) — admin-configured Slack/
-    // email routing rules, keyed by (role, event, channel_type); a fixed
-    // broadcast route per rule, not per-user delivery.
+    // email routing rules; a fixed broadcast route per rule, not per-user
+    // delivery. Rules are id-identified (create/update/delete by id, same
+    // shape as aiPlugins below) since a rule covering several events can no
+    // longer be addressed by its field values.
     notifications: {
       list: () => request<ListNotificationConfigsResponse>('/v1/config/notifications'),
-      upsert: (req: UpsertNotificationConfigRequest) =>
-        request<NotificationConfigResponse>('/v1/config/notifications', { method: 'PUT', body: JSON.stringify(req) }),
-      // role/event/channel_type identify the rule; DeleteNotificationConfig
-      // has no path template, so grpc-gateway maps them to query params.
-      delete: (role: string, event: string, channelType: string) =>
-        request<void>(`/v1/config/notifications${buildQuery({ role, event, channel_type: channelType })}`, {
-          method: 'DELETE',
+      create: (req: CreateNotificationConfigRequest) =>
+        request<NotificationConfigResponse>('/v1/config/notifications', { method: 'POST', body: JSON.stringify(req) }),
+      update: (id: string, req: UpdateNotificationConfigRequest) =>
+        request<NotificationConfigResponse>(`/v1/config/notifications/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(req),
+        }),
+      delete: (id: string) =>
+        request<void>(`/v1/config/notifications/${id}`, { method: 'DELETE' }),
+      // Sends one real test message per event straight to req's own
+      // channel_type/channel_target — no id involved, so it works for a
+      // saved rule (pass its current field values) or one still being
+      // drafted in the Add-rule form.
+      test: (req: TestNotificationConfigRequest) =>
+        request<TestNotificationConfigResponse>('/v1/config/notifications/test', {
+          method: 'POST',
+          body: JSON.stringify(req),
         }),
     },
     // Per-severity-level escalation thresholds (Roadmap Phase 15) — "alert

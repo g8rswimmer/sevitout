@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -104,33 +105,72 @@ func (n *Notifier) Notify(ctx context.Context, ev NotifyEvent) {
 		return
 	}
 	for _, row := range rows {
-		n.deliver(ctx, row, ev)
+		_ = n.deliver(ctx, row, ev) // best-effort: deliver* already logs its own failure
 	}
 }
 
-func (n *Notifier) deliver(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) {
+// TestResult is the outcome of manually test-delivering one event for a
+// candidate notification-config rule (Admin → Notifications "Send test",
+// docs/roadmap.md Phase 15 follow-up). Err is nil on success.
+type TestResult struct {
+	Event string
+	Err   error
+}
+
+// Test delivers one synthetic test message per event in cfg.Events, to
+// cfg's own ChannelType/ChannelTarget — unlike Notify, it does not consult
+// NotificationConfigStore.ListForEvent and ignores cfg.MaxSeverityLevel
+// entirely, since the point is to validate this exact rule (already saved,
+// or still being drafted in the admin UI's Add-rule form and therefore
+// possibly cfg.ID == 0) regardless of what other rules exist or what
+// severity a real triggering SEV would have. Unlike Notify, each delivery's
+// error is returned rather than only logged, so the caller (the admin who
+// clicked the button) sees exactly why a channel/integration isn't working.
+// Safe to call on a nil *Notifier or with a nil/empty-Events cfg (returns
+// nil).
+func (n *Notifier) Test(ctx context.Context, cfg *store.NotificationConfig) []TestResult {
+	if n == nil || cfg == nil {
+		return nil
+	}
+	results := make([]TestResult, 0, len(cfg.Events))
+	for _, event := range cfg.Events {
+		ev := NotifyEvent{
+			Type:    event,
+			Message: fmt.Sprintf("This is a test notification for event %q, sent from Admin → Notifications.", event),
+		}
+		results = append(results, TestResult{Event: event, Err: n.deliver(ctx, cfg, ev)})
+	}
+	return results
+}
+
+// deliver dispatches to the channel-specific sender and returns its error,
+// if any. Notify's caller above discards it (already logged inside
+// deliverSlack/deliverEmail); Test's caller returns it to the admin instead.
+func (n *Notifier) deliver(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) error {
 	switch row.ChannelType {
 	case store.NotificationChannelSlack:
-		n.deliverSlack(ctx, row, ev)
+		return n.deliverSlack(ctx, row, ev)
 	case store.NotificationChannelEmail:
-		n.deliverEmail(ctx, row, ev)
+		return n.deliverEmail(ctx, row, ev)
 	default:
-		slog.ErrorContext(ctx, "notify: unknown channel type", "channel_type", row.ChannelType, "event", row.Event)
+		err := fmt.Errorf("unknown channel type %q", row.ChannelType)
+		slog.ErrorContext(ctx, "notify: unknown channel type", "channel_type", row.ChannelType, "event", ev.Type)
+		return err
 	}
 }
 
-func (n *Notifier) deliverSlack(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) {
+func (n *Notifier) deliverSlack(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) error {
 	if n.slackFactory == nil || n.integrations == nil {
-		return
+		return errors.New("slack delivery is not configured on this server")
 	}
 	creds, err := n.decryptedIntegration(ctx, "slack")
 	if err != nil {
 		slog.ErrorContext(ctx, "notify: slack integration unavailable", "err", err)
-		return
+		return fmt.Errorf("slack integration unavailable: %w", err)
 	}
 	botToken := creds["bot_token"]
 	if botToken == "" {
-		return
+		return errors.New("slack integration has no bot token configured")
 	}
 	text := notifyText(ev)
 	// <#CHANNELID> is Slack's own channel-mention syntax — it renders as a
@@ -146,23 +186,25 @@ func (n *Notifier) deliverSlack(ctx context.Context, row *store.NotificationConf
 		text = fmt.Sprintf("%s\nIncident channel: <#%s>", text, *ev.SEV.SlackChannelID)
 	}
 	if err := n.slackFactory(botToken).PostMessage(ctx, row.ChannelTarget, text); err != nil {
-		slog.ErrorContext(ctx, "notify: slack delivery failed", "channel", row.ChannelTarget, "event", row.Event, "err", err)
+		slog.ErrorContext(ctx, "notify: slack delivery failed", "channel", row.ChannelTarget, "event", ev.Type, "err", err)
+		return fmt.Errorf("slack delivery failed: %w", err)
 	}
+	return nil
 }
 
-func (n *Notifier) deliverEmail(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) {
+func (n *Notifier) deliverEmail(ctx context.Context, row *store.NotificationConfig, ev NotifyEvent) error {
 	if n.emailFactory == nil || n.integrations == nil {
-		return
+		return errors.New("email delivery is not configured on this server")
 	}
 	cfg, err := n.integrations.Get(ctx, "email")
 	if err != nil {
 		slog.ErrorContext(ctx, "notify: email integration unavailable", "err", err)
-		return
+		return fmt.Errorf("email integration unavailable: %w", err)
 	}
 	creds, err := DecryptIntegrationCredentials(n.crypto, cfg)
 	if err != nil {
 		slog.ErrorContext(ctx, "notify: failed to decrypt email credentials", "err", err)
-		return
+		return fmt.Errorf("failed to decrypt email credentials: %w", err)
 	}
 	merged := make(map[string]string, len(creds)+len(cfg.Settings))
 	for k, v := range creds {
@@ -174,7 +216,7 @@ func (n *Notifier) deliverEmail(ctx context.Context, row *store.NotificationConf
 		}
 	}
 	if merged["smtp_host"] == "" || merged["from_address"] == "" {
-		return
+		return errors.New("email integration is missing smtp_host or from_address")
 	}
 	body := notifyText(ev)
 	if ev.SEV != nil && ev.SEV.SlackChannelID != nil && *ev.SEV.SlackChannelID != "" {
@@ -185,8 +227,10 @@ func (n *Notifier) deliverEmail(ctx context.Context, row *store.NotificationConf
 		body = fmt.Sprintf("%s\nSlack channel: https://slack.com/app_redirect?channel=%s", body, *ev.SEV.SlackChannelID)
 	}
 	if err := n.emailFactory(merged).Send(ctx, row.ChannelTarget, notifySubject(ev), body); err != nil {
-		slog.ErrorContext(ctx, "notify: email delivery failed", "to", row.ChannelTarget, "event", row.Event, "err", err)
+		slog.ErrorContext(ctx, "notify: email delivery failed", "to", row.ChannelTarget, "event", ev.Type, "err", err)
+		return fmt.Errorf("email delivery failed: %w", err)
 	}
+	return nil
 }
 
 func (n *Notifier) decryptedIntegration(ctx context.Context, integrationType string) (map[string]string, error) {

@@ -314,11 +314,12 @@ SEVs must be searchable and filterable across all records:
 ## 16. Notifications & Alerting
 
 **Shipped** (`docs/roadmap.md` Phase 15, `demo/notifications-alerting.md`) —
-`ConfigService.{Upsert,Delete,List}NotificationConfig` and
+`ConfigService.{Create,Update,Delete,List}NotificationConfig` and
 `{Upsert,List}EscalationConfig`, plus an admin page at `/admin/notifications`.
-Routing rules are a fixed broadcast route per (role, event, channel_type) —
-not per-user or per-incident-assignee personal delivery; see the demo doc's
-Known limitations. Live WebSocket updates and the pre-existing Slack channel
+Routing rules are a fixed broadcast route per (role, channel_type,
+channel_target) that can cover several event types at once — not per-user or
+per-incident-assignee personal delivery; see the demo doc's Known
+limitations. Live WebSocket updates and the pre-existing Slack channel
 pushes for status changes and `external`/`status-page` announcements (§13.1)
 continue to ship alongside this — see `docs/user-guide.md` §17.
 
@@ -392,7 +393,7 @@ Sevitout maintains its own lightweight service registry:
 **Shipped** (`docs/roadmap.md` Phase 15) — see §16 above.
 
 - Configure escalation thresholds per severity level (e.g., SEV-1 without IC after N minutes) — `/admin/notifications`
-- Configure which roles receive which notification events, and over which channel (Slack or email) — `ConfigService.{Upsert,Delete,List}NotificationConfig`
+- Configure which roles receive which notification events (a rule may cover more than one event), and over which channel (Slack or email) — `ConfigService.{Create,Update,Delete,List}NotificationConfig`
 - Notification channel *targets* (a specific Slack channel or email address) are set per rule, not as a single org-wide default
 
 ### 18.6 AI Plugin Configuration

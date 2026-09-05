@@ -269,6 +269,7 @@ func main() {
 			pagerdutyResolver, githubResolver, jiraResolver,
 		},
 		SlackbotServiceEmail: cfg.SlackbotServiceEmail,
+		Notifier:             notifier,
 	})
 	aiServer := grpchandler.NewAIServer(aiDispatcher, stores.AIOutput, stores.AIPlugin)
 

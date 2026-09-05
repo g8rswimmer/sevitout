@@ -2234,40 +2234,51 @@ func TestNotificationConfigStore(t *testing.T) {
 	s := memory.NewNotificationConfigStore()
 
 	cfg := &store.NotificationConfig{
-		Role: store.OrgRoleIncidentCommander, Event: "sev.created",
+		Role: store.OrgRoleIncidentCommander, Events: []string{"sev.created"},
 		ChannelType: store.NotificationChannelSlack, ChannelTarget: "#incidents",
 	}
 
-	t.Run("Upsert (insert)", func(t *testing.T) {
-		if err := s.Upsert(ctx, cfg); err != nil {
-			t.Fatalf("Upsert: %v", err)
+	t.Run("Create", func(t *testing.T) {
+		if err := s.Create(ctx, cfg); err != nil {
+			t.Fatalf("Create: %v", err)
 		}
 		if cfg.ID == 0 {
-			t.Fatal("ID should be set on insert")
+			t.Fatal("ID should be set on create")
 		}
 	})
 
-	t.Run("Upsert (update existing preserves ID, replaces target)", func(t *testing.T) {
+	t.Run("Update (replaces target, covers a second event)", func(t *testing.T) {
 		existingID := cfg.ID
 		updated := &store.NotificationConfig{
-			Role: store.OrgRoleIncidentCommander, Event: "sev.created",
+			ID: existingID, Role: store.OrgRoleIncidentCommander,
+			Events:      []string{"sev.created", "sev.sla_breached"},
 			ChannelType: store.NotificationChannelSlack, ChannelTarget: "#incidents-v2",
 		}
-		if err := s.Upsert(ctx, updated); err != nil {
-			t.Fatalf("Upsert: %v", err)
+		if err := s.Update(ctx, updated); err != nil {
+			t.Fatalf("Update: %v", err)
 		}
 		if updated.ID != existingID {
-			t.Errorf("Upsert should preserve the existing ID, got %d want %d", updated.ID, existingID)
+			t.Errorf("Update should preserve the ID, got %d want %d", updated.ID, existingID)
+		}
+	})
+
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		err := s.Update(ctx, &store.NotificationConfig{
+			ID: 999999, Role: store.OrgRoleAdmin, Events: []string{"sev.created"},
+			ChannelType: store.NotificationChannelSlack, ChannelTarget: "#x",
+		})
+		if err != store.ErrNotFound {
+			t.Fatalf("want ErrNotFound updating a nonexistent id, got %v", err)
 		}
 	})
 
 	t.Run("List", func(t *testing.T) {
 		other := &store.NotificationConfig{
-			Role: store.OrgRoleAdmin, Event: "sev.created",
+			Role: store.OrgRoleAdmin, Events: []string{"sev.created"},
 			ChannelType: store.NotificationChannelEmail, ChannelTarget: "mgmt@example.com", MaxSeverityLevel: int16p(2),
 		}
-		if err := s.Upsert(ctx, other); err != nil {
-			t.Fatalf("Upsert: %v", err)
+		if err := s.Create(ctx, other); err != nil {
+			t.Fatalf("Create: %v", err)
 		}
 		items, err := s.List(ctx)
 		if err != nil {
@@ -2285,6 +2296,19 @@ func TestNotificationConfigStore(t *testing.T) {
 		}
 		if len(items) != 2 {
 			t.Fatalf("want both rules to match a nil severity filter, got %d", len(items))
+		}
+	})
+
+	t.Run("ListForEvent_MatchesSecondEventInMultiEventRule", func(t *testing.T) {
+		items, err := s.ListForEvent(ctx, "sev.sla_breached", nil)
+		if err != nil {
+			t.Fatalf("ListForEvent: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want the IC rule to match sev.sla_breached (its second event), got %d", len(items))
+		}
+		if items[0].Role != store.OrgRoleIncidentCommander {
+			t.Errorf("got role %q, want the IC rule", items[0].Role)
 		}
 	})
 
@@ -2323,7 +2347,7 @@ func TestNotificationConfigStore(t *testing.T) {
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		if err := s.Delete(ctx, store.OrgRoleIncidentCommander, "sev.created", store.NotificationChannelSlack); err != nil {
+		if err := s.Delete(ctx, cfg.ID); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 		items, _ := s.List(ctx)
@@ -2333,7 +2357,7 @@ func TestNotificationConfigStore(t *testing.T) {
 	})
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
-		err := s.Delete(ctx, store.OrgRoleIncidentCommander, "sev.created", store.NotificationChannelSlack)
+		err := s.Delete(ctx, cfg.ID)
 		if err != store.ErrNotFound {
 			t.Fatalf("want ErrNotFound on second delete, got %v", err)
 		}

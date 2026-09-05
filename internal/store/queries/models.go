@@ -70,12 +70,12 @@ type IntegrationConfig struct {
 type NotificationConfig struct {
 	ID               int64              `json:"id"`
 	Role             string             `json:"role"`
-	Event            string             `json:"event"`
 	ChannelType      string             `json:"channel_type"`
 	ChannelTarget    string             `json:"channel_target"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	MaxSeverityLevel *int16             `json:"max_severity_level"`
+	Events           []string           `json:"events"`
 }
 
 type OncallRotation struct {
