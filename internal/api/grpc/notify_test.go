@@ -237,9 +237,11 @@ func TestNotifier_Notify_EventWithNoSEV_MatchesEveryRule(t *testing.T) {
 	// SEV is set here (escalation events always carry one), but confirm a
 	// nil-severity NotifyEvent (Message-only) still matches a rule with no
 	// MaxSeverityLevel filter at all.
-	tn.configs.Create(context.Background(), &store.NotificationConfig{
+	if err := tn.configs.Create(context.Background(), &store.NotificationConfig{
 		Role: store.OrgRoleAdmin, Events: []string{"custom.event"}, ChannelType: store.NotificationChannelSlack, ChannelTarget: "#alerts",
-	})
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 	tn.notifier.Notify(context.Background(), grpchandler.NotifyEvent{Type: "custom.event", Message: "hello"})
 	if tn.slack.calls != 1 {
 		t.Fatalf("want 1 delivery for a nil-SEV event against an unfiltered rule, got %d", tn.slack.calls)
