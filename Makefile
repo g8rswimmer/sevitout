@@ -17,6 +17,22 @@ proto:
 	  --grpc-gateway_out=$(PB_OUT) --grpc-gateway_opt=module=github.com/g8rswimmer/sevitout \
 	  --openapiv2_out=internal/api/pb \
 	  $(PROTO_FILES)
+	# Second, separate invocation: protoc doesn't honor two --openapiv2_out
+	# flags in one call (the later one wins for both), so the per-service
+	# specs above (used individually — e.g. for reviewing one service's
+	# shape in isolation) and this merged, all-services spec need their own
+	# protoc runs. This one feeds cmd/server/openapi/openapi.json, the spec
+	# embedded into the server binary and served at GET /openapi.json / GET
+	# /docs (see cmd/server/main.go and openapi.proto for the merged
+	# document's title/version/description).
+	protoc \
+	  -I $(PROTO_DIR) \
+	  -I $(PROTO_DIR)/third_party \
+	  -I $(GATEWAY_PROTO) \
+	  --openapiv2_out=cmd/server/openapi \
+	  --openapiv2_opt=allow_merge=true,merge_file_name=openapi \
+	  $(PROTO_FILES)
+	mv cmd/server/openapi/openapi.swagger.json cmd/server/openapi/openapi.json
 
 generate:
 	sqlc generate

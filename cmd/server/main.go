@@ -3,8 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
-	_ "embed"
+	"embed"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -46,6 +47,15 @@ import (
 
 //go:embed openapi/openapi.json
 var openAPISpec []byte
+
+// docsUI is a vendored, trimmed copy of swagger-ui-dist (see
+// openapi/vendor/swagger-ui/README.md) rather than a CDN reference, so GET
+// /docs renders a browsable, "try it out"-capable API reference with no
+// outbound network access needed — consistent with this being a single,
+// self-contained binary.
+//
+//go:embed openapi/vendor/swagger-ui/index.html openapi/vendor/swagger-ui/assets
+var docsUI embed.FS
 
 func main() {
 	ctx := context.Background()
@@ -431,6 +441,23 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(openAPISpec)
 	})
+	// GET /docs: browsable API reference (Swagger UI) for integrators, backed
+	// by the same /openapi.json spec served above. Deliberately
+	// unauthenticated, same rationale as /openapi.json itself — the spec has
+	// no secrets, and requiring a session just to read API docs would send
+	// integrators straight to reading the .proto/.json source instead.
+	docsAssets, err := fs.Sub(docsUI, "openapi/vendor/swagger-ui")
+	if err != nil {
+		// Only possible if the embed directive above and this path drift
+		// apart; embed.FS content is compiled in, so this can't happen at
+		// runtime against a build that compiled successfully.
+		log.Error("docs: sub fs", "err", err)
+		os.Exit(1)
+	}
+	httpMux.HandleFunc("/docs", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/docs/", http.StatusMovedPermanently)
+	})
+	httpMux.Handle("/docs/", http.StripPrefix("/docs/", http.FileServer(http.FS(docsAssets))))
 	// GET /metrics: Prometheus scrape target. Deliberately unauthenticated
 	// and un-logged (a scraper polls this every few seconds; an access-log
 	// line per scrape would be pure noise), matching /openapi.json's

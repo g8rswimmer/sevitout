@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package sevitout.v1;
+
+option go_package = "github.com/g8rswimmer/sevitout/internal/api/pb;pb";
+
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+// This file defines no messages or services of its own. It exists solely to
+// attach document-level metadata (title, version, description) to the
+// single, all-services OpenAPI spec that `make proto`'s merged generation
+// (see the Makefile's `proto` target, --openapiv2_opt=allow_merge=true)
+// produces as cmd/server/openapi/openapi.json — served at GET /openapi.json
+// and rendered at GET /docs. Without a file like this, protoc-gen-openapiv2
+// picks one of the per-service protos' info blocks arbitrarily for the
+// merged document's title, which reads as an unrelated implementation
+// detail leaking into API docs meant for outside integrators.
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Sevitout API";
+    version: "v1";
+    description: "REST API for Sevitout, a Severity Event (SEV) management "
+      "system: open and track incidents, manage postmortems, and drive "
+      "SEV lifecycle automation. This is the same API the web app, Slack "
+      "bot, and AI plugins all consume — every feature is reachable "
+      "through it.";
+  }
+};
