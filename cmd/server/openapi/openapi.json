@@ -1,12 +1,55 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "sevitout/v1/sev.proto",
-    "version": "version not set"
+    "title": "Sevitout API",
+    "description": "REST API for Sevitout, a Severity Event (SEV) management system: open and track incidents, manage postmortems, and drive SEV lifecycle automation. This is the same API the web app, Slack bot, and AI plugins all consume — every feature is reachable through it.",
+    "version": "v1"
   },
   "tags": [
     {
+      "name": "AnnouncementService"
+    },
+    {
+      "name": "ShareService"
+    },
+    {
+      "name": "TaskService"
+    },
+    {
+      "name": "AuditService"
+    },
+    {
+      "name": "AIService"
+    },
+    {
       "name": "SEVService"
+    },
+    {
+      "name": "SearchService"
+    },
+    {
+      "name": "SEVLinkService"
+    },
+    {
+      "name": "RoleService"
+    },
+    {
+      "name": "ReportService"
+    },
+    {
+      "name": "PostmortemService"
+    },
+    {
+      "name": "ChatService"
+    },
+    {
+      "name": "SEVAccessService"
+    },
+    {
+      "name": "AuthService"
+    },
+    {
+      "name": "ConfigService"
     }
   ],
   "consumes": [
@@ -16,6 +59,1758 @@
     "application/json"
   ],
   "paths": {
+    "/v1/ai/plugins": {
+      "get": {
+        "summary": "ListPlugins returns the currently enabled AI plugins that\nTriggerAction/StreamAction can route to. Unlike\nConfigService.ListAIPlugins (Admin-only, full record), this is readable\nby any authenticated user and never includes credentials or handler\ninternals — just enough to populate a \"run AI action\" menu.",
+        "operationId": "AIService_ListPlugins",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListPluginsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/auth/directory": {
+      "get": {
+        "summary": "ListUserDirectory is a minimal org-wide \"who is this person\" lookup —\ndeliberately narrower than ConfigService.ListUsers (an Admin-only\nuser-management surface): open to any authenticated Viewer, and returns\nonly the fields needed to resolve a role assignment or a Slack invite\n(docs/roadmap.md Phase 10a), never role/active-status/audit fields.",
+        "operationId": "AuthService_ListUserDirectory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListUserDirectoryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "query",
+            "description": "query filters by a case-insensitive substring match against name or\nemail, for the role-assignment user picker's search box (§10c); empty\nreturns everyone. Mutually composable with ids below (both may be set,\nthough typical callers use one or the other).",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "ids",
+            "description": "ids, when non-empty, restricts the result to exactly these user IDs —\nused for a batch resolve of already-known IDs (e.g. Slack auto-invite\nresolving every assigned role's user in one call).",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "summary": "WhoAmI returns the identity of the currently authenticated caller.",
+        "operationId": "AuthService_WhoAmI",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1WhoAmIResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AuthService"
+        ]
+      },
+      "patch": {
+        "summary": "UpdateMyIntegrationIdentities lets the caller manage their own\nself-service integration identities (Slack user ID, GitHub username,\nJira account ID — docs/roadmap.md Phase 10a), used to widen Slack\nauto-invite and default new tracker issues to the creating user. Unlike\nUpdateSEV's sparse-patch convention, this is full-replace: all three\nfields are sent on every call, and an empty string clears that field —\nthis endpoint only ever touches these three fields, so \"empty = leave\nalone\" would make clearing one impossible.",
+        "operationId": "AuthService_UpdateMyIntegrationIdentities",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1WhoAmIResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1UpdateMyIntegrationIdentitiesRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/config/ai-plugins": {
+      "get": {
+        "operationId": "ConfigService_ListAIPlugins",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAIPluginsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "post": {
+        "operationId": "ConfigService_CreateAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIPluginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateAIPluginRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/ai-plugins/{id}": {
+      "get": {
+        "operationId": "ConfigService_GetAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIPluginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "operationId": "ConfigService_DeleteAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "patch": {
+        "operationId": "ConfigService_UpdateAIPlugin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIPluginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateAIPluginBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/enabled-integrations": {
+      "get": {
+        "summary": "ListEnabledIntegrations is a viewer-safe signal of which integration_types\ncurrently have meaningful store-configured settings or credentials\n(docs/roadmap.md Phase 11a) — used by the SEV detail page to hide an\nintegration-tied action (e.g. \"Create Jira issue\") when that integration\nisn't configured, without exposing anything an Admin-only endpoint\nwouldn't already consider safe to hand to any Viewer: no settings\nvalues, no credentials_configured per type, just the list of enabled\ntypes. Reflects store-configured integrations only — see this RPC's\nresponse doc comment for the static-env-var-fallback limitation.",
+        "operationId": "ConfigService_ListEnabledIntegrations",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListEnabledIntegrationsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/escalation": {
+      "get": {
+        "operationId": "ConfigService_ListEscalationConfigs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListEscalationConfigsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/escalation/{severityLevel}": {
+      "put": {
+        "summary": "--- Escalation thresholds (docs/requirements.md §16, docs/roadmap.md\nPhase 15) --- per-severity-level \"alert if open \u003e N minutes with no\nIncident Commander assigned\" configuration, scanned by cmd/server's\nescalation scanner. Reads/writes floor exactly like RetentionConfig.",
+        "operationId": "ConfigService_UpsertEscalationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EscalationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpsertEscalationConfigBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/integration-catalog": {
+      "get": {
+        "summary": "GetIntegrationCatalog returns the fixed, ordered field schema for every\nintegration_type this server recognizes (docs/roadmap.md Phase 9) — a\npure translation of internal/integrations/catalog.All with no store\naccess. It's the single source of truth the admin UI renders its\nsidebar + schema-driven detail form from, and UpsertIntegrationConfig\nvalidates incoming requests against the same catalog.",
+        "operationId": "ConfigService_GetIntegrationCatalog",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetIntegrationCatalogResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/integrations": {
+      "get": {
+        "operationId": "ConfigService_ListIntegrationConfigs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListIntegrationConfigsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/integrations/slack/bot-credential": {
+      "get": {
+        "summary": "GetSlackBotCredential returns the decrypted \"slack\" integration\ncredential pair (bot_token/app_token) — the one deliberate exception to\n\"credentials are never returned by any RPC in this service\" above. It\nexists solely so cmd/slackbot (a separate process that only talks to\nthis API over gRPC, with no direct datastore/encryption-key access) can\npick up a datastore-configured Slack token without a restart; see\ndocs/roadmap.md Phase 8. Gated server-side to the specific slackbot\nservice account (SLACKBOT_SERVICE_EMAIL), not merely Admin+ — an\nunrelated admin session must not be able to pull plaintext Slack tokens\nthrough this call. Returns empty fields (not an error) when the \"slack\"\nintegration has no credentials configured, so callers can fall back to\ntheir own static tokens.",
+        "operationId": "ConfigService_GetSlackBotCredential",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetSlackBotCredentialResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/integrations/{integrationType}": {
+      "get": {
+        "operationId": "ConfigService_GetIntegrationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1IntegrationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "integrationType",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "put": {
+        "summary": "UpsertIntegrationConfig creates or replaces the settings and credentials\nfor one integration type. Credentials are encrypted (AES-256-GCM) before\nbeing written to storage and are never returned by any RPC in this\nservice — only whether credentials are currently configured. The\nintegration_type and every credential/settings key (and, for a select\nfield, its value) are validated against GetIntegrationCatalog's schema\nbefore anything is written — see this RPC's handler doc comment.",
+        "operationId": "ConfigService_UpsertIntegrationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1IntegrationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "integrationType",
+            "description": "integration_type: one of GetIntegrationCatalog's fixed set — e.g.\n\"slack\", \"pagerduty\", \"github\", \"jira\", \"monitoring\". Any other value is\nrejected.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpsertIntegrationConfigBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/leveling-criteria": {
+      "get": {
+        "summary": "ListLevelingCriteriaForServices is the batch lookup the SEV creation\nform and postmortem page use: every configured row across a SEV's\n(possibly multiple) affected services, at one severity level, no\nreduction — see ServiceLevelingCriteriaStore.ListForServices. Spans\nmultiple services, so it sits at a top-level path rather than nested\nunder one service.",
+        "operationId": "ConfigService_ListLevelingCriteriaForServices",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListLevelingCriteriaForServicesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceIds",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "severityLevel",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/notifications": {
+      "get": {
+        "operationId": "ConfigService_ListNotificationConfigs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListNotificationConfigsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "post": {
+        "summary": "--- Notifications \u0026 Alerting (docs/requirements.md §16/§18.5,\ndocs/roadmap.md Phase 15) --- an admin-configured routing rule set:\n\"for org role X, on any of events Y, post to channel_type at\nchannel_target.\" A fixed broadcast route, not per-user/per-incident\npersonalization. Reads sit at the Viewer floor (same reasoning as\nServiceSLA/LevelingCriteria); mutations are Admin-only. Rules are\nID-identified (Create/Update/Delete by id), matching AIPlugin's shape\nabove — a rule covering several events can no longer be addressed by\nits field values the way the original single-event design could.",
+        "operationId": "ConfigService_CreateNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1NotificationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateNotificationConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/notifications/test": {
+      "post": {
+        "summary": "TestNotificationConfig sends one real test message per event in the\nrequest straight to its channel_type/channel_target — bypassing\nListForEvent's event/severity matching entirely, so it works equally\nfor an already-saved rule (pass its current field values) or a rule\nstill being drafted in the Add-rule form (id is never needed). Lets an\nadmin verify a Slack channel/email address and the underlying\nintegration actually work without waiting for a real SEV event.\nAdmin-only, like every other mutation here — it has the same\nreal-world side effect (a message lands in a real channel/inbox) as\nCreate/Update.",
+        "operationId": "ConfigService_TestNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TestNotificationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "TestNotificationConfigRequest carries the same fields as\nCreateNotificationConfigRequest (no id — see the RPC's doc comment).",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1TestNotificationConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/notifications/{id}": {
+      "delete": {
+        "operationId": "ConfigService_DeleteNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "patch": {
+        "operationId": "ConfigService_UpdateNotificationConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1NotificationConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateNotificationConfigBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/oncall": {
+      "get": {
+        "summary": "ListOnCallRotations is readable by any authenticated user (Viewer+) so\nthe UI can show who is currently on-call.",
+        "operationId": "ConfigService_ListOnCallRotations",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListOnCallRotationsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "post": {
+        "operationId": "ConfigService_CreateOnCallRotation",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1OnCallRotationResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateOnCallRotationRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/oncall/{id}": {
+      "get": {
+        "operationId": "ConfigService_GetOnCallRotation",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1OnCallRotationResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "operationId": "ConfigService_DeleteOnCallRotation",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "patch": {
+        "operationId": "ConfigService_UpdateOnCallRotation",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1OnCallRotationResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateOnCallRotationBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/retention": {
+      "get": {
+        "operationId": "ConfigService_ListRetentionConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListRetentionConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/retention/{severityLevel}": {
+      "get": {
+        "operationId": "ConfigService_GetRetentionConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1RetentionConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "put": {
+        "operationId": "ConfigService_UpdateRetentionConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1RetentionConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateRetentionConfigBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services": {
+      "get": {
+        "summary": "ListServices is readable by any authenticated user (Viewer+) since\nservices are referenced throughout the system (e.g. picking affected\nservices on a SEV).",
+        "operationId": "ConfigService_ListServices",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListServicesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "activeOnly",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "post": {
+        "operationId": "ConfigService_CreateService",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateServiceRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{id}": {
+      "get": {
+        "operationId": "ConfigService_GetService",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "summary": "DeleteService permanently removes a service record. To retire a service\nwhile preserving historical SEV references, prefer UpdateService with\nactive=false instead.",
+        "operationId": "ConfigService_DeleteService",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "patch": {
+        "operationId": "ConfigService_UpdateService",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateServiceBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{serviceId}/leveling-criteria": {
+      "get": {
+        "summary": "ListLevelingCriteria returns every configured severity row (0-4) for one\nservice — what the admin editor renders as its 4-row table.",
+        "operationId": "ConfigService_ListLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListLevelingCriteriaResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{serviceId}/leveling-criteria/{severityLevel}": {
+      "get": {
+        "summary": "--- Per-service SEV leveling criteria (docs/roadmap.md Phase 14) ---\nfree-text guidance for what qualifies as one severity level for one\nservice — purely advisory, never enforced or validated against. Reads\nsit at the same Viewer floor as GetServiceSLA/ListServiceSLAs, since\nthis is exactly what the SEV creation form and postmortem page need for\nany authenticated user opening or reviewing a SEV. Mutations are\nAdmin-only, matching UpsertServiceSLA/DeleteServiceSLA.",
+        "operationId": "ConfigService_GetLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1LevelingCriteriaResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "operationId": "ConfigService_DeleteLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "put": {
+        "operationId": "ConfigService_UpsertLevelingCriteria",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1LevelingCriteriaResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpsertLevelingCriteriaBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{serviceId}/sla": {
+      "get": {
+        "summary": "ListServiceSLAs returns every configured severity row (0-4) for one\nservice — what the admin editor renders as its 4-row table.",
+        "operationId": "ConfigService_ListServiceSLAs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListServiceSLAsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/services/{serviceId}/sla/{severityLevel}": {
+      "get": {
+        "summary": "--- Per-service, per-severity-level SLA targets (docs/roadmap.md\nPhase 12) --- readable by any authenticated user (Viewer+), same floor\nas GetService/ListServices — the resolved numbers are already exposed to\nany Viewer via SEVResponse.sla_status, so gating the raw config any\ntighter would protect nothing. Mutations (Upsert/Delete) are Admin-only,\nmatching UpdateService/DeleteService.",
+        "operationId": "ConfigService_GetServiceSLA",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceSLAResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "delete": {
+        "operationId": "ConfigService_DeleteServiceSLA",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      },
+      "put": {
+        "operationId": "ConfigService_UpsertServiceSLA",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceSLAResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "severityLevel",
+            "in": "path",
+            "required": true,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpsertServiceSLABody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/users": {
+      "get": {
+        "summary": "ListUsers is Admin-only; the directory includes email addresses.",
+        "operationId": "ConfigService_ListUsers",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListUsersResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "query",
+            "description": "query filters the directory by a case-insensitive substring match\nagainst name or email; empty returns everyone.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/users/{id}/deactivate": {
+      "post": {
+        "operationId": "ConfigService_DeactivateUser",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UserResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceDeactivateUserBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/users/{id}/reactivate": {
+      "post": {
+        "operationId": "ConfigService_ReactivateUser",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UserResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceReactivateUserBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/config/users/{id}/role": {
+      "patch": {
+        "operationId": "ConfigService_UpdateUserRole",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UserResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfigServiceUpdateUserRoleBody"
+            }
+          }
+        ],
+        "tags": [
+          "ConfigService"
+        ]
+      }
+    },
+    "/v1/reports/dashboard": {
+      "get": {
+        "operationId": "ReportService_GetDashboardMetrics",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1DashboardMetricsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ReportService"
+        ]
+      }
+    },
+    "/v1/reports/service-metrics": {
+      "get": {
+        "summary": "GetServiceMetrics aggregates SEVs into per-(service, severity level)\nrollups over a trailing window: SEV count, average MTTD/MTTM/MTTR, and\nan SLA compliance breakdown (docs/roadmap.md Phase 13 — the aggregate\ncounterpart to Phase 12's per-SEV live sla_status on SEVResponse).",
+        "operationId": "ReportService_GetServiceMetrics",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ServiceMetricsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "windowDays",
+            "description": "window_days is one of: 30, 60, 90, 180. Defaults to 30 when unset or 0\n— validated in the handler, not here.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "serviceIds",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "ReportService"
+        ]
+      }
+    },
+    "/v1/reports/trends": {
+      "get": {
+        "summary": "GetSEVTrends surfaces recurring failure patterns: SEVs sharing the same\naffected service and root cause category (§17's \"recurring incident\nflag\").",
+        "operationId": "ReportService_GetSEVTrends",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVTrendsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ReportService"
+        ]
+      }
+    },
+    "/v1/search/sevs": {
+      "get": {
+        "summary": "SearchSEVs returns SEVs matching the given filters, sorted and paginated.\nquery performs full-text search across a SEV's title, description, root\ncause description, and business impact, plus any linked announcement.",
+        "operationId": "SearchService_SearchSEVs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SearchSEVsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "severityLevels",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "serviceIds",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "onCallUser",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "detectedBy",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "rootCauseCategory",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "tags",
+            "description": "This is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "startedAfter",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "startedBefore",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "quickView",
+            "description": "quick_view: \"open\" | \"my_sevs\" | \"awaiting_postmortem\"",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "description": "sort: \"started_at\" | \"severity\" | \"mttr\" | \"updated_at\"\n(default: most recently created first)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "sortDesc",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "SearchService"
+        ]
+      }
+    },
     "/v1/sevs": {
       "get": {
         "operationId": "SEVService_ListSEVs",
@@ -114,6 +1909,82 @@
         ],
         "tags": [
           "SEVService"
+        ]
+      }
+    },
+    "/v1/sevs/export.csv": {
+      "get": {
+        "summary": "ExportSEVs returns a filtered SEV list as CSV. The response is raw\ntext/csv bytes (google.api.HttpBody), not JSON — cmd/server/main.go\nwraps the gateway's marshaler in runtime.HTTPBodyMarshaler, which\ndetects this response type and writes GetData() as the HTTP body with\nGetContentType() as Content-Type instead of JSON-encoding it.",
+        "operationId": "ReportService_ExportSEVs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/apiHttpBody"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "severityLevels",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "serviceIds",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "rootCauseCategory",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "startedAfter",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "startedBefore",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          }
+        ],
+        "tags": [
+          "ReportService"
         ]
       }
     },
@@ -220,9 +2091,1437 @@
           "SEVService"
         ]
       }
+    },
+    "/v1/sevs/{sevId}/access": {
+      "get": {
+        "operationId": "SEVAccessService_ListAccess",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAccessResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "SEVAccessService"
+        ]
+      },
+      "post": {
+        "operationId": "SEVAccessService_GrantAccess",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVAccessResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SEVAccessServiceGrantAccessBody"
+            }
+          }
+        ],
+        "tags": [
+          "SEVAccessService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/access/{id}": {
+      "delete": {
+        "operationId": "SEVAccessService_RevokeAccess",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "SEVAccessService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/ai/actions": {
+      "post": {
+        "summary": "TriggerAction runs one AI action against a SEV and returns once the\nprovider responds; the result is also stored (ai_outputs) and broadcast\nover WebSocket as an ai.output event, same as a proactive trigger.",
+        "operationId": "AIService_TriggerAction",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AIOutputResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AIServiceTriggerActionBody"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/ai/outputs": {
+      "get": {
+        "summary": "ListOutputs returns previously generated AI output for a SEV, proactive\nand user-triggered alike, oldest first.",
+        "operationId": "AIService_ListOutputs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAIOutputsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/announcements": {
+      "get": {
+        "operationId": "AnnouncementService_ListAnnouncements",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAnnouncementsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "audience",
+            "description": "audience is an optional filter; omit to return all audiences",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AnnouncementService"
+        ]
+      },
+      "post": {
+        "operationId": "AnnouncementService_CreateAnnouncement",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AnnouncementResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AnnouncementServiceCreateAnnouncementBody"
+            }
+          }
+        ],
+        "tags": [
+          "AnnouncementService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/audit": {
+      "get": {
+        "operationId": "AuditService_ListAuditEntries",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAuditEntriesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AuditService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/chat": {
+      "get": {
+        "operationId": "ChatService_ListChatEntries",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListChatEntriesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ChatService"
+        ]
+      },
+      "post": {
+        "operationId": "ChatService_AddChatEntry",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ChatEntryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ChatServiceAddChatEntryBody"
+            }
+          }
+        ],
+        "tags": [
+          "ChatService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/github-issues": {
+      "post": {
+        "summary": "CreateGitHubIssue creates a new GitHub Issue pre-filled with SEV context,\nlinks it to the SEV, and returns the linked task record.",
+        "operationId": "TaskService_CreateGitHubIssue",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceCreateGitHubIssueBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/jira-issues": {
+      "post": {
+        "summary": "CreateJiraIssue creates a new Jira issue pre-filled with SEV context,\nlinks it to the SEV, and returns the linked task record.",
+        "operationId": "TaskService_CreateJiraIssue",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceCreateJiraIssueBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/join-slack-channel": {
+      "post": {
+        "summary": "JoinSlackChannel is a self-service \"add me\" action (docs/roadmap.md\nPhase 11c) — unlike InviteRoleToSlack, it invites the *caller*, not a\nnamed role holder, so it needs no role_id and no IC/Responder floor:\nany Viewer with real (non visibility-restricted) access to the SEV may\ncall it. Resolution order is the caller's own identity: stored\nSlackUserID, then LookupUserIDByEmail against the caller's own email.\nFailedPrecondition when the SEV has no Slack channel recorded or the\ncaller has no resolvable Slack identity; PermissionDenied when the\ncaller lacks full access to a Sensitive SEV — see the handler's doc\ncomment for why that check is explicit here and wasn't part of Phase\n10e's InviteRoleToSlack.",
+        "operationId": "RoleService_JoinSlackChannel",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "RoleService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/links": {
+      "get": {
+        "operationId": "SEVLinkService_ListLinkedSEVs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListLinkedSEVsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "SEVLinkService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/postmortem": {
+      "get": {
+        "operationId": "PostmortemService_GetPostmortem",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PostmortemResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      },
+      "patch": {
+        "operationId": "PostmortemService_UpdatePostmortem",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PostmortemResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PostmortemServiceUpdatePostmortemBody"
+            }
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/postmortem/transition": {
+      "post": {
+        "operationId": "PostmortemService_TransitionPostmortemStatus",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PostmortemResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PostmortemServiceTransitionPostmortemStatusBody"
+            }
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/roles": {
+      "get": {
+        "operationId": "RoleService_ListRoles",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListRolesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "RoleService"
+        ]
+      },
+      "post": {
+        "summary": "AssignRole, in addition to recording the assignment, best-effort invites\nthe role holder into the SEV's incident Slack channel when one is\nalready recorded (SEV.slack_channel_id) — every assigned role gets\nadded automatically, not just those present at channel-creation time\n(docs/roadmap.md Phase 11 follow-up). A Slack-side failure here never\nfails the assignment itself; InviteRoleToSlack below remains available\nto retry or to invite a role assigned before the channel existed.",
+        "operationId": "RoleService_AssignRole",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVRoleResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/RoleServiceAssignRoleBody"
+            }
+          }
+        ],
+        "tags": [
+          "RoleService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/roles/{id}": {
+      "delete": {
+        "operationId": "RoleService_RemoveRole",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "RoleService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/roles/{id}/invite-to-slack": {
+      "post": {
+        "summary": "InviteRoleToSlack invites the person holding one role assignment into\nthe SEV's already-created incident Slack channel (docs/roadmap.md Phase\n10e) — a manual \"add to chat\" action for a role assigned after the\nchannel was created (auto-invite at channel-creation time only covers\nroles that existed at that moment). Fails FailedPrecondition when the\nSEV has no Slack channel recorded, or when the role holder has no\nresolvable Slack identity.",
+        "operationId": "RoleService_InviteRoleToSlack",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "RoleService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/share": {
+      "post": {
+        "summary": "CreateShareLink is rejected for a Sensitive SEV (§14.1: \"Sensitive SEVs\ncannot have shareable links generated\").",
+        "operationId": "ShareService_CreateShareLink",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ShareLinkResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ShareServiceCreateShareLinkBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShareService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/share/{token}": {
+      "delete": {
+        "operationId": "ShareService_RevokeShareLink",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ShareService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/tasks": {
+      "get": {
+        "summary": "ListTasks returns all tasks linked to a SEV.",
+        "operationId": "TaskService_ListTasks",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListTasksResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      },
+      "post": {
+        "summary": "LinkTask links an existing external task (e.g. a GitHub Issue URL) to a SEV.",
+        "operationId": "TaskService_LinkTask",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceLinkTaskBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/tasks/{id}": {
+      "delete": {
+        "summary": "UnlinkTask removes a linked task from a SEV by its database ID.",
+        "operationId": "TaskService_UnlinkTask",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/tasks/{id}/due-date": {
+      "patch": {
+        "summary": "UpdateTaskDueDate overrides the SLA-computed due date for a linked task.",
+        "operationId": "TaskService_UpdateTaskDueDate",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TaskResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TaskServiceUpdateTaskDueDateBody"
+            }
+          }
+        ],
+        "tags": [
+          "TaskService"
+        ]
+      }
+    },
+    "/v1/sevs/{sevId}/unlock": {
+      "post": {
+        "operationId": "PostmortemService_UnlockSEV",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UnlockSEVResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PostmortemServiceUnlockSEVBody"
+            }
+          }
+        ],
+        "tags": [
+          "PostmortemService"
+        ]
+      }
+    },
+    "/v1/sevs/{sourceSevId}/links": {
+      "post": {
+        "operationId": "SEVLinkService_LinkSEVs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SEVLinkResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sourceSevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SEVLinkServiceLinkSEVsBody"
+            }
+          }
+        ],
+        "tags": [
+          "SEVLinkService"
+        ]
+      }
+    },
+    "/v1/sevs/{sourceSevId}/links/{targetSevId}": {
+      "delete": {
+        "operationId": "SEVLinkService_UnlinkSEVs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sourceSevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "targetSevId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "relationshipType",
+            "description": "relationship_type must be one of: related, caused-by, duplicate, recurrence-of",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "SEVLinkService"
+        ]
+      }
     }
   },
   "definitions": {
+    "AIServiceTriggerActionBody": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/v1AIAction"
+        },
+        "pluginId": {
+          "type": "string",
+          "format": "int64",
+          "description": "plugin_id selects which registered plugin to use. 0 (unset) uses the\nfirst enabled plugin found — sufficient for v1, where orgs are expected\nto configure at most one active plugin at a time."
+        }
+      }
+    },
+    "AnnouncementServiceCreateAnnouncementBody": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "audience": {
+          "type": "string",
+          "title": "audience must be one of: internal, external, status-page"
+        },
+        "isMilestone": {
+          "type": "boolean"
+        },
+        "authorId": {
+          "type": "string"
+        }
+      }
+    },
+    "ChatServiceAddChatEntryBody": {
+      "type": "object",
+      "properties": {
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "occurred_at is when the message was originally sent in the chat channel."
+        },
+        "source": {
+          "type": "string",
+          "description": "source identifies the chat platform (e.g., slack, email)."
+        },
+        "author": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "addedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "ConfigServiceDeactivateUserBody": {
+      "type": "object"
+    },
+    "ConfigServiceReactivateUserBody": {
+      "type": "object"
+    },
+    "ConfigServiceUpdateAIPluginBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handlerType": {
+          "type": "string"
+        },
+        "httpEndpoint": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "apiKey": {
+          "type": "string",
+          "description": "api_key, when non-empty, replaces the stored key; omit to keep the\nexisting one unchanged."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "triggerOnOpen": {
+          "type": "boolean"
+        },
+        "triggerOnMitigated": {
+          "type": "boolean"
+        },
+        "triggerOnResolved": {
+          "type": "boolean"
+        },
+        "triggerOnPostmortemReview": {
+          "type": "boolean"
+        },
+        "rateLimitPerMinute": {
+          "type": "integer",
+          "format": "int32",
+          "description": "rate_limit_per_minute: unlike the response/create messages, 0 is a\nmeaningful value here (explicitly reset to unlimited), so this must be\nwrapped to distinguish \"not supplied\" (nil) from \"set to 0\"."
+        }
+      }
+    },
+    "ConfigServiceUpdateNotificationConfigBody": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "ConfigServiceUpdateOnCallRotationBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "pagerdutyScheduleId": {
+          "type": "string"
+        },
+        "manualUserId": {
+          "type": "string"
+        },
+        "manualDisplayName": {
+          "type": "string"
+        },
+        "overrideStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "overrideEnd": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ConfigServiceUpdateRetentionConfigBody": {
+      "type": "object",
+      "properties": {
+        "retentionDays": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "hardDelete": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ConfigServiceUpdateServiceBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "owningTeam": {
+          "type": "string"
+        },
+        "pagerdutyServiceId": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "active": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ConfigServiceUpdateUserRoleBody": {
+      "type": "object",
+      "properties": {
+        "orgRole": {
+          "type": "string",
+          "title": "org_role: viewer | responder | incident-commander | admin"
+        }
+      }
+    },
+    "ConfigServiceUpsertEscalationConfigBody": {
+      "type": "object",
+      "properties": {
+        "thresholdMinutes": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ConfigServiceUpsertIntegrationConfigBody": {
+      "type": "object",
+      "properties": {
+        "credentials": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "credentials is write-only: encrypted with AES-256-GCM before storage.\nOmit (leave empty) to keep the existing stored credentials unchanged\nwhile updating settings."
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ConfigServiceUpsertLevelingCriteriaBody": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "string"
+        }
+      }
+    },
+    "ConfigServiceUpsertServiceSLABody": {
+      "type": "object",
+      "properties": {
+        "mttdTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "A field left at 0 clears that metric's target (full-replace, like\nUpdateRetentionConfigRequest — not a sparse patch)."
+        },
+        "mttmTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttrTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "rtpcTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "PostmortemServiceTransitionPostmortemStatusBody": {
+      "type": "object",
+      "properties": {
+        "toStatus": {
+          "type": "string",
+          "title": "to_status must be one of: draft, in-review, approved"
+        },
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "PostmortemServiceUnlockSEVBody": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "reason is required and is written to the audit log."
+        },
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "PostmortemServiceUpdatePostmortemBody": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is required when the SEV is locked (PostmortemComplete status)."
+        },
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "RoleServiceAssignRoleBody": {
+      "type": "object",
+      "properties": {
+        "roleType": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      }
+    },
+    "SEVAccessServiceGrantAccessBody": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "SEVLinkServiceLinkSEVsBody": {
+      "type": "object",
+      "properties": {
+        "targetSevId": {
+          "type": "string"
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type must be one of: related, caused-by, duplicate, recurrence-of"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      }
+    },
     "SEVServiceTransitionStatusBody": {
       "type": "object",
       "properties": {
@@ -243,6 +3542,10 @@
         "postmortemCompletedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is required when the SEV is locked (PostmortemComplete status)."
         }
       }
     },
@@ -289,18 +3592,6 @@
         "monitoringTool": {
           "type": "string"
         },
-        "alertUrl": {
-          "type": "string"
-        },
-        "metricLink": {
-          "type": "string"
-        },
-        "snapshotUrl": {
-          "type": "string"
-        },
-        "githubRepo": {
-          "type": "string"
-        },
         "rightPeoplePresent": {
           "type": "boolean"
         },
@@ -326,17 +3617,201 @@
         },
         "userId": {
           "type": "string"
+        },
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is required when the SEV is locked (PostmortemComplete status)."
+        },
+        "aiDisabled": {
+          "type": "boolean"
+        },
+        "alertUrl": {
+          "type": "string"
+        },
+        "dashboardUrl": {
+          "type": "string"
+        },
+        "snapshotUrl": {
+          "type": "string"
+        },
+        "githubRepo": {
+          "type": "string"
+        },
+        "rootCauseReferenceUrl": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "slackChannelId": {
+          "type": "string",
+          "description": "slack_channel_id records the incident channel cmd/slackbot auto-created\nfor this SEV, written back right after channel creation (docs/roadmap.md\nPhase 10e). Sparse-patch like every other field here: omitted on every\nother UpdateSEV call, so this is safe to send from exactly one call site."
         }
       }
+    },
+    "ShareServiceCreateShareLinkBody": {
+      "type": "object",
+      "properties": {
+        "expiresInDays": {
+          "type": "integer",
+          "format": "int32",
+          "description": "expires_in_days: how many days from now the link stays valid. Defaults\nto 30 when unset or \u003c= 0."
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      }
+    },
+    "TaskServiceCreateGitHubIssueBody": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "owner is the GitHub organisation or user (e.g. \"acme-corp\")."
+        },
+        "repo": {
+          "type": "string",
+          "description": "repo is the repository name (e.g. \"my-service\")."
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string",
+          "description": "body is the issue description; callers should pre-fill with SEV context."
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "assignee": {
+          "type": "string",
+          "description": "assignee is a GitHub login to assign the new issue to (wrapped into\nGitHub's assignees: []string at the client layer). Optional — an empty\nvalue creates the issue unassigned (docs/roadmap.md Phase 10f)."
+        },
+        "assigneeUserId": {
+          "type": "string",
+          "description": "assignee_user_id is the Sevitout user ID of the picked assignee, when\npicked via the frontend's directory-backed AssigneePicker (as opposed\nto a raw API call supplying only `assignee` directly) — the server\nresolves it to that user's current display name and stores it as\nTaskResponse.assignee_name, so the linked-tasks list can show a person's\nname instead of their opaque GitHub login. Optional; a lookup failure\n(e.g. an unrecognized ID) is non-fatal — issue creation still succeeds,\njust without assignee_name set."
+        }
+      }
+    },
+    "TaskServiceCreateJiraIssueBody": {
+      "type": "object",
+      "properties": {
+        "projectKey": {
+          "type": "string",
+          "description": "project_key is the Jira project's key (e.g. \"OPS\"), not its numeric ID."
+        },
+        "issueType": {
+          "type": "string",
+          "description": "issue_type is the target project's issue type name (e.g. \"Task\", \"Bug\")\n— it must already exist on that project."
+        },
+        "summary": {
+          "type": "string",
+          "description": "summary is the issue's title (Jira's naming for the field GitHub calls\n\"title\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "description is the issue body; callers should pre-fill with SEV\ncontext."
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "assigneeAccountId": {
+          "type": "string",
+          "description": "assignee_account_id is a Jira Cloud account ID to assign the new issue\nto (sent as Jira's assignee: {accountId: \"...\"}). Optional — an empty\nvalue creates the issue unassigned. Unlike a GitHub login, this is an\nopaque ID a user typically can't see in Jira's own UI without an\nemail-\u003eaccountId lookup (docs/roadmap.md Phase 10f's documented UX risk)."
+        },
+        "assigneeUserId": {
+          "type": "string",
+          "description": "assignee_user_id is the Sevitout user ID of the picked assignee — same\nmeaning as CreateGitHubIssueRequest.assignee_user_id, resolved into\nTaskResponse.assignee_name the same way."
+        }
+      }
+    },
+    "TaskServiceLinkTaskBody": {
+      "type": "object",
+      "properties": {
+        "externalSystem": {
+          "type": "string",
+          "description": "external_system identifies the tracker (e.g. \"github\", \"generic\")."
+        },
+        "taskId": {
+          "type": "string",
+          "description": "task_id is the external identifier (e.g. \"owner/repo#42\")."
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "description": "priority: critical | non-critical (controls default SLA due date)."
+        },
+        "dueDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "due_date overrides the computed SLA due date when provided."
+        }
+      }
+    },
+    "TaskServiceUpdateTaskDueDateBody": {
+      "type": "object",
+      "properties": {
+        "dueDate": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "apiHttpBody": {
+      "type": "object",
+      "properties": {
+        "contentType": {
+          "type": "string",
+          "description": "The HTTP Content-Type header value specifying the content type of the body."
+        },
+        "data": {
+          "type": "string",
+          "format": "byte",
+          "description": "The HTTP request/response body as raw binary."
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          },
+          "description": "Application specific response metadata. Must be set in the first response\nfor streaming APIs."
+        }
+      },
+      "description": "Message that represents an arbitrary HTTP body. It should only be used for\npayload formats that can't be represented as JSON, such as raw binary or\nan HTML page.\n\n\nThis message can be used both in streaming and non-streaming API methods in\nthe request as well as the response.\n\nIt can be used as a top-level request field, which is convenient if one\nwants to extract parameters from either the URL or HTTP template into the\nrequest fields and also want access to the raw HTTP body.\n\nExample:\n\n    message GetResourceRequest {\n      // A unique request id.\n      string request_id = 1;\n\n      // The raw HTTP body is bound to this field.\n      google.api.HttpBody http_body = 2;\n    }\n\n    service ResourceService {\n      rpc GetResource(GetResourceRequest) returns (google.api.HttpBody);\n      rpc UpdateResource(google.api.HttpBody) returns\n      (google.protobuf.Empty);\n    }\n\nExample with streaming methods:\n\n    service CaldavService {\n      rpc GetCalendar(stream google.api.HttpBody)\n        returns (stream google.api.HttpBody);\n      rpc UpdateCalendar(stream google.api.HttpBody)\n        returns (stream google.api.HttpBody);\n    }\n\nUse of this type only changes how the request and response bodies are\nhandled, all other features will continue to work unchanged."
     },
     "protobufAny": {
       "type": "object",
       "properties": {
         "@type": {
-          "type": "string"
+          "type": "string",
+          "description": "A URL/resource name that uniquely identifies the type of the serialized\nprotocol buffer message. This string must contain at least\none \"/\" character. The last segment of the URL's path must represent\nthe fully qualified name of the type (as in\n`path/google.protobuf.Duration`). The name should be in a canonical form\n(e.g., leading \".\" is not accepted).\n\nIn practice, teams usually precompile into the binary all types that they\nexpect it to use in the context of Any. However, for URLs which use the\nscheme `http`, `https`, or no scheme, one can optionally set up a type\nserver that maps type URLs to message definitions as follows:\n\n* If no scheme is provided, `https` is assumed.\n* An HTTP GET on the URL must yield a [google.protobuf.Type][]\n  value in binary format, or produce an error.\n* Applications are allowed to cache lookup results based on the\n  URL, or have them precompiled into a binary to avoid any\n  lookup. Therefore, binary compatibility needs to be preserved\n  on changes to types. (Use versioned type names to manage\n  breaking changes.)\n\nNote: this functionality is not currently available in the official\nprotobuf release, and it is not used for type URLs beginning with\ntype.googleapis.com. As of May 2023, there are no widely used type server\nimplementations and no plans to implement one.\n\nSchemes other than `http`, `https` (or the empty scheme) might be\nused with implementation specific semantics."
         }
       },
-      "additionalProperties": {}
+      "additionalProperties": {},
+      "description": "`Any` contains an arbitrary serialized protocol buffer message along with a\nURL that describes the type of the serialized message.\n\nProtobuf library provides support to pack/unpack Any values in the form\nof utility functions or additional generated methods of the Any type.\n\nExample 1: Pack and unpack a message in C++.\n\n    Foo foo = ...;\n    Any any;\n    any.PackFrom(foo);\n    ...\n    if (any.UnpackTo(\u0026foo)) {\n      ...\n    }\n\nExample 2: Pack and unpack a message in Java.\n\n    Foo foo = ...;\n    Any any = Any.pack(foo);\n    ...\n    if (any.is(Foo.class)) {\n      foo = any.unpack(Foo.class);\n    }\n    // or ...\n    if (any.isSameTypeAs(Foo.getDefaultInstance())) {\n      foo = any.unpack(Foo.getDefaultInstance());\n    }\n\n Example 3: Pack and unpack a message in Python.\n\n    foo = Foo(...)\n    any = Any()\n    any.Pack(foo)\n    ...\n    if any.Is(Foo.DESCRIPTOR):\n      any.Unpack(foo)\n      ...\n\n Example 4: Pack and unpack a message in Go\n\n     foo := \u0026pb.Foo{...}\n     any, err := anypb.New(foo)\n     if err != nil {\n       ...\n     }\n     ...\n     foo := \u0026pb.Foo{}\n     if err := any.UnmarshalTo(foo); err != nil {\n       ...\n     }\n\nThe pack methods provided by protobuf library will by default use\n'type.googleapis.com/full.type.name' as the type URL and the unpack\nmethods only use the fully qualified type name after the last '/'\nin the type URL, for example \"foo.bar.com/x/y.z\" will yield type\nname \"y.z\".\n\nJSON\n====\nThe JSON representation of an `Any` value uses the regular\nrepresentation of the deserialized, embedded message, with an\nadditional field `@type` which contains the type URL. Example:\n\n    package google.profile;\n    message Person {\n      string first_name = 1;\n      string last_name = 2;\n    }\n\n    {\n      \"@type\": \"type.googleapis.com/google.profile.Person\",\n      \"firstName\": \u003cstring\u003e,\n      \"lastName\": \u003cstring\u003e\n    }\n\nIf the embedded message type is well-known and has a custom JSON\nrepresentation, that representation will be embedded adding a field\n`value` which holds the custom JSON in addition to the `@type`\nfield. Example (for message [google.protobuf.Duration][]):\n\n    {\n      \"@type\": \"type.googleapis.com/google.protobuf.Duration\",\n      \"value\": \"1.212s\"\n    }"
     },
     "rpcStatus": {
       "type": "object",
@@ -354,6 +3829,379 @@
             "type": "object",
             "$ref": "#/definitions/protobufAny"
           }
+        }
+      }
+    },
+    "v1AIAction": {
+      "type": "string",
+      "enum": [
+        "AI_ACTION_UNSPECIFIED",
+        "AI_ACTION_SUMMARIZE",
+        "AI_ACTION_SUGGEST_ROOT_CAUSE",
+        "AI_ACTION_DRAFT_POSTMORTEM",
+        "AI_ACTION_SUGGEST_TASKS",
+        "AI_ACTION_FIND_SIMILAR",
+        "AI_ACTION_SUGGEST_RESPONDERS",
+        "AI_ACTION_DRAFT_ANNOUNCEMENT"
+      ],
+      "default": "AI_ACTION_UNSPECIFIED",
+      "description": "AIAction enumerates the Provider methods a caller can invoke on demand\n(§11.2) or that a lifecycle trigger invokes proactively (§11.1). Not every\naction is meaningful for every trigger — see internal/ai.Dispatcher."
+    },
+    "v1AIActionChunk": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "done": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1AIOutputResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "pluginId": {
+          "type": "string",
+          "format": "int64"
+        },
+        "triggerEvent": {
+          "type": "string",
+          "description": "trigger_event is the lifecycle event that produced this output (e.g.\n\"sev.opened\", \"sev.mitigated\", \"sev.resolved\", \"postmortem.in_review\"),\nor \"manual\" for a TriggerAction/StreamAction call."
+        },
+        "action": {
+          "$ref": "#/definitions/v1AIAction"
+        },
+        "content": {
+          "type": "string",
+          "description": "content is plain text for narrative actions (Summarize,\nDraftPostmortem, DraftAnnouncement) and JSON for structured, list-shaped\nactions (SuggestRootCause, SuggestTasks, FindSimilar, SuggestResponders).\nAlways clearly labeled AI-generated wherever the UI renders it (§11)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1AIPluginResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handlerType": {
+          "type": "string",
+          "description": "handler_type: \"builtin\" (internal/ai's built-in Anthropic provider) or \"http\"."
+        },
+        "httpEndpoint": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "apiKeyConfigured": {
+          "type": "boolean",
+          "description": "api_key_configured is true when an encrypted API key has been stored;\nthe decrypted value itself is never returned, same policy as\nIntegrationConfigResponse.credentials_configured."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "triggerOnOpen": {
+          "type": "boolean"
+        },
+        "triggerOnMitigated": {
+          "type": "boolean"
+        },
+        "triggerOnResolved": {
+          "type": "boolean"
+        },
+        "triggerOnPostmortemReview": {
+          "type": "boolean"
+        },
+        "rateLimitPerMinute": {
+          "type": "integer",
+          "format": "int32",
+          "description": "rate_limit_per_minute caps AI actions per minute for this plugin; 0 means unlimited."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1ActiveSEVCount": {
+      "type": "object",
+      "properties": {
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "count": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1AnnouncementResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "authorId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "audience": {
+          "type": "string",
+          "title": "audience is one of: internal, external, status-page"
+        },
+        "isMilestone": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1AuditEntryResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "fieldName": {
+          "type": "string"
+        },
+        "oldValue": {
+          "type": "string"
+        },
+        "newValue": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1AvailablePlugin": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      }
+    },
+    "v1CatalogField": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "key is the storage key exactly as read/written by UpsertIntegrationConfig\n(e.g. \"bot_token\", \"cloud_id\") — never itself shown to an admin; see label."
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "kind: \"text\" | \"secret\" | \"select\". \"secret\" fields are write-only\ncredentials, rendered password-masked; \"select\" fields must be one of\noptions."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "required is a UI-only affordance — see UpsertIntegrationConfig's doc\ncomment for why it isn't enforced server-side at upsert time."
+        },
+        "help": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "options lists the valid values for a \"select\" field; empty otherwise."
+        }
+      },
+      "description": "CatalogField describes one credential or settings key an integration_type\naccepts — see internal/integrations/catalog.Field, which this mirrors\nfield-for-field."
+    },
+    "v1ChatEntryResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "addedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "v1CreateAIPluginRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handlerType": {
+          "type": "string"
+        },
+        "httpEndpoint": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "apiKey": {
+          "type": "string",
+          "description": "api_key is write-only: encrypted with AES-256-GCM before storage, like\nUpsertIntegrationConfigRequest.credentials."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "triggerOnOpen": {
+          "type": "boolean"
+        },
+        "triggerOnMitigated": {
+          "type": "boolean"
+        },
+        "triggerOnResolved": {
+          "type": "boolean"
+        },
+        "triggerOnPostmortemReview": {
+          "type": "boolean"
+        },
+        "rateLimitPerMinute": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1CreateNotificationConfigRequest": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1CreateOnCallRotationRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "pagerdutyScheduleId": {
+          "type": "string"
+        },
+        "manualUserId": {
+          "type": "string",
+          "description": "manual_user_id / manual_display_name plus a override_start/override_end\nwindow define a manual override for a planned change; omit all four for\na normal PagerDuty-backed rotation."
+        },
+        "manualDisplayName": {
+          "type": "string"
+        },
+        "overrideStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "overrideEnd": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -396,15 +4244,6 @@
         "monitoringTool": {
           "type": "string"
         },
-        "alertUrl": {
-          "type": "string"
-        },
-        "metricLink": {
-          "type": "string"
-        },
-        "snapshotUrl": {
-          "type": "string"
-        },
         "tags": {
           "type": "object",
           "additionalProperties": {
@@ -413,6 +4252,434 @@
         },
         "sensitive": {
           "type": "boolean"
+        },
+        "aiDisabled": {
+          "type": "boolean"
+        },
+        "alertUrl": {
+          "type": "string"
+        },
+        "dashboardUrl": {
+          "type": "string"
+        },
+        "snapshotUrl": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    },
+    "v1CreateServiceRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "id is a caller-supplied slug (e.g. \"checkout\"); it is the stable\nidentifier referenced elsewhere (affected services, SLIs, on-call)."
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "owningTeam": {
+          "type": "string"
+        },
+        "pagerdutyServiceId": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v1DashboardMetricsResponse": {
+      "type": "object",
+      "properties": {
+        "activeByLevel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ActiveSEVCount"
+          }
+        },
+        "mttrTrends": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1MTTRTrend"
+          },
+          "description": "mttr_trends always has exactly 3 entries: 7, 30, and 90-day windows."
+        },
+        "frequencyByServiceAndLevel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ServiceLevelFrequency"
+          }
+        },
+        "postmortemCompletionRate": {
+          "type": "number",
+          "format": "double",
+          "description": "postmortem_completion_rate is approved postmortems divided by total\npostmortems, in [0, 1]. 0 when there are no postmortems yet."
+        },
+        "overdueTaskCount": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1DirectoryUser": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "slackUserId": {
+          "type": "string",
+          "description": "slack_user_id is included since resolving it is exactly why the Slack\nauto-invite path calls this RPC — see docs/roadmap.md Phase 10d."
+        },
+        "githubUsername": {
+          "type": "string",
+          "description": "github_username and jira_account_id back the GitHub/Jira issue-creation\nassignee picker (docs/roadmap.md Phase 10f UX follow-up): the frontend\nsearches this directory and offers only users with the relevant field\nset, displaying their name instead of the raw tracker-native ID."
+        },
+        "jiraAccountId": {
+          "type": "string"
+        }
+      }
+    },
+    "v1EscalationConfigResponse": {
+      "type": "object",
+      "properties": {
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "thresholdMinutes": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1GetIntegrationCatalogResponse": {
+      "type": "object",
+      "properties": {
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IntegrationCatalogEntry"
+          },
+          "description": "integrations is fixed-order — the order the admin UI's sidebar renders\nin — matching internal/integrations/catalog.All exactly."
+        }
+      }
+    },
+    "v1GetSlackBotCredentialResponse": {
+      "type": "object",
+      "properties": {
+        "botToken": {
+          "type": "string",
+          "description": "bot_token / app_token are empty when the \"slack\" integration has no\ndatastore-configured credentials — not an error, since the caller has a\nstatic-env-var fallback of its own."
+        },
+        "appToken": {
+          "type": "string"
+        }
+      }
+    },
+    "v1IntegrationCatalogEntry": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "credentialFields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1CatalogField"
+          },
+          "description": "credential_fields is empty for a settings-only integration (Monitoring)."
+        },
+        "settingsFields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1CatalogField"
+          }
+        }
+      },
+      "description": "IntegrationCatalogEntry describes one integration_type's complete field\nschema — see internal/integrations/catalog.Integration."
+    },
+    "v1IntegrationConfigResponse": {
+      "type": "object",
+      "properties": {
+        "integrationType": {
+          "type": "string"
+        },
+        "credentialsConfigured": {
+          "type": "boolean",
+          "description": "credentials_configured is true when a non-empty credentials blob has\nbeen stored; the decrypted value itself is never returned."
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1LevelingCriteriaResponse": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "criteria": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1ListAIOutputsResponse": {
+      "type": "object",
+      "properties": {
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AIOutputResponse"
+          }
+        }
+      }
+    },
+    "v1ListAIPluginsResponse": {
+      "type": "object",
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AIPluginResponse"
+          }
+        }
+      }
+    },
+    "v1ListAccessResponse": {
+      "type": "object",
+      "properties": {
+        "access": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SEVAccessResponse"
+          }
+        }
+      }
+    },
+    "v1ListAnnouncementsResponse": {
+      "type": "object",
+      "properties": {
+        "announcements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AnnouncementResponse"
+          }
+        }
+      }
+    },
+    "v1ListAuditEntriesResponse": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AuditEntryResponse"
+          }
+        }
+      }
+    },
+    "v1ListChatEntriesResponse": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ChatEntryResponse"
+          }
+        }
+      }
+    },
+    "v1ListEnabledIntegrationsResponse": {
+      "type": "object",
+      "properties": {
+        "enabledTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "enabled_types lists the integration_types (e.g. \"slack\", \"jira\") that\ncurrently have a meaningful store-configured credentials or settings\nblob — the same \"configured\" concept the admin UI already uses (see\nGetIntegrationCatalog). Known limitation: an integration activated only\nvia its static env-var fallback (PagerDuty/GitHub/Jira, with zero store\nrows — see cmd/server's *Resolver types) is not reflected here, so it\nshows as \"not enabled\" even though the backend would actually serve the\nrequest. See docs/roadmap.md Phase 11a for why a fully accurate signal\nis out of scope for this phase."
+        }
+      }
+    },
+    "v1ListEscalationConfigsResponse": {
+      "type": "object",
+      "properties": {
+        "configs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EscalationConfigResponse"
+          }
+        }
+      }
+    },
+    "v1ListIntegrationConfigsResponse": {
+      "type": "object",
+      "properties": {
+        "configs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IntegrationConfigResponse"
+          }
+        }
+      }
+    },
+    "v1ListLevelingCriteriaForServicesResponse": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1LevelingCriteriaResponse"
+          }
+        }
+      }
+    },
+    "v1ListLevelingCriteriaResponse": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1LevelingCriteriaResponse"
+          }
+        }
+      }
+    },
+    "v1ListLinkedSEVsResponse": {
+      "type": "object",
+      "properties": {
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SEVLinkResponse"
+          }
+        }
+      }
+    },
+    "v1ListNotificationConfigsResponse": {
+      "type": "object",
+      "properties": {
+        "configs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1NotificationConfigResponse"
+          }
+        }
+      }
+    },
+    "v1ListOnCallRotationsResponse": {
+      "type": "object",
+      "properties": {
+        "rotations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1OnCallRotationResponse"
+          }
+        }
+      }
+    },
+    "v1ListPluginsResponse": {
+      "type": "object",
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AvailablePlugin"
+          }
+        }
+      }
+    },
+    "v1ListRetentionConfigResponse": {
+      "type": "object",
+      "properties": {
+        "configs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RetentionConfigResponse"
+          }
+        }
+      }
+    },
+    "v1ListRolesResponse": {
+      "type": "object",
+      "properties": {
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SEVRoleResponse"
+          }
         }
       }
     },
@@ -429,6 +4696,288 @@
         "total": {
           "type": "integer",
           "format": "int32"
+        }
+      }
+    },
+    "v1ListServiceSLAsResponse": {
+      "type": "object",
+      "properties": {
+        "slas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ServiceSLAResponse"
+          }
+        }
+      }
+    },
+    "v1ListServicesResponse": {
+      "type": "object",
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ServiceResponse"
+          }
+        }
+      }
+    },
+    "v1ListTasksResponse": {
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1TaskResponse"
+          }
+        }
+      }
+    },
+    "v1ListUserDirectoryResponse": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1DirectoryUser"
+          }
+        }
+      }
+    },
+    "v1ListUsersResponse": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1UserResponse"
+          }
+        }
+      }
+    },
+    "v1MTTRTrend": {
+      "type": "object",
+      "properties": {
+        "windowDays": {
+          "type": "integer",
+          "format": "int32",
+          "description": "window_days is one of: 7, 30, 90."
+        },
+        "averageMttrSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "average_mttr_seconds is the mean MTTRSeconds across SEVs resolved within\nthe last window_days days. 0 when no SEV resolved in that window."
+        },
+        "sampleSize": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1NotificationConfigResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "events is non-empty; a rule matches an incoming event when that event's\ntype appears anywhere in this list — one rule can cover several events\ninstead of requiring a separate rule per event."
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32",
+          "description": "max_severity_level restricts this rule to SEVs at this severity level or\nmore critical (severity 1 is most critical); 0 means unset (every\nseverity), the same proto3 convention ServiceSLAResponse's target-seconds\nfields already use."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1OnCallRotationResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "pagerdutyScheduleId": {
+          "type": "string"
+        },
+        "manualUserId": {
+          "type": "string"
+        },
+        "manualDisplayName": {
+          "type": "string"
+        },
+        "overrideStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "overrideEnd": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1PostmortemResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "v1RecurringPattern": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "rootCauseCategory": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "sevIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "sev_ids is sorted most-recently-created first."
+        }
+      }
+    },
+    "v1RetentionConfigResponse": {
+      "type": "object",
+      "properties": {
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "retentionDays": {
+          "type": "integer",
+          "format": "int32",
+          "description": "retention_days == 0 means retain forever."
+        },
+        "hardDelete": {
+          "type": "boolean",
+          "description": "hard_delete controls what happens on expiry: false archives\n(soft-delete), true purges permanently."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1SEVAccessResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      }
+    },
+    "v1SEVLinkResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sourceSevId": {
+          "type": "string"
+        },
+        "targetSevId": {
+          "type": "string"
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type is one of: related, caused-by, duplicate, recurrence-of"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string"
         }
       }
     },
@@ -479,18 +5028,6 @@
           "type": "string"
         },
         "monitoringTool": {
-          "type": "string"
-        },
-        "alertUrl": {
-          "type": "string"
-        },
-        "metricLink": {
-          "type": "string"
-        },
-        "snapshotUrl": {
-          "type": "string"
-        },
-        "githubRepo": {
           "type": "string"
         },
         "rightPeoplePresent": {
@@ -556,6 +5093,546 @@
           "format": "date-time"
         },
         "createdBy": {
+          "type": "string"
+        },
+        "aiDisabled": {
+          "type": "boolean",
+          "description": "ai_disabled opts this SEV out of all AI plugin dispatch, proactive and\nuser-triggered (§11.3)."
+        },
+        "alertUrl": {
+          "type": "string",
+          "description": "alert_url links to the alert that fired (e.g. a PagerDuty incident or\nDatadog monitor URL)."
+        },
+        "dashboardUrl": {
+          "type": "string",
+          "description": "dashboard_url links to the monitoring dashboard referenced by\nmonitoring_tool (§13.4)."
+        },
+        "snapshotUrl": {
+          "type": "string",
+          "description": "snapshot_url links to an already-hosted image of the monitoring chart at\ndetection time; rendered as an inline preview in the UI. No file upload\nis supported — this is a URL to an image hosted elsewhere."
+        },
+        "githubRepo": {
+          "type": "string",
+          "description": "github_repo is the \"owner/repo\" this SEV's code lives in (e.g.\n\"acme-corp/checkout-service\"); pre-fills TaskService.CreateGitHubIssue's\nowner/repo fields in the web UI. Set via UpdateSEV, not at creation."
+        },
+        "rootCauseReferenceUrl": {
+          "type": "string",
+          "description": "root_cause_reference_url links to the concrete change that caused the\nincident — e.g. a PR/commit diff or a config-management change —\nalongside root_cause_category/root_cause_description's classification\nand narrative. Set via UpdateSEV, not at creation."
+        },
+        "query": {
+          "type": "string",
+          "description": "query is a saved query/expression (e.g. PromQL or a Datadog query\nstring) run against monitoring_tool — a separate concept from\ndashboard_url, not a URL (§13.4)."
+        },
+        "slackChannelId": {
+          "type": "string",
+          "description": "slack_channel_id is the incident channel cmd/slackbot auto-created for\nthis SEV (§13.1, docs/roadmap.md Phase 10e) — absent for SEVs created\nbefore this shipped, or whose channel-creation step never ran/failed.\nNot sensitive (raw IDs are already exposed elsewhere), so it's on the\nmain response rather than gated."
+        },
+        "slaStatus": {
+          "$ref": "#/definitions/v1SLAStatus",
+          "description": "sla_status is this SEV's live SLA breach status (docs/roadmap.md\nPhase 12), derived on every read against the most-strict SLA target\nacross its affected_services at severity_level — never trusted from\nstorage, the same discipline TaskResponse.overdue already applies to\ntask due dates. Absent (zero value) when no attached service has any\nSLA target configured at this SEV's severity level."
+        },
+        "rtpcSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "rtpc_seconds is Resolution to Postmortem Complete\n(postmortem_completed_at − resolved_at) — the same point-A-to-point-B\nshape as dttm_seconds above, not \"from started_at\" like\nmttd/mttm/mttr_seconds. Added as a Phase 12 follow-up SLA target for the\npostmortem tail."
+        }
+      }
+    },
+    "v1SEVRoleResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "roleType": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      }
+    },
+    "v1SEVTrendsResponse": {
+      "type": "object",
+      "properties": {
+        "recurringPatterns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RecurringPattern"
+          }
+        }
+      }
+    },
+    "v1SLAStatus": {
+      "type": "object",
+      "properties": {
+        "mttd": {
+          "type": "string",
+          "description": "Each status string is one of \"ok\", \"at_risk\", \"breached\",\n\"not_applicable\" (internal/sev.SLAMetricStatus)."
+        },
+        "mttm": {
+          "type": "string"
+        },
+        "mttr": {
+          "type": "string"
+        },
+        "overall": {
+          "type": "string",
+          "description": "overall is the worst of mttd/mttm/mttr/rtpc — what a summary badge\nshould show."
+        },
+        "mttdTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "The resolved target seconds per metric, 0 when not_applicable — so a UI\ncan show \"target: 5m\" alongside the status without a second lookup."
+        },
+        "mttmTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttrTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "rtpc": {
+          "type": "string",
+          "description": "rtpc is Resolution to Postmortem Complete — measured from resolved_at,\nnot started_at like mttd/mttm/mttr above (see SEVResponse.rtpc_seconds)."
+        },
+        "rtpcTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        }
+      },
+      "description": "SLAStatus is the live per-metric SLA breach status for one SEV, resolved\nfrom the most-strict target across its affected services (see\nConfigService's ServiceSLA RPCs below for how targets are set)."
+    },
+    "v1SearchSEVsResponse": {
+      "type": "object",
+      "properties": {
+        "sevs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SEVResponse"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1ServiceLevelFrequency": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "count": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1ServiceLevelMetrics": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "sevCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "avgMttdSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "avg_mttd_seconds/avg_mttm_seconds/avg_mttr_seconds average only the\nSEVs in this group with that metric already computed (nil-safe, same\ndiscipline as MTTRTrend) — 0 when none have it yet."
+        },
+        "avgMttmSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "avgMttrSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "slaOkCount": {
+          "type": "integer",
+          "format": "int32",
+          "description": "sla_*_count bucket this group's SEVs by their live SLAEvaluation.Overall\n(internal/sev/sla.go) — sla_not_applicable_count covers both \"no SLA\nconfigured for this service+severity\" and \"no baseline timestamp yet\"."
+        },
+        "slaAtRiskCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "slaBreachedCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "slaNotApplicableCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "compliancePct": {
+          "type": "number",
+          "format": "double",
+          "description": "compliance_pct is sla_ok_count / (sla_ok_count + sla_at_risk_count +\nsla_breached_count), 0 when that denominator is 0 (every SEV in the\ngroup is sla_not_applicable — not a real 0% compliance claim)."
+        }
+      }
+    },
+    "v1ServiceMetricsResponse": {
+      "type": "object",
+      "properties": {
+        "serviceLevelMetrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ServiceLevelMetrics"
+          }
+        },
+        "windowDays": {
+          "type": "integer",
+          "format": "int32",
+          "description": "window_days echoes back the resolved window (after defaulting), same\ndefensive pattern MTTRTrend.window_days uses."
+        }
+      }
+    },
+    "v1ServiceResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "owningTeam": {
+          "type": "string"
+        },
+        "pagerdutyServiceId": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1ServiceSLAResponse": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string"
+        },
+        "severityLevel": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "mttdTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "Target seconds per metric; 0 means unset (no SLA for that metric at this\nseverity level)."
+        },
+        "mttmTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mttrTargetSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rtpcTargetSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "rtpc_target_seconds targets Resolution to Postmortem Complete — see\nSEVResponse.rtpc_seconds."
+        }
+      }
+    },
+    "v1ShareLinkResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "description": "path is the public view's URL path on this server — GET path needs no\nauthentication and returns the curated public SEV view."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "createdBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1TaskResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sevId": {
+          "type": "string"
+        },
+        "externalSystem": {
+          "type": "string",
+          "description": "external_system identifies the tracker (e.g. \"github\", \"generic\")."
+        },
+        "taskId": {
+          "type": "string",
+          "description": "task_id is the external identifier (e.g. \"owner/repo#42\" for GitHub Issues)."
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "relationshipType": {
+          "type": "string",
+          "title": "relationship_type: action-item | contributing-factor | follow-up | dependency"
+        },
+        "priority": {
+          "type": "string",
+          "title": "priority: critical | non-critical"
+        },
+        "dueDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "due_date is null when the SEV has not yet been resolved."
+        },
+        "overdue": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string"
+        },
+        "assignee": {
+          "type": "string",
+          "description": "assignee is the tracker-native assignee identifier set at issue-creation\ntime (a GitHub login, or a Jira account ID) — see\nCreateGitHubIssueRequest.assignee / CreateJiraIssueRequest.assignee_account_id\n(docs/roadmap.md Phase 10f). Absent for tasks linked via LinkTask, or\ncreated before this field existed."
+        },
+        "assigneeName": {
+          "type": "string",
+          "description": "assignee_name is the Sevitout display name of the assignee, resolved\nserver-side at creation time from CreateGitHubIssueRequest.assignee_user_id\n/ CreateJiraIssueRequest.assignee_user_id — a snapshot, not a live\nlookup, the same trade-off already accepted for SEVRoleResponse's own\ndisplay_name. Absent when the assignee wasn't picked from Sevitout's\nown directory (e.g. a raw API call supplying only the tracker-native\n`assignee`); clients should fall back to `assignee` for display in that\ncase."
+        }
+      },
+      "description": "TaskResponse is the linked task record returned by all TaskService RPCs."
+    },
+    "v1TestNotificationConfigRequest": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "channelType": {
+          "type": "string"
+        },
+        "channelTarget": {
+          "type": "string"
+        },
+        "maxSeverityLevel": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "TestNotificationConfigRequest carries the same fields as\nCreateNotificationConfigRequest (no id — see the RPC's doc comment)."
+    },
+    "v1TestNotificationConfigResponse": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1TestNotificationResult"
+          }
+        }
+      }
+    },
+    "v1TestNotificationResult": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "description": "TestNotificationResult is one event's test-delivery outcome. error is\nabsent/empty on success."
+    },
+    "v1UnlockSEVResponse": {
+      "type": "object",
+      "properties": {
+        "unlockToken": {
+          "type": "string",
+          "description": "unlock_token is a short-lived JWT scoped to sev_id.\nPass it as unlock_token in subsequent mutation requests."
+        }
+      }
+    },
+    "v1UpdateMyIntegrationIdentitiesRequest": {
+      "type": "object",
+      "properties": {
+        "slackUserId": {
+          "type": "string"
+        },
+        "githubUsername": {
+          "type": "string"
+        },
+        "jiraAccountId": {
+          "type": "string"
+        }
+      }
+    },
+    "v1UserResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatarUrl": {
+          "type": "string"
+        },
+        "orgRole": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "slackUserId": {
+          "type": "string",
+          "description": "slack_user_id, github_username, and jira_account_id mirror\nWhoAmIResponse's self-service identity fields (docs/roadmap.md Phase\n10a) — read-only here (AdminUsersPage shows, but never edits, another\nuser's identities; each user manages their own via /profile)."
+        },
+        "githubUsername": {
+          "type": "string"
+        },
+        "jiraAccountId": {
+          "type": "string"
+        }
+      }
+    },
+    "v1WhoAmIResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatarUrl": {
+          "type": "string"
+        },
+        "orgRole": {
+          "type": "string"
+        },
+        "oauthProvider": {
+          "type": "string"
+        },
+        "slackUserId": {
+          "type": "string",
+          "description": "slack_user_id, github_username, and jira_account_id are the caller's\nown self-service integration identities (docs/roadmap.md Phase 10a),\nset via UpdateMyIntegrationIdentities."
+        },
+        "githubUsername": {
+          "type": "string"
+        },
+        "jiraAccountId": {
           "type": "string"
         }
       }

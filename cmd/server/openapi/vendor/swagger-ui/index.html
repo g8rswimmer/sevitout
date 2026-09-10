@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sevitout API Docs</title>
+    <link rel="stylesheet" href="/docs/assets/swagger-ui.css" />
+    <link rel="icon" type="image/png" href="/docs/assets/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/docs/assets/favicon-16x16.png" sizes="16x16" />
+    <style>
+      html { box-sizing: border-box; overflow-y: scroll; }
+      *, *:before, *:after { box-sizing: inherit; }
+      body { margin: 0; background: #fafafa; }
+      /* Sevitout doesn't support the OAuth/API-key auth flows Swagger UI's
+         default topbar advertises (auth is a JWT bearer token obtained via
+         POST /auth/login) so it's hidden rather than left dangling. */
+      .topbar { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="/docs/assets/swagger-ui-bundle.js" charset="UTF-8"></script>
+    <script src="/docs/assets/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+    <script>
+      window.onload = () => {
+        window.ui = SwaggerUIBundle({
+          url: '/openapi.json',
+          dom_id: '#swagger-ui',
+          presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+          plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+          layout: 'StandaloneLayout',
+          deepLinking: true,
+        });
+      };
+    </script>
+  </body>
+</html>
