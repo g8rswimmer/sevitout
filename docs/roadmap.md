@@ -21,6 +21,14 @@ files by domain), a real security fix (sensitive-SEV visibility — see
 gate yet. Two non-milestone runbooks already exist documenting this phase:
 `demo/logging-observability.md` and `demo/sensitive-sev-visibility.md`.
 
+Phases 0–15 are all shipped, closing the observability core, the engineering
+hardening backlog, and every integration/reporting feature named in
+`docs/requirements.md` except the two fast-follows it already flags (Linear,
+AI semantic search). Phases 16–19 continue the hardening phase with a
+SEV-hygiene-focused set of new features — closing gaps in postmortem
+follow-through, stalled-incident detection, and recurrence prevention that no
+prior phase addressed.
+
 This document lays out what's next: closing observability gaps, tightening
 engineering practices, and a short list of concretely-scoped new features. See
 [`docs/architecture-evolution.md`](architecture-evolution.md) for the architecture
@@ -1854,6 +1862,366 @@ already in the roadmap — reuses `Publisher`, `IntegrationConfigStore`/
 
 ---
 
+## Phase 16 — Task completion tracking + org-wide open action items
+
+**Status**: not started
+
+`docs/requirements.md` §10 requires a postmortem's "Prevention / Action
+Items" section but only as narrative, "distinct from linked tasks" — and
+that separation has a real cost: nothing connects the prose someone writes
+in a postmortem to a trackable follow-up, and no page shows every open
+action item across every SEV in one place. The `action-item` relationship
+type already exists on `LinkedTask` (`internal/store/models.go`'s
+`TaskRelationshipActionItem`) with a due date derived by priority
+(`docs/requirements.md` §8), but `LinkedTask` has **no completion field at
+all** — `isOverdue`/`CountOverdue` (`internal/api/grpc/task.go`,
+`internal/api/grpc/report.go`) are pure due-date comparisons, so a
+long-since-fixed action item stays flagged "Overdue" forever, and the only
+org-wide surface today is `GetDashboardMetrics`' `overdue_task_count` — a
+number, not a list. This phase reuses `LinkedTask`/`TaskStore` rather than
+inventing a second structured-action-item model, adds the missing
+completion signal, and bridges the postmortem editor to it.
+
+**16a. Backend: schema + completion**
+
+- Migration `000023_task_completed_at.{up,down}.sql` (next free number after
+  `000022_notification_config_multi_event`): `ALTER TABLE linked_tasks ADD
+  COLUMN completed_at TIMESTAMPTZ;` — nullable, `NULL` means open. Down drops
+  the column.
+- `store.LinkedTask` (`internal/store/models.go:316-344`) gains
+  `CompletedAt *time.Time`, doc-commented next to `Overdue`.
+- `store.TaskStore` (`internal/store/store.go:68-84`) gains two narrow
+  mutators, matching the file's existing preference for narrow mutators over
+  widening `Update` (the same reasoning `SetDueDateIfUnset` already
+  documents): `MarkComplete(ctx, id int64, at time.Time) error` and
+  `Reopen(ctx, id int64) error` (sets `completed_at` back to `NULL`).
+  Implement in `internal/store/memory/*task*.go` and
+  `internal/store/postgres/task.go` + a new sqlc query pair.
+- `isOverdue` (`internal/api/grpc/task.go:640-647`) and `CountOverdue`
+  (backing `internal/api/grpc/report.go`'s `overdue_task_count`) both gain a
+  "completed tasks are never overdue" check — `completed_at IS NOT NULL`
+  short-circuits to not-overdue regardless of due date. This is a genuine
+  bug fix, not just new behavior: today a completed GitHub/Jira issue or a
+  manually-resolved action item has no way to stop counting as overdue.
+
+**16b. Backend + frontend: mark complete / reopen**
+
+- `TaskService` gains `CompleteTask(sev_id, task_id) → TaskResponse` and
+  `ReopenTask(sev_id, task_id) → TaskResponse`, RBAC `store.OrgRoleResponder`
+  (same floor as `LinkTask`/`CreateGitHubIssue`/`CreateJiraIssue` — an
+  auxiliary task-management action, not something requiring IC/Admin).
+  `TaskResponse` gains `completed_at`.
+- `TasksPanel.tsx`: each row gets a "Mark done" action (or "Reopen" once
+  completed), styled as a low-emphasis icon button next to the existing
+  Overdue badge — the badge itself simply stops rendering once
+  `completed_at` is set, since `Overdue` is now false for that row.
+
+**16c. Backend + frontend: org-wide "Open Action Items" view**
+
+- New RPC `ReportService.ListActionItems(include_completed: bool) →
+  ListActionItemsResponse{repeated ActionItemResponse}`, RBAC
+  `store.OrgRoleViewer` (matches every other `ReportService` read). Backed
+  by a new `TaskStore.ListByRelationshipType(ctx, relType
+  store.TaskRelationshipType, includeCompleted bool) ([]*LinkedTask, error)`
+  filtered server-side to `action-item`, joined with each task's parent
+  `SEV.ID`/`Title`/`SeverityLevel`/`Status` (a small N+1-avoiding batch
+  lookup by distinct SEV ID, same shape as Phase 13's `slaLookup`
+  construction), excluding sensitive SEVs (same `ExcludeSensitive` posture
+  as every other `ReportService`/`SearchService` read). Bounded by
+  `reportFanoutLimit`, matching `ExportSEVs`.
+- New `web/src/components/reports/OpenActionItemsTable.tsx`: columns SEV
+  (linked), item title, owner (assignee if set, else blank), due date,
+  Overdue badge, inline "Mark done" — built on the same table shell
+  `ServiceHeatmap`/`ServiceSLAComplianceTable` already use. Added to
+  `ReportsPage.tsx` under a new `<Section title="Open Action Items">`, with
+  a simple "show completed" toggle (default off) driving
+  `include_completed`.
+
+**16d. Frontend: postmortem → task bridge**
+
+- `web/src/lib/postmortemTemplate.ts` already knows the "Action Items"
+  section heading it seeds — reuse that same heading string to detect
+  whether the current postmortem `content` has non-placeholder text under
+  it. `PostmortemPage.tsx`: when that section has real content but the SEV
+  has zero `action-item`-relationship linked tasks, show a dismissible
+  inline banner: "This postmortem mentions action items that aren't tracked
+  as follow-up tasks yet" with a button that opens `TasksPanel`'s existing
+  link/create form pre-set to `relationship_type: action-item`. A simple
+  presence heuristic, not content parsing — it never tries to extract
+  individual items from the prose.
+
+**16e. Tests + demo doc**
+
+- Go: `internal/store/memory/task_test.go` / `postgres` equivalent for
+  `MarkComplete`/`Reopen`; `internal/api/grpc/task_test.go` for
+  `isOverdue`'s completed-never-overdue case and the two new RPCs' RBAC
+  floor; `internal/api/grpc/report_test.go` for `ListActionItems`
+  (relationship-type filtering, sensitive-SEV exclusion, include/exclude
+  completed).
+- Frontend: `TasksPanel.test.tsx` additions for the mark-done/reopen toggle
+  and the Overdue badge disappearing on completion;
+  `OpenActionItemsTable.test.tsx` (new); `PostmortemPage.test.tsx` additions
+  for the bridge banner's show/hide conditions.
+- `demo/action-item-tracking.md` (existing template). Known limitations to
+  state: the postmortem bridge is a presence heuristic, not per-item
+  parsing — a postmortem with one bullet and one with ten both just get a
+  single banner; no due-date/escalation on action items beyond what linked
+  tasks already have (folds into Phase 17 if wanted later, not built here).
+
+**Also considered and explicitly deferred**:
+- Parsing postmortem prose into individually auto-created tasks — a real
+  NLP/parsing effort, disproportionate to this phase's scope.
+- An action-item-specific escalation/notification (e.g. "this action item is
+  overdue" as its own event) — natural once Phase 17's escalation
+  infrastructure and this phase's completion signal both exist, not bundled
+  into either phase alone.
+
+**Estimate**: ~4-5 days (16a ~1 day, 16b ~0.5-0.75 day, 16c ~1.25-1.5 days,
+16d ~0.5-0.75 day, 16e ~0.75-1 day). **Depends on**: nothing — reuses
+`LinkedTask`/`TaskStore`/`ReportService` unchanged.
+
+---
+
+## Phase 17 — Stalled-incident & postmortem-timeliness escalation
+
+**Status**: not started
+
+Phase 15 built one escalation type — "no Incident Commander assigned after N
+minutes" — via `escalation_config`, `internal/api/grpc/notify.go`'s
+`Notifier`, and `cmd/server/main.go`'s `startEscalationScanner`/
+`scanEscalations`. Two more incident-hygiene failure modes fit the exact
+same shape but aren't covered: a SEV that has an IC but has simply gone
+quiet (no status change, announcement, or audit activity in a long
+stretch), and a postmortem that sits in `Draft`/`InReview` long after its
+SEV resolved, defeating §10's "a postmortem is required for every SEV" in
+practice even though `postmortem.due` already fires once and is never
+followed up on. This phase extends Phase 15's infrastructure rather than
+building new plumbing.
+
+**17a. Backend: schema**
+
+- Migration `000024_escalation_kind.{up,down}.sql`: `ALTER TABLE
+  escalation_config ADD COLUMN kind TEXT NOT NULL DEFAULT 'no_ic'; ALTER
+  TABLE escalation_config DROP CONSTRAINT escalation_config_severity_level_key,
+  ADD CONSTRAINT escalation_config_severity_level_kind_key UNIQUE
+  (severity_level, kind);` (exact existing constraint name confirmed at
+  implementation time) — `stalled` and `postmortem_overdue` become two more
+  rows per severity level under the same table, not two new tables; all
+  pre-existing rows default to `kind = 'no_ic'` and keep working unchanged.
+  Down reverses both.
+- `ALTER TABLE sevs ADD COLUMN stalled_notified_at TIMESTAMPTZ;` — mirrors
+  `escalated_at`'s "fire once, clear when the underlying condition clears"
+  pattern (cleared once new activity is observed past the notified
+  timestamp).
+- `store.EscalationConfig` (`internal/store/models.go`) gains `Kind string`;
+  `store.EscalationConfigStore`'s `Upsert`/`Get`/`List` signatures gain a
+  `kind` parameter alongside `severityLevel`, updated in
+  `internal/store/memory/escalationconfig.go` and the Postgres
+  implementation + sqlc queries.
+- `store.SEVStore` gains `SetStalledNotifiedAt(ctx, sevID string, at
+  *time.Time) error`, matching `SetEscalatedAt`'s narrow-mutator shape.
+
+**17b. Backend: scan logic**
+
+- `EvaluateEscalations` (wherever Phase 15 landed it —
+  `internal/api/grpc/notify.go` or a sibling file, confirmed at
+  implementation time since Phase 15 shipped without the originally-planned
+  `internal/notify` package) is extended, or a parallel
+  `EvaluateStalled(ctx, sevs []*store.SEV, announcements
+  store.AnnouncementStore, audit store.AuditStore, configs
+  []*store.EscalationConfig, now time.Time) []*store.SEV` function is added:
+  for each open SEV with an enabled `stalled`-kind config at its severity
+  level, "last activity" is `max(SEV.UpdatedAt, latest AnnouncementStore
+  entry for this SEV, latest AuditStore entry for this SEV)` — computed at
+  scan time from existing stores, no new bookkeeping column needed for that
+  half. If `now.Sub(lastActivity) > threshold` and
+  `stalled_notified_at` is unset or older than `lastActivity`, fire
+  `sev.stalled` and call `SetStalledNotifiedAt`. A `lastActivity` newer than
+  `stalled_notified_at` on a later scan (i.e. someone finally did
+  something) both explains why it won't re-fire immediately and is the
+  reset condition for the *next* quiet period.
+- A second pure function, `EvaluatePostmortemOverdue(ctx, sevs []*store.SEV,
+  postmortems store.PostmortemStore, configs []*store.EscalationConfig, now
+  time.Time) []*store.SEV`: for each SEV at `Resolved` or later with a
+  `postmortem_overdue`-kind config enabled at its severity level, postmortem
+  status still `Draft` or `InReview`, and `now.Sub(sev.ResolvedAt) >
+  threshold`, fires `postmortem.overdue`. No separate "already notified"
+  column needed here — the condition itself (postmortem still not
+  `Approved`) is what stops it from ever being spuriously silenced, and
+  once `Approved` the SEV no longer matches the scan filter at all, so a
+  simpler "fire every scan while still true" contract is acceptable
+  (matches this event's use as a routing-rule trigger, not a fire-once
+  alert) — noted explicitly as a deliberate difference from
+  `sev.stalled`/`sev.escalation_no_ic`'s fire-once contract, worth
+  reconsidering if repeated notifications prove noisy in practice.
+- Two new scanners in `cmd/server/main.go`, identical ticker shape to
+  `startEscalationScanner`/`scanEscalations`: `startStalledScanner`/
+  `scanStalled` and `startPostmortemOverdueScanner`/
+  `scanPostmortemOverdue`, both on the existing 1-minute interval constant
+  pattern.
+
+**17c. Backend + frontend: admin surface**
+
+- RBAC and RPC surface unchanged in shape — `UpsertEscalationConfig`/
+  `ListEscalationConfigs` (`internal/auth/rbac.go:125-126`) just carry the
+  new `kind` field through; no new RPCs needed.
+- `AdminNotificationsPage.tsx`'s existing 4-row escalation table component
+  is reused twice more — "Stalled incident" and "Postmortem overdue"
+  sections, each its own 4-row (SEV-1..4) threshold table, next to the
+  existing "No Incident Commander" one. Both new event types
+  (`sev.stalled`, `postmortem.overdue`) become selectable in the routing-
+  rule event checkbox group like every existing event.
+
+**17d. Tests + demo doc**
+
+- Go: table tests for `EvaluateStalled` (fires when quiet past threshold,
+  doesn't when recent activity exists, doesn't re-fire immediately after
+  firing, re-fires after a further quiet period following new activity) and
+  `EvaluatePostmortemOverdue` (fires while Draft/InReview past threshold,
+  stops once Approved, disabled config doesn't fire); `escalationconfig`
+  store tests for the widened `(severity_level, kind)` key.
+- Frontend: `AdminNotificationsPage.test.tsx` additions for the two new
+  threshold tables and event-picker options.
+- `demo/incident-escalation-hygiene.md` (existing template). Known
+  limitations to state: "last activity" only considers announcements, audit
+  entries, and the SEV's own `updated_at` — a Slack-side conversation not
+  captured via `/sev capture` doesn't count; `postmortem.overdue` re-fires
+  every scan while still overdue rather than firing once, unlike the other
+  two escalation types.
+
+**Estimate**: ~3.5-4.5 days (17a ~0.75-1 day, 17b ~1.25-1.5 days, 17c ~0.75-1
+day, 17d ~0.75-1 day). **Depends on**: nothing beyond Phase 15's already-
+shipped `escalation_config`/`Notifier`/scanner infrastructure.
+
+---
+
+## Phase 18 — Postmortem completeness nudge
+
+**Status**: not started
+
+Every SEV is auto-seeded a postmortem from `buildPostmortemTemplate`
+(`web/src/lib/postmortemTemplate.ts`) with explanatory placeholders (e.g.
+"_Not yet determined._") anywhere the SEV's own recorded facts are missing —
+by design, so the document is never blank. But nothing stops a postmortem
+still full of those placeholders from being transitioned straight through to
+`Approved`: `internal/postmortem/statemachine.go`'s `ValidateTransition`
+checks only the state graph, never content. This phase is deliberately the
+smallest of the four — a frontend-only, non-blocking nudge, not a new
+enforcement mechanism, matching §10's existing "blameless framing enforced
+by convention" posture rather than adding a hard gate that would fight IC/
+Admin judgment.
+
+**18a. Frontend: completeness check**
+
+- New `web/src/lib/postmortemCompleteness.ts`: `checkCompleteness(content:
+  string): string[]` — scans for the same placeholder strings
+  `postmortemTemplate.ts` emits per section (e.g. "_Not yet determined._")
+  and returns the list of section headings still holding one. Pure
+  string-scanning, no Markdown AST needed given the placeholders are exact,
+  known strings this same file controls.
+- `PostmortemPage.tsx`: before calling `TransitionPostmortemStatus` for
+  `Draft → InReview` or `InReview → Approved`, run `checkCompleteness`. If
+  non-empty, show a confirm dialog ("This postmortem still has unfilled
+  sections: Root Cause, Business Impact — Transition anyway?") with Cancel/
+  Transition Anyway — never a hard block, and it never touches
+  `internal/postmortem/statemachine.go`'s actual transition validation.
+
+**18b. Tests + demo doc**
+
+- `postmortemCompleteness.test.ts` (new): each known placeholder detected,
+  a fully-filled postmortem returns empty, mixed partial content returns
+  only the still-placeholder sections.
+- `PostmortemPage.test.tsx` additions: transition proceeds immediately when
+  complete, shows the confirm dialog when incomplete, Cancel aborts the
+  transition, "Transition anyway" proceeds.
+- `demo/postmortem-completeness-nudge.md` (existing template). Known
+  limitations to state: purely advisory, easy to click through; detects
+  only the specific placeholder strings the template itself seeds, not
+  general low-quality content (e.g. a filled-in but one-word "root cause").
+
+**Also considered and explicitly deferred**:
+- A server-enforced version (a `GetCompletenessWarnings` RPC backing a
+  shared Go implementation, so the check can't be bypassed by calling the
+  API directly) — not built here since this stays advisory-only by design;
+  revisit only if the client-side nudge proves too easy to ignore in
+  practice.
+
+**Estimate**: ~1-1.5 days. **Depends on**: nothing.
+
+---
+
+## Phase 19 — Recurrence loop: did the prior incident's action items land?
+
+**Status**: not started
+
+`autoLinkRecurrence` (`internal/api/grpc/sev.go:94-144`) already auto-links a
+new SEV to the most recent prior SEV sharing the same affected service and
+root-cause category, as a `recurrence-of` `SEVLink`. That link is the
+sharpest available signal that a postmortem didn't actually prevent a
+repeat — but today it's just a link with no context about *why* the repeat
+happened. This phase surfaces, right where the recurrence link already
+appears, whether the earlier incident's action items (Phase 16's
+`completed_at`) were actually finished before the recurrence — turning a
+passive cross-reference into an accountability signal. **Hard dependency on
+Phase 16**: without a completion field on `LinkedTask`, there's no signal to
+show.
+
+**19a. Backend: recurrence action-item rollup**
+
+- A small aggregation, not a new store: for a SEV with an outbound
+  `recurrence-of` `SEVLink` (`SEVLinkStore`, `internal/store/models.go:346-355`),
+  look up the predecessor's `action-item`-relationship tasks via
+  `TaskStore.ListBySEVID` and compute `{completed, total}` using Phase 16's
+  `LinkedTask.CompletedAt`.
+- Exposed either as a small addition to the existing linked-SEVs response
+  the SEV detail page already fetches, or a dedicated
+  `SEVService.GetRecurrenceContext(sev_id) →
+  RecurrenceContextResponse{repeated RecurrencePredecessor{sev_id,
+  completed_action_items, total_action_items}}` — the concrete choice is
+  made once the current linked-SEVs response shape is in hand at
+  implementation time, following this codebase's own precedent (Phase 6a:
+  "a design choice made when the concrete shape ... is in hand, not
+  before"). RBAC `store.OrgRoleViewer` either way, excluding sensitive
+  predecessors from the count (same posture as every other cross-SEV
+  reporting surface).
+
+**19b. Frontend: recurrence badge**
+
+- The SEV detail page's existing Linked SEVs panel (exact component name
+  confirmed at implementation time) renders a small badge on any
+  `recurrence-of` link: "Prior incident's action items: 2/5 done" — using
+  `SLABadge`-style color coding (e.g. neutral at 100%, amber otherwise) so
+  an incomplete predecessor is visually distinct without a new dependency.
+
+**19c. Reports rollup (optional, stretch)**
+
+- A summary tile on the Reports dashboard: "% of recurring incidents whose
+  predecessor's action items were fully closed" — computed the same way as
+  19a but aggregated across every `recurrence-of` link in the reporting
+  window. Cut first if the phase needs to shrink; 19a/19b alone already
+  deliver the core accountability signal.
+
+**19d. Tests + demo doc**
+
+- Go: a table test for the rollup aggregation (fully closed, partially
+  closed, predecessor with zero action items — `not_applicable`, not `0/0`
+  read as "failed"); RBAC/sensitive-exclusion test for whichever RPC shape
+  19a lands on.
+- Frontend: a test for the badge's three states (complete, partial, no
+  action items — renders nothing in that last case, not a misleading
+  "0/0").
+- `demo/recurrence-action-item-followthrough.md` (existing template). Known
+  limitations to state: only covers `recurrence-of` links, not `related`/
+  `caused-by`/`duplicate`; a predecessor SEV with zero linked action items
+  shows no badge at all rather than a misleading 0/0.
+
+**Estimate**: ~2.5-3.5 days (19a ~1-1.5 days, 19b ~0.5-0.75 day, 19c
+~0.5-1 day if included, 19d ~0.5-0.75 day). **Depends on**: **Phase 16**
+(hard dependency — needs `LinkedTask.CompletedAt`); independent of Phases
+17-18.
+
+---
+
 ## Sequencing summary
 
 | Phase | Work | Depends on | Estimate |
@@ -1875,6 +2243,10 @@ already in the roadmap — reuses `Publisher`, `IntegrationConfigStore`/
 | 13 | Per-service SLA compliance reporting | 12 (except 13a's UX mockup) | 3.5-5.25 days |
 | 14 | Per-service SEV leveling criteria (guidance, not enforced) | — | 3-4.25 days |
 | 15 | Notifications & Alerting (routing + email + escalation) | — | 7-9 days |
+| 16 | Task completion tracking + org-wide open action items | — | 4-5 days |
+| 17 | Stalled-incident & postmortem-timeliness escalation | 15 (infra reuse) | 3.5-4.5 days |
+| 18 | Postmortem completeness nudge | — | 1-1.5 days |
+| 19 | Recurrence loop: prior incident's action items | 16 | 2.5-3.5 days |
 
 Phases 0→1→2→3→4 are the observability core and genuinely depend on each other in
 that order. Phases 5, 6a, and 6b are independent of the observability core and of
@@ -1918,6 +2290,24 @@ however, the phase that Phases 12 and 13 each named as their own
 prerequisite for "automated breach notifications" / "automated alerts when
 compliance drops below a threshold" — those two follow-ups can only be
 built once Phase 15's routing table and dispatcher exist.
+
+Phases 16-19 are the SEV-hygiene set — a distinct theme from 12-15's SLA/
+notification infrastructure, though 17 deliberately extends it rather than
+building new plumbing. Phase 16 is independent of everything above it —
+it only touches `LinkedTask`/`TaskStore`/`ReportService`, none of which any
+earlier phase changes. Phase 17 needs no unshipped phase either, but its
+17b scan logic is additive to Phase 15's already-shipped
+`escalation_config`/`Notifier`/scanner shape rather than parallel new
+infrastructure, so it's natural to sequence after 15 (already true) even
+though nothing blocks building it independently. Phase 18 is the only
+phase in this document with zero backend footprint at all — pure frontend,
+sequenced wherever convenient. Phase 19 is this document's third real hard
+dependency on another unshipped phase: its rollup is meaningless without
+Phase 16's `LinkedTask.CompletedAt`, so it must ship strictly after 16,
+independent of where 17/18 stand. Recommended order given these
+constraints: **16 → 18 → 17 → 19** — 16 first since it's both independent
+and the highest-leverage on its own, 18 next as the cheapest independent
+win, 17 next, 19 last since it depends on 16.
 
 Each phase, once implemented, gets its own `demo/<topic>.md` runbook following the
 existing template (What was built / Prerequisites / Walkthrough / Known
