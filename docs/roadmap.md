@@ -1916,7 +1916,62 @@ completion signal, and bridges the postmortem editor to it.
   Overdue badge — the badge itself simply stops rendering once
   `completed_at` is set, since `Overdue` is now false for that row.
 
-**16c. Backend + frontend: org-wide "Open Action Items" view**
+**16c. Backend + frontend: on-demand tracker-status pull**
+
+Closes a real gap surfaced while scoping this phase: `github.Client.GetIssue`
+and `jira.Client.GetIssue` (`internal/integrations/tasktracker/{github,jira}/client.go`)
+**already exist** — but grepping the whole codebase turns up zero call sites
+for either outside their own client/test files. Nothing in
+`internal/api/grpc/task.go` has ever called them; there is no live
+open/closed signal from either tracker anywhere in the app today. Full
+automatic sync (a background poller, or a webhook receiver reacting to
+tracker close events) is a materially bigger, separate effort — Phase 6b
+already named it out of scope ("a new surface... no existing pattern to
+build on"). This step is the pull-based middle ground: a manual,
+per-task refresh, reusing the clients that already exist.
+
+- `jira.issueDTO`'s `Fields.Status` (`internal/integrations/tasktracker/jira/client.go:279-289`)
+  gains `StatusCategory struct { Key string \`json:"key"\` } \`json:"statusCategory"\``
+  — Jira's `fields.status.statusCategory.key` is one of `new`/`indeterminate`/
+  `done`, a normalized signal independent of each project's own workflow
+  status names (unlike the free-text `Status.Name` this client already
+  reads, per its own doc comment: "project-defined, unlike GitHub's fixed
+  open/closed"). `jira.Issue` gains `Done bool`, set in `decodeIssue` from
+  `statusCategory.key == "done"`. GitHub needs no client change —
+  `github.Issue.State` (`internal/integrations/tasktracker/github/client.go:23-29`)
+  is already a clean `"open"`/`"closed"`.
+- `IssueClient`/`JiraIssueClient` (`internal/api/grpc/task.go:43-59`, today
+  `CreateIssue`-only) each widen to add a `GetIssue`-shaped method returning
+  a normalized open/closed bool — or a sibling narrow interface if that
+  reads cleaner once the concrete shape is in hand, per this codebase's own
+  "design choice made when the shape is known, not before" convention
+  (Phase 6a).
+- New RPC `TaskService.RefreshTaskStatus(sev_id, task_id) → TaskResponse`,
+  RBAC `store.OrgRoleResponder` (same floor as every other task action).
+  `codes.FailedPrecondition` for a task whose `external_system` isn't
+  `github`/`jira` — a manually-linked or generic-URL task has nothing to
+  query. Reuses `TaskServer`'s existing `github`/`jira` client fields (the
+  same nil-tolerant, per-request credential resolution
+  `CreateGitHubIssue`/`CreateJiraIssue` already use — `codes.Unavailable`
+  when that tracker isn't configured, matching §14.3/14.4's existing
+  contract). Returns the task with a new **`tracker_status`**
+  (`"open"`/`"closed"`) field — distinct from, and never auto-writing,
+  `completed_at`.
+- Explicitly pull, not push, and never automatic: no scanner, no webhook
+  receiver, no periodic background polling. 16a/16b's `completed_at` stays
+  the only signal Sevitout's own overdue/reporting logic reads — this step
+  only ever fires on an explicit user click, so it adds no rate-limit or
+  reliability surface to reason about.
+- `TasksPanel.tsx`: a "Check tracker status" icon button on each
+  GitHub/Jira-linked row (absent for manually-linked/generic tasks), calling
+  `RefreshTaskStatus` and showing the result as a small secondary badge
+  (e.g. "GitHub: closed"), informational only. If the fetched status comes
+  back closed while Sevitout's own `completed_at` is still unset, the same
+  result also surfaces a one-click "Mark done in Sevitout too" using 16b's
+  `CompleteTask` — reconciling the two states in one click without ever
+  writing on the user's behalf automatically.
+
+**16d. Backend + frontend: org-wide "Open Action Items" view**
 
 - New RPC `ReportService.ListActionItems(include_completed: bool) →
   ListActionItemsResponse{repeated ActionItemResponse}`, RBAC
@@ -1937,7 +1992,7 @@ completion signal, and bridges the postmortem editor to it.
   a simple "show completed" toggle (default off) driving
   `include_completed`.
 
-**16d. Frontend: postmortem → task bridge**
+**16e. Frontend: postmortem → task bridge**
 
 - `web/src/lib/postmortemTemplate.ts` already knows the "Action Items"
   section heading it seeds — reuse that same heading string to detect
@@ -1950,23 +2005,32 @@ completion signal, and bridges the postmortem editor to it.
   presence heuristic, not content parsing — it never tries to extract
   individual items from the prose.
 
-**16e. Tests + demo doc**
+**16f. Tests + demo doc**
 
 - Go: `internal/store/memory/task_test.go` / `postgres` equivalent for
-  `MarkComplete`/`Reopen`; `internal/api/grpc/task_test.go` for
-  `isOverdue`'s completed-never-overdue case and the two new RPCs' RBAC
-  floor; `internal/api/grpc/report_test.go` for `ListActionItems`
+  `MarkComplete`/`Reopen`; `jira` client test for `decodeIssue`'s
+  `statusCategory.key == "done"` → `Done` derivation (all three category
+  values); `internal/api/grpc/task_test.go` for `isOverdue`'s
+  completed-never-overdue case, `RefreshTaskStatus` (GitHub/Jira happy path,
+  `FailedPrecondition` for a non-tracker task, `Unavailable` when that
+  tracker isn't configured), and the other new RPCs' RBAC floor;
+  `internal/api/grpc/report_test.go` for `ListActionItems`
   (relationship-type filtering, sensitive-SEV exclusion, include/exclude
   completed).
-- Frontend: `TasksPanel.test.tsx` additions for the mark-done/reopen toggle
-  and the Overdue badge disappearing on completion;
+- Frontend: `TasksPanel.test.tsx` additions for the mark-done/reopen toggle,
+  the Overdue badge disappearing on completion, the "Check tracker status"
+  button (hidden for non-tracker tasks, shows the returned badge, offers
+  "Mark done in Sevitout too" when closed-but-not-completed);
   `OpenActionItemsTable.test.tsx` (new); `PostmortemPage.test.tsx` additions
   for the bridge banner's show/hide conditions.
 - `demo/action-item-tracking.md` (existing template). Known limitations to
   state: the postmortem bridge is a presence heuristic, not per-item
   parsing — a postmortem with one bullet and one with ten both just get a
-  single banner; no due-date/escalation on action items beyond what linked
-  tasks already have (folds into Phase 17 if wanted later, not built here).
+  single banner; tracker-status refresh is manual/pull-only, never
+  automatic — a closed GitHub/Jira issue does not update `completed_at` on
+  its own until someone clicks the refresh button; no due-date/escalation
+  on action items beyond what linked tasks already have (folds into Phase
+  17 if wanted later, not built here).
 
 **Also considered and explicitly deferred**:
 - Parsing postmortem prose into individually auto-created tasks — a real
@@ -1975,10 +2039,17 @@ completion signal, and bridges the postmortem editor to it.
   overdue" as its own event) — natural once Phase 17's escalation
   infrastructure and this phase's completion signal both exist, not bundled
   into either phase alone.
+- Automatic tracker sync — a background poller across every linked issue,
+  or a webhook receiver that pushes tracker close events straight into
+  `completed_at` — stays out of scope per Phase 6b's existing reasoning.
+  16c's on-demand pull is the deliberate middle ground: real tracker data,
+  no new always-on infrastructure, no webhook signature/retry handling to
+  get right.
 
-**Estimate**: ~4-5 days (16a ~1 day, 16b ~0.5-0.75 day, 16c ~1.25-1.5 days,
-16d ~0.5-0.75 day, 16e ~0.75-1 day). **Depends on**: nothing — reuses
-`LinkedTask`/`TaskStore`/`ReportService` unchanged.
+**Estimate**: ~5-6.5 days (16a ~1 day, 16b ~0.5-0.75 day, 16c ~0.75-1 day,
+16d ~1.25-1.5 days, 16e ~0.5-0.75 day, 16f ~1-1.5 days). **Depends on**:
+nothing — reuses `LinkedTask`/`TaskStore`/`ReportService` and the existing
+GitHub/Jira clients unchanged.
 
 ---
 
@@ -2243,7 +2314,7 @@ show.
 | 13 | Per-service SLA compliance reporting | 12 (except 13a's UX mockup) | 3.5-5.25 days |
 | 14 | Per-service SEV leveling criteria (guidance, not enforced) | — | 3-4.25 days |
 | 15 | Notifications & Alerting (routing + email + escalation) | — | 7-9 days |
-| 16 | Task completion tracking + org-wide open action items | — | 4-5 days |
+| 16 | Task completion tracking + open action items (+ on-demand tracker-status pull) | — | 5-6.5 days |
 | 17 | Stalled-incident & postmortem-timeliness escalation | 15 (infra reuse) | 3.5-4.5 days |
 | 18 | Postmortem completeness nudge | — | 1-1.5 days |
 | 19 | Recurrence loop: prior incident's action items | 16 | 2.5-3.5 days |
